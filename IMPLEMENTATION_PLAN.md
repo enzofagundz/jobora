@@ -2,7 +2,7 @@
 
 > Documento de execução derivado de `TECHNICAL_PLAN.md` (fonte técnica) e `PRD.md` (fonte de produto).
 > O repositório já contém a maior parte do MVP implementada (verificado em 2026-08-13). Cada tarefa indica o estado atual: **verificar/aceitar** (validar o que existe contra critérios objetivos) ou **implementar** (criar o que falta). Não refazer trabalho existente. Ordem de execução segue o TECHNICAL_PLAN §16.
-> Restrições fixas: Laravel 13 + Filament 5 + Laravel AI SDK (provider `opencode-go`, modelo `deepseek-v4-flash`); SQLite; single-user; vagas como fonte de dados (não gerenciador de vagas/candidaturas); sem scraping; sem Redis/filas/Elasticsearch; comparação agregada mercado × currículo; sem Ollama; sem chamadas HTTP próprias ao OpenCode Go (toda comunicação via Laravel AI SDK).
+> Restrições fixas: Laravel 13 + Filament 5 + Laravel AI SDK (provider `opencode-go`, modelo `deepseek-v4-flash`); SQLite; single-user; vagas como fonte de dados (não gerenciador de vagas/candidaturas); sem scraping; sem Redis/filas/Elasticsearch; comparação agregada mercado × currículo; sem Ollama; sem chamadas HTTP próprias ao OpenCode Go (toda comunicação via Laravel AI SDK). F6 (adequação de currículo): IA via mesmo provider `opencode-go`/`deepseek-v4-flash` — **Cloudflare não é provedor de IA**, atua apenas como driver de PDF (`spatie/laravel-pdf`); persistência da última versão adaptada por vaga (sem histórico); currículo original nunca substituído; PDF não persistido (derivado sob demanda); sem DOCX no MVP; sem CRUD para a adaptação.
 
 ## 1. Estratégia de implementação
 
@@ -19,8 +19,9 @@ Construir o MVP em 11 fases seguindo a ordem de dependências do TECHNICAL_PLAN 
 - **Fase I — Dashboard (T019):** widgets de stats, top conceitos, lacunas e tendência.
 - **Fase J — Análise temporal (T020):** série mensal + comparação de períodos + aviso de dados insuficientes.
 - **Fase K — Testes e refinamentos (T021–T022):** suite completa verde + smoke manual ponta-a-ponta com chave real + Definition of Done.
+- **Fase L — Adequação de currículo para ATS — F6 (T023–T032):** persistência, DTO, agent, validação de integridade, service, testes de domínio, PDF (`spatie/laravel-pdf` + driver `cloudflare`), página Filament não-CRUD, testes de integração e refinamentos — após o MVP existente (T001–T022), podendo rodar em paralelo com Fases I–J. T033 (entrada PDF/DOCX) fica **bloqueada** pela decisão de extração de texto (TP §17).
 
-Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAnalysisResult`) + Services (lógica de negócio) + 1 Agent (`JobExtractionAgent`, único contato com o SDK) + Filament (1 Resource, 4 páginas custom, 4 widgets). Sem repository pattern, sem Actions classes, sem Jobs no MVP (fluxo síncrono). Nenhuma métrica materializada — tudo calculado sob demanda sobre vagas `confirmed`.
+Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAnalysisResult`) + Services (lógica de negócio) + 1 Agent (`JobExtractionAgent`, único contato com o SDK) + Filament (1 Resource, 4 páginas custom, 4 widgets). Sem repository pattern, sem Actions classes, sem Jobs no MVP (fluxo síncrono). Nenhuma métrica materializada — tudo calculado sob demanda sobre vagas `confirmed`. Com a F6: +1 Model (`ResumeAdaptation`), +1 DTO (`ResumeAdaptationResult`), +1 Agent (`ResumeAdaptationAgent`, mesmo provider `opencode-go`), +2 Services (`ResumeAdaptationService`, `ResumePdfService`), +1 página custom (`ResumeAdaptationPage`) e +1 pacote (`spatie/laravel-pdf` com driver `cloudflare`).
 
 ## 2. Tarefas
 
@@ -428,6 +429,224 @@ Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAn
 
 **Testes:** smoke manual (fora de CI); suite T021 permanece verde.
 
+### Fase L — Adequação de currículo para ATS (F6)
+
+**Objetivo da fase:** implementar a F6 ponta a ponta conforme TP etapas 15–17: persistência da última versão adaptada por vaga, agente de adequação (mesmo provider `opencode-go`/`deepseek-v4-flash`), validação de integridade em 2 camadas, página de resultado não-CRUD e exportação PDF via `spatie/laravel-pdf` com driver `cloudflare` (Cloudflare Browser Run). Cloudflare **não** é provedor de IA. Nenhum teste depende de chamadas reais (fakes do Agent e `Pdf::fake()`).
+
+**Decisões de implementação registradas:** o download do PDF é uma **rota GET autenticada do painel** (`filament.admin.resume-pdf.download`), não uma ação Livewire — retornos de arquivo de ações são serializados no snapshot JSON e bytes binários quebram o encode (erro "Malformed UTF-8"). A autorização do Resource/ações/páginas/rota é explícita via `App\Policies\JobPostingPolicy` (single-user: todos os métodos permitem; a fronteira fica testável). `AnalyzeJobPosting` implementa `ShouldQueueAfterCommit` (o job só é disparado após o commit da transação). A análise em segundo plano exige worker ativo (`php artisan dev` ou `queue:work`).
+
+**Contexto geral:** TP §3–§8, §14, §15, §16 etapas 15–17; PRD F6, §4 (dados), §6 (fluxo), §7 (MVP), §8 (critérios de aceitação). A F6 depende do MVP existente: domínio de vagas (T005–T007), estruturação (T008–T014), currículo (T015), normalização (T016) e comparação mercado × currículo (T018).
+
+#### T023 — Persistência da adequação (migration + Model `ResumeAdaptation`)
+
+**Objetivo:** tabela `resume_adaptations` com constraint 1:1 por vaga (última versão, sem histórico) e Model Eloquent, sem qualquer alteração no currículo original (TP §4–5, §16 etapa 15).
+
+**Contexto:** TP §4 (entidade `ResumeAdaptation`), §5 (migration 5), §16 etapa 15. Estado: **implementado — verificar/aceitar**.
+
+**Implementação:**
+- Migration `resume_adaptations`: `id` BIGINT PK; `job_posting_id` BIGINT NOT NULL **UNIQUE** FK → `job_postings.id` ON DELETE CASCADE (garante 1 adaptação por vaga — constraint 1:1); `adapted_content` TEXT NOT NULL; `changes`, `covered_keywords`, `missing_requirements`, `alerts` TEXT NULL (JSON); `created_at`/`updated_at`.
+- Model `App\Models\ResumeAdaptation`: fillable completo; casts `changes`/`covered_keywords`/`missing_requirements`/`alerts` → array; relação `jobPosting()` belongsTo.
+- Sem tabela de histórico: regenerar = atualizar a mesma linha (UPSERT é responsabilidade do service, T027).
+- Nenhuma mudança em `resumes` (o original nunca é substituído).
+
+**Dependências:** T005 (schema base), T006 (models/enums).
+
+**Critérios de conclusão:** `php artisan migrate` cria a tabela com UNIQUE em `job_posting_id` e FK com cascade; Model com casts e relação funcionando; `resumes` inalterada.
+
+**Testes:** cobertura indireta via T028 (Feature com `RefreshDatabase`); conferir schema via `php artisan migrate:status`/tinker.
+
+#### T024 — DTO `ResumeAdaptationResult`
+
+**Objetivo:** representar e validar estruturalmente a resposta da IA da adequação — currículo adaptado, alterações, palavras-chave/requisitos contemplados, requisitos ausentes e alertas de integridade (TP §8).
+
+**Contexto:** TP §3 (DTO), §8 (schema F6), §16 etapa 15. Estado: **implementado — verificar/aceitar**.
+
+**Implementação:**
+- `App\DTO\ResumeAdaptationResult` (final, readonly): `fromStructured(array $data)` — valida tipos (lança `InvalidArgumentException` para tipos errados), limpa strings (trim, colapso de whitespace) e aplica limites: `adapted_resume` ≤ 20.000 chars; listas ≤ 50 itens; itens ≤ 200 chars.
+- Campos: `adaptedResume`, `changes`, `coveredKeywords`, `missingRequirements`, `alerts`.
+- Conteúdo estruturado, **nunca HTML**: a IA não retorna HTML e o DTO não o aceita.
+
+**Dependências:** nenhuma (pode rodar em paralelo com T023).
+
+**Critérios de conclusão:** resposta válida → DTO preenchido; tipos errados/limites excedidos → exceção; campos limpos.
+
+**Testes:** `tests/Unit/ResumeAdaptationResultTest` (T028).
+
+#### T025 — Agent `ResumeAdaptationAgent`
+
+**Objetivo:** único ponto de contato com o Laravel AI SDK para a adequação: provider `opencode-go`, modelo `deepseek-v4-flash`, timeout 120s, instruções pt-BR com o contrato JSON da F6 e a regra de integridade (TP §7–8).
+
+**Contexto:** TP §3 (Agents), §7 (integração), §8 (schema F6), §16 etapa 15. Estado: **implementado — verificar/aceitar**.
+
+**Implementação:**
+- `App\Agents\ResumeAdaptationAgent` implementa `Laravel\Ai\Contracts\Agent` com trait `Promptable`: `provider()` → `opencode-go`; `model()` → `config('ai.providers.opencode-go.models.text.default')` (`AI_MODEL`); `timeout()` → 120.
+- `instructions()` em pt-BR: analisar a vaga em relação ao currículo (terminologia, palavras-chave, organização, destaque de experiências relevantes, priorização de competências); **reformular/organizar/reordenar apenas informações existentes — nunca inventar** (experiências, tecnologias, cargos, certificações, resultados, projetos, responsabilidades, formação); requisitos ausentes vão para `missing_requirements`; alertas quando uma adaptação exigiria inventar; embute o contrato JSON da F6 (TP §8); exige JSON cru, sem markdown e **sem HTML**.
+- **Não** implementa `HasStructuredOutput` (provedor rejeita `json_schema` — TP §7).
+- Sem chamadas HTTP próprias; nenhuma referência à Cloudflare na parte de IA.
+
+**Dependências:** T004 (SDK + provider), T024 (contrato).
+
+**Critérios de conclusão:** provider/model/timeout corretos; instructions com regra de integridade + schema F6; sem `HasStructuredOutput`; sem referência a Cloudflare/HTML.
+
+**Testes:** uso via fakes (T028/T031); nenhuma chamada real.
+
+#### T026 — Validação de integridade (2 camadas)
+
+**Objetivo:** garantir a regra do PRD/TP: todo conceito canônico no currículo adaptado deve existir no currículo original; conceito novo introduzido pela IA ⇒ resposta rejeitada (TP §8).
+
+**Contexto:** TP §8 (validação de integridade), §9 (reuso do normalizador), §16 etapa 15. Estado: **implementado — verificar/aceitar**.
+
+**Implementação:**
+- Camada (a) — estrutural: regras do `ResumeAdaptationResult::fromStructured` (T024): tipos e limites.
+- Camada (b) — de integridade (no `ResumeAdaptationService`, reutilizável e testável):
+  - conceitos do `adapted_resume` (via `ResumeAnalyzer`/`ConceptNormalizer`) ⊆ conceitos do currículo original — conceito novo ⇒ rejeição com mensagem de integridade;
+  - `covered_keywords` ⊆ conceitos presentes no currículo original;
+  - `missing_requirements` consistente com os itens da vaga ausentes do currículo (itens `confirmed` da vaga × `ResumeAnalyzer`);
+  - sem camada extra de infraestrutura: reusa `ConceptNormalizer` (T016) e `ResumeAnalyzer` (T018).
+
+**Dependências:** T016 (normalizador), T018 (`ResumeAnalyzer`), T024 (DTO).
+
+**Critérios de conclusão:** adaptado com conceito inventado ⇒ rejeição; `covered_keywords` fora do currículo ⇒ rejeição; `missing_requirements` inconsistente ⇒ rejeição; mensagens legíveis em pt-BR.
+
+**Testes:** Unit/Feature em T028 (respostas fake: válida, conceito inventado, keywords fora, ausentes inconsistentes).
+
+#### T027 — Service `ResumeAdaptationService`
+
+**Objetivo:** orquestrar a adequação ponta a ponta (coleta → agent → validação → UPSERT), sem lógica no Filament (TP §3, §6 F6, §16 etapa 15).
+
+**Contexto:** TP §3 (Services), §6 (fluxo F6), §16 etapa 15. Estado: **implementado — verificar/aceitar**.
+
+**Implementação:**
+- `App\Services\ResumeAdaptationService::adapt(JobPosting $posting)`:
+  1. pré-condições: vaga `confirmed`; currículo cadastrado (`ResumeService::content()`) — senão, exceção com mensagem clara;
+  2. coleta: currículo original, descrição original, itens estruturados (`JobPostingItem` da vaga) e posicionamento mercado × currículo da vaga (itens da vaga × presença no currículo via `ResumeAnalyzer`);
+  3. `ResumeAdaptationAgent->prompt(...)` → `json_decode` (não-array ⇒ `InvalidArgumentException`);
+  4. `ResumeAdaptationResult::fromStructured` + validação de integridade (T026) — falha ⇒ exceção, nada persistido;
+  5. UPSERT: `ResumeAdaptation::updateOrCreate(['job_posting_id' => ...], [...])` — regenerar substitui a última; nunca toca em `Resume`;
+  6. retorna a adaptação persistida.
+- Erros: `try/catch` → `Log::channel('ai')` (sem API key) + exceção legível para a UI.
+- Síncrono, sem filas (mesmo padrão da extração).
+
+**Dependências:** T023 (model), T024 (DTO), T025 (agent), T026 (integridade), T015 (`ResumeService`), T018 (`ResumeAnalyzer`), T014 (vaga confirmed).
+
+**Critérios de conclusão:** fluxo completo gera e persiste a última adaptação por vaga; regenerar substitui; falha não persiste nada; vaga não confirmada ou sem currículo ⇒ exceção clara; `resumes` intocada.
+
+**Testes:** T028 (Feature com fakes) + T031.
+
+#### T028 — Testes do domínio F6 (DTO, integridade, UPSERT, original intocado)
+
+**Objetivo:** cobrir DTO, validação de integridade, persistência UPSERT e a garantia de que o currículo original nunca é alterado (TP §15).
+
+**Contexto:** TP §15 (F6 — adequação). Estado: **implementado — verificar/aceitar**.
+
+**Implementação:**
+- `tests/Unit/ResumeAdaptationResultTest`: tipos errados lançam; limites (itens/chars); campos limpos; HTML rejeitado.
+- `tests/Feature/ResumeAdaptationFlowTest` (parte domínio, com `ResumeAdaptationAgent::fake([...])`):
+  - resposta válida → adaptação persistida (1 linha por vaga, com `adapted_content` e listas JSON);
+  - regenerar → mesma linha, conteúdo novo (UPSERT);
+  - resposta com conceito inventado (fora do currículo original) ⇒ rejeição, nada persistido;
+  - vaga não `confirmed` ou sem currículo ⇒ exceção, nada persistido;
+  - **currículo original (`resumes`) inalterado** após qualquer adequação;
+  - JSON inválido / fora do schema / exceção genérica ⇒ erro sem persistência.
+- Fakes do SDK — sem chamadas reais (phpunit.xml: sqlite `:memory:`, sem chave).
+
+**Dependências:** T023, T024, T026, T027.
+
+**Critérios de conclusão:** cenários acima verdes, sem rede.
+
+**Testes:** os próprios testes.
+
+#### T029 — PDF: `spatie/laravel-pdf` + driver `cloudflare` + `ResumePdfService` + Blade
+
+**Objetivo:** exportação do currículo adaptado em PDF (formato do MVP) via `spatie/laravel-pdf` com driver `cloudflare` (Cloudflare Browser Run), a partir de HTML/Blade controlado pela aplicação; PDF derivado sob demanda, não persistido (TP §2, §10, §14, §16 etapa 16).
+
+**Contexto:** TP §2 (stack), §14 (PDF — template Blade), §16 etapa 16; PRD F6 (exportação PDF no MVP; DOCX fora do MVP). Estado: **implementado — verificar/aceitar**.
+
+**Implementação:**
+- Instalar/configurar `spatie/laravel-pdf` (composer) com driver `cloudflare` → Cloudflare Browser Run API; credenciais via env (sem hardcode — nomes definidos na configuração do driver; conferir pendência no TP §17).
+- `App\Services\ResumePdfService::download(ResumeAdaptation $adaptation)`: renderiza o Blade de impressão com o `adapted_content` + dados da vaga → gera o PDF via `spatie/laravel-pdf` → resposta de download.
+- Template `resources/views/pdf/adapted-resume.blade.php`: próprio para impressão — A4, sem cores de fundo, tipografia legível, texto selecionável (leitura por ATS); conteúdo textual do adaptado, não HTML da IA.
+- **Não** persistir PDFs (gerar sob demanda). **Não** criar DOCX.
+
+**Dependências:** T027 (dados da adaptação); T002 (env para credenciais).
+
+**Critérios de conclusão:** `Pdf::fake()` permite testar sem rede; Blade renderiza o conteúdo correto; download responde com PDF; nenhum PDF persistido; sem DOCX.
+
+**Testes:** `Pdf::fake()` em T031 (`ResumePdfTest`); smoke real com credencial Cloudflare em T032.
+
+#### T030 — Filament `ResumeAdaptationPage` (não-CRUD)
+
+**Objetivo:** página de resultado da adequação acessível a partir da vaga, sem CRUD genérico (TP §14, §16 etapa 16; PRD F6).
+
+**Contexto:** TP §14 (F6 — `ResumeAdaptationPage`). Estado: **implementado — verificar/aceitar**.
+
+**Implementação:**
+- Ação "Adequar currículo" na listagem (`JobPostingsTable`) — somente vaga `confirmed` com currículo cadastrado; síncrona com loading; navega para a página.
+- `App\Filament\Resources\JobPostings\Pages\ResumeAdaptationPage` (rota `/{record}/adapt`):
+  - vaga (cargo/empresa) + currículo original (fonte) + currículo adaptado;
+  - painéis: alterações realizadas, palavras-chave/requisitos contemplados, requisitos ausentes, alertas de integridade;
+  - ações: "Adequar novamente" (chama `ResumeAdaptationService`, atualiza a página), "Copiar" (texto do adaptado), "Baixar PDF" (`ResumePdfService` — T029);
+  - avisos: sem currículo cadastrado ou vaga não confirmada ⇒ ação indisponível com mensagem.
+- Sem páginas de listagem/edição genérica para adaptações; sem CRUD.
+
+**Dependências:** T003 (Filament), T008 (listagem), T027 (service), T029 (PDF).
+
+**Critérios de conclusão:** ação na listagem disponível apenas nas condições corretas; página renderiza os 5 resultados; "Adequar novamente" regenera; "Copiar" e "Baixar PDF" funcionam; sem CRUD.
+
+**Testes:** T031 (Filament — renderização e ações).
+
+#### T031 — Testes de integração F6 (fluxo completo + PDF + Filament)
+
+**Objetivo:** validar o fluxo ponta a ponta da F6 sem chamadas reais: vaga → adequação → persistência → página → PDF (TP §15, §16 etapa 17).
+
+**Contexto:** TP §15 (F6), §16 etapa 17. Estado: **implementado — verificar/aceitar**.
+
+**Implementação:**
+- `tests/Feature/ResumePdfTest` com `Pdf::fake()`: `ResumePdfService` gera o PDF a partir do Blade com o conteúdo correto; sem chamadas ao Cloudflare.
+- `tests/Feature/FilamentPagesTest` (F6): página de resultado renderiza com dados do fake; ação "Adequar currículo" na listagem leva à página; "Adequar novamente" atualiza; "Baixar PDF" responde com PDF fake; "Copiar" disponível.
+- Fluxo completo: vaga confirmed + currículo → adaptação persistida → página exibe os 5 resultados → PDF gerado.
+- Nenhuma chamada real a OpenCode Go ou Cloudflare.
+
+**Dependências:** T028, T029, T030.
+
+**Critérios de conclusão:** fluxo completo verde com fakes; `php artisan test` (F6) verde.
+
+**Testes:** os próprios testes.
+
+#### T032 — Refinamentos F6 e smoke manual
+
+**Objetivo:** fechar a F6: cobertura final, polimento pt-BR e smoke manual com chave real + credencial Cloudflare (TP §16 etapa 17).
+
+**Contexto:** TP §16 etapa 17. Estado: **implementado (código) — smoke manual a executar com credenciais reais (Cloudflare)**.
+
+**Implementação:**
+- Rodar a suite completa (`php artisan test`) — F1–F6 verdes.
+- Polimento pt-BR da página e mensagens; revisão de limites/erros (falha de IA → mensagem legível + nova tentativa).
+- Smoke manual: vaga confirmed real + currículo → adequar (chave real do `AI_MODEL`) → conferir os 5 resultados → "Baixar PDF" (credencial Cloudflare Browser Run) → conferir PDF legível/ATS. Requer worker ativo (`php artisan dev` ou `queue:work`) para a análise em segundo plano.
+- Registrar resultados em `storage/logs/ai.log`.
+
+**Dependências:** T031.
+
+**Critérios de conclusão:** suite verde; smoke real da adequação + PDF validado; F6 alinhada aos critérios do PRD §8.
+
+**Testes:** suite completa; smoke manual (fora de CI).
+
+#### T033 — Entrada do currículo em PDF/DOCX (extração de texto) — **bloqueada**
+
+**Objetivo:** habilitar PDF/DOCX como formatos de entrada do currículo, convertendo o arquivo para texto antes da análise (a IA só recebe texto) (TP §10).
+
+**Contexto:** TP §10 (formatos de entrada), §17 (pendência de extração de texto); PRD F3 (formato de entrada **PENDENTE**). Estado: **bloqueada — depende da decisão de extração de texto (TP §17)**: a biblioteca/abordagem não está definida e **não deve ser inventada** nesta etapa.
+
+**Implementação:**
+- Bloqueada até a decisão: quando definida, implementar a abordagem aprovada — converter o arquivo para texto e salvar via `ResumeService::save` (fluxo normal: o conteúdo extraído segue o mesmo caminho do texto colado).
+- Nenhuma implementação provisória.
+
+**Dependências:** decisão de extração de texto (TP §17 — pendência); T015 (`ResumeService`).
+
+**Critérios de conclusão:** decisão registrada; entrada PDF/DOCX convertida para texto e salva; sem impacto no fluxo existente.
+
+**Testes:** a definir junto com a decisão (fora do MVP de F6).
+
 ## 3. Definition of Done do MVP
 
 Condições objetivas (derivadas do PRD §7–8) — todas devem ser verdadeiras para considerar o MVP concluído:
@@ -446,6 +665,10 @@ Condições objetivas (derivadas do PRD §7–8) — todas devem ser verdadeiras
 12. **Visualização no Filament:** Listagem/Cadastro de vagas, página de revisão, página do currículo, Mercado × Currículo, Tendências e Dashboard com widgets (stats, top conceitos, lacunas, gráfico mensal).
 13. **Testes das funcionalidades críticas:** suite Pest verde (Unit + Feature) com fakes do SDK (sem chamadas reais em CI), cobrindo fluxo da vaga, análise, revisão, currículo, análises, comparação, temporal e páginas Filament.
 14. **Smoke real concluído:** fluxo ponta-a-ponta com chave real validado no navegador (T022).
+15. **Adequação (F6):** ação "Adequar currículo" (vaga `confirmed` com currículo cadastrado) gera a versão adaptada com os 5 resultados (adaptado, alterações, contemplados, ausentes, alertas); persistida a última versão por vaga (1:1, sem histórico — T023/T027); currículo original nunca alterado.
+16. **Integridade (F6):** todo conceito do currículo adaptado existe no currículo original; conceito novo ⇒ rejeição com mensagem; `covered_keywords`/`missing_requirements` consistentes (T026).
+17. **PDF (F6):** exportação em PDF via `spatie/laravel-pdf` com driver `cloudflare` (Cloudflare Browser Run), derivado sob demanda do Blade de impressão, legível por ATS; DOCX fora do MVP (T029).
+18. **Testes F6:** suite F6 verde com fakes (Agent + `Pdf::fake()`), sem chamadas reais; smoke real da adequação + PDF validado (T032).
 
 ## 4. Ordem final
 
@@ -485,7 +708,23 @@ T019 Dashboard ── T020 Análise temporal (paralelos, ambos após T017)
    ↓
 T021 Suite completa / regressão
    ↓
-T022 Smoke real + Definition of Done
+T022 Smoke real + Definition of Done (MVP existente)
+   ↓
+T023 Persistência ── T024 DTO ──┬── T025 Agent (dep. T024)
+                               └── T026 Integridade (dep. T016, T018)
+   ↓
+T027 ResumeAdaptationService (dep. T015, T018)
+   ↓
+T028 Testes do domínio F6
+   ↓
+T029 PDF (spatie/laravel-pdf + driver cloudflare)
+   ↓
+T030 Página Filament (não-CRUD)
+   ↓
+T031 Testes de integração F6
+   ↓
+T032 Refinamentos F6
+(T033 entrada PDF/DOCX — bloqueada pela decisão de extração de texto)
 ```
 
 | ID | Tarefa | Fase | Dependências | Resultado |
@@ -512,6 +751,17 @@ T022 Smoke real + Definition of Done
 | T020 | Página de tendências (análise temporal) | J — Temporal | T017 | Série mensal + comparação 3×3 + aviso dados insuficientes |
 | T021 | Suite completa e regressão do fluxo integral | K — Testes | T008–T020 | `php artisan test` verde |
 | T022 | Smoke real ponta-a-ponta + Definition of Done | K — Testes | T021 | Fluxo real validado; DoD do MVP 100% |
+| T023 | Persistência da adequação (migration + Model `ResumeAdaptation`) | L — F6 | T005, T006 | Tabela 1:1 por vaga (UNIQUE), sem histórico; `resumes` intocada |
+| T024 | DTO `ResumeAdaptationResult` | L — F6 | — (paralelo a T023) | Resposta da IA validada estruturalmente (5 campos, limites, sem HTML) |
+| T025 | Agent `ResumeAdaptationAgent` | L — F6 | T004, T024 | Agent opencode-go/deepseek-v4-flash com regra de integridade; sem Cloudflare/HTML |
+| T026 | Validação de integridade (2 camadas) | L — F6 | T016, T018, T024 | Conceitos do adaptado ⊆ original; keywords/ausentes consistentes |
+| T027 | Service `ResumeAdaptationService` | L — F6 | T023, T024, T025, T026, T015, T018, T014 | Fluxo completo com UPSERT por vaga; falha não persiste nada |
+| T028 | Testes do domínio F6 (DTO, integridade, UPSERT, original intocado) | L — F6 | T023, T024, T026, T027 | Cenários verdes com fakes, sem rede |
+| T029 | PDF: `spatie/laravel-pdf` + driver `cloudflare` + `ResumePdfService` + Blade | L — F6 | T027, T002 | PDF sob demanda a partir do Blade; sem persistir PDF; sem DOCX |
+| T030 | Filament `ResumeAdaptationPage` (não-CRUD) | L — F6 | T003, T008, T027, T029 | Página com os 5 resultados + Adequar novamente/Copiar/Baixar PDF |
+| T031 | Testes de integração F6 (fluxo completo + PDF + Filament) | L — F6 | T028, T029, T030 | Fluxo ponta a ponta verde com `Pdf::fake()` e fakes do Agent |
+| T032 | Refinamentos F6 e smoke manual | L — F6 | T031 | Suite verde + smoke real (adequação + PDF) validado |
+| T033 | Entrada do currículo em PDF/DOCX (extração de texto) | L — F6 (bloqueada) | Decisão TP §17, T015 | Habilitada após decisão de extração; fora do MVP de F6 |
 
 ## 5. Cobertura PRD × tarefas
 
@@ -526,5 +776,7 @@ T022 Smoke real + Definition of Done
 | MVP essencial (PRD §7) | T003–T020 (itens), T021–T022 (verificação final) |
 | Critérios de aceitação (PRD §8) | T021 (testes), T022 (smoke + DoD) |
 | Fluxo operacional completo | T022 (smoke ponta-a-ponta) |
+| F6 — Adequação de currículo para uma vaga (ATS) | T023 (persistência), T024 (DTO), T025 (agent), T026 (integridade), T027 (service), T028 (testes domínio), T029 (PDF), T030 (página Filament), T031 (testes integração), T032 (refinamentos) |
+| Entrada do currículo PDF/DOCX (PENDENTE no PRD) | T033 (bloqueada pela decisão de extração de texto — TP §17) |
 
-Revisão interna: toda funcionalidade do PRD (F1–F5), análise temporal, comparação agregada e lacunas possuem tarefa(s) correspondente(s); nenhuma funcionalidade fora do escopo (scraping, gestão de candidaturas, multi-usuário, exportação, histórico de currículo) foi adicionada.
+Revisão interna: toda funcionalidade do PRD (F1–F6), análise temporal, comparação agregada, lacunas e adequação de currículo possuem tarefa(s) correspondente(s); nenhuma funcionalidade fora do escopo (scraping, gestão de candidaturas, multi-usuário, carta de apresentação, candidatura automática, integração LinkedIn, envio automático, múltiplas versões persistentes, DOCX no MVP, exportação CSV/JSON, histórico de currículo) foi adicionada.

@@ -4,15 +4,15 @@
 
 **O que é o produto**
 
-Ferramenta pessoal que transforma descrições de vagas de emprego, coletadas manualmente ao longo do tempo, em uma base estruturada de dados sobre demandas do mercado de trabalho. A partir dessa base, o produto identifica padrões, frequências e tendências e cruza essas informações com o currículo do usuário. As vagas são a fonte de dados do produto: ele não é um gerenciador de vagas nem um sistema de acompanhamento de candidaturas. O nome do produto é **PENDENTE** (ainda não definido).
+Ferramenta pessoal que transforma descrições de vagas de emprego, coletadas manualmente ao longo do tempo, em uma base estruturada de dados sobre demandas do mercado de trabalho. A partir dessa base, o produto identifica padrões, frequências e tendências e cruza essas informações com o currículo do usuário. As vagas são a fonte de dados do produto: ele não é um gerenciador de vagas nem um sistema de acompanhamento de candidaturas. Além da visão agregada do mercado, o produto permite aplicar essa análise a uma vaga específica, gerando uma versão do currículo adequada aos critérios normalmente utilizados por sistemas ATS (Applicant Tracking Systems) — trabalhando exclusivamente com informações verdadeiras já presentes no currículo do usuário.
 
 **Restrição tecnológica já definida**
 
-O sistema será desenvolvido com Laravel + Filament. A estruturação das descrições será auxiliada por um modelo de linguagem — `deepseek-v4-flash`, fornecido pelo provedor OpenCode Go por meio de endpoint OpenAI-compatible — integrado à aplicação através do Laravel AI SDK, que atua como camada de integração com modelos de linguagem. Credenciais e configurações sensíveis (endpoint/base URL do OpenCode Go, API key, modelo) são fornecidas pelo ambiente/configuração da aplicação, sem hardcoding, e o modelo pode ser alterado posteriormente sem modificar a lógica de negócio. Demais escolhas de implementação ficam para o planejamento técnico.
+O sistema será desenvolvido com Laravel + Filament. A estruturação das descrições será auxiliada por um modelo de linguagem — `deepseek-v4-flash`, fornecido pelo provedor OpenCode Go por meio de endpoint OpenAI-compatible — integrado à aplicação através do Laravel AI SDK, que atua como camada de integração com modelos de linguagem. Credenciais e configurações sensíveis (endpoint/base URL do OpenCode Go, API key, modelo) são fornecidas pelo ambiente/configuração da aplicação, sem hardcoding, e o modelo pode ser alterado posteriormente sem modificar a lógica de negócio. A adequação de currículo para uma vaga (F6) utilizará o provedor/modelo de IA já definido para o produto (OpenCode Go, modelo `deepseek-v4-flash`, via Laravel AI SDK). A Cloudflare não participa da geração textual nem da adequação do currículo: é utilizada exclusivamente para a geração/renderização do PDF da versão adaptada, através do driver Cloudflare do `spatie/laravel-pdf`, que envia o HTML/Blade do currículo adaptado ao Cloudflare Browser Run para renderização em PDF. A exportação em PDF é o formato de exportação definido para o MVP. Demais escolhas de implementação ficam para o planejamento técnico.
 
 **Arquitetura conceitual da integração com IA**
 
-A aplicação não realiza chamadas HTTP diretas ao OpenCode Go: a lógica do produto conversa com um agente/serviço de análise, que utiliza o Laravel AI SDK como camada de integração com o provedor. Dentro da arquitetura do produto, o Laravel AI SDK é responsável pela comunicação com o modelo — incluindo agentes, structured output, configuração de provedores, tratamento de respostas e erros e possibilidade de testes/mock da integração — por meio do provider OpenAI-compatible apontando para o OpenCode Go com o modelo `deepseek-v4-flash`. Essa separação mantém o domínio da aplicação independente de detalhes específicos do OpenCode Go e permite substituir o provedor ou o modelo posteriormente sem alterar a lógica principal de cadastro e análise das vagas.
+A aplicação não realiza chamadas HTTP diretas ao OpenCode Go: a lógica do produto conversa com um agente/serviço de análise, que utiliza o Laravel AI SDK como camada de integração com o provedor. Dentro da arquitetura do produto, o Laravel AI SDK é responsável pela comunicação com o modelo — incluindo agentes, structured output, configuração de provedores, tratamento de respostas e erros e possibilidade de testes/mock da integração — por meio do provider OpenAI-compatible apontando para o OpenCode Go com o modelo `deepseek-v4-flash`. Essa separação mantém o domínio da aplicação independente de detalhes específicos do OpenCode Go e permite substituir o provedor ou o modelo posteriormente sem alterar a lógica principal de cadastro e análise das vagas. O mesmo princípio se aplica à adequação de currículo (F6): um agente/serviço próprio realiza a adequação através da mesma camada do Laravel AI SDK, com o provedor OpenCode Go e o modelo `deepseek-v4-flash`, sem alterar a lógica de negócio.
 
 **Qual problema ele resolve**
 
@@ -20,7 +20,7 @@ Descrições de vagas são textos não estruturados espalhados em links, abas e 
 
 **Qual é seu objetivo principal**
 
-Construir, a partir das vagas coletadas, uma base de dados sobre as demandas do mercado (tecnologias, linguagens, frameworks, habilidades, requisitos etc.) e cruzar esses dados com o currículo, para embasar decisões sobre quais conhecimentos, tecnologias e experiências desenvolver. Pergunta central do produto: "Dado o conjunto de vagas que estou observando, o que o mercado está pedindo e como meu currículo se posiciona em relação a isso?"
+Construir, a partir das vagas coletadas, uma base de dados sobre as demandas do mercado (tecnologias, linguagens, frameworks, habilidades, requisitos etc.) e cruzar esses dados com o currículo, para embasar decisões sobre quais conhecimentos, tecnologias e experiências desenvolver. Pergunta central do produto: "Dado o conjunto de vagas que estou observando, o que o mercado está pedindo e como meu currículo se posiciona em relação a isso?" Como objetivo complementar, o produto permite aplicar essa leitura a uma vaga específica: adequar o currículo atual aos critérios de ATS daquela vaga, sem inventar informações.
 
 ## 2. Usuário e problema
 
@@ -81,16 +81,26 @@ A finalidade é identificar lacunas e aderências em relação às tendências d
 - **O que o sistema faz**: agrega a base e apresenta as frequências por categoria (tecnologias, linguagens, frameworks, bancos de dados, ferramentas, cloud, metodologias, habilidades, requisitos, experiência exigida), as combinações recorrentes e a evolução dessas frequências ao longo do tempo, quando houver dados suficientes.
 - **Resultado esperado**: visões que embasam decisões sobre o que desenvolver e como ajustar o currículo.
 
+### F6. Adequação de currículo para uma vaga (ATS)
+
+- **O que o usuário faz**: seleciona uma vaga cadastrada (com dados estruturados confirmados) e solicita a adequação do currículo atual para aquela vaga.
+- **O que o sistema faz**: recupera o currículo atual, a descrição original e os dados estruturados da vaga (tecnologias, habilidades, requisitos, experiência exigida etc.), junto com a comparação mercado × currículo, e envia essas informações ao agente/serviço de adequação, que utiliza o Laravel AI SDK com o provedor OpenCode Go (modelo `deepseek-v4-flash`, o mesmo já definido para o produto). A IA analisa a aderência do currículo à vaga e gera uma versão adaptada do currículo, orientando: terminologia, palavras-chave, organização das informações, destaque de experiências relevantes, ordem/priorização das competências e adequação do conteúdo ao perfil procurado.
+- **Regra fundamental — integridade das informações**: a IA trabalha exclusivamente com informações verdadeiras presentes no currículo do usuário. Não pode inventar experiências profissionais, tecnologias, conhecimentos, cargos, certificações, resultados, projetos, responsabilidades, formação ou qualquer outra informação factual. Ela pode reformular informações existentes, mas não falsificá-las. Requisitos da vaga ausentes do currículo são tratados como lacunas, e nunca criados artificialmente. Quando uma adaptação não puder ser feita sem inventar informação, o sistema emite um alerta.
+- **Resultado esperado**: o usuário recebe (1) uma versão adaptada do currículo; (2) a explicação das principais alterações realizadas; (3) os requisitos/palavras-chave da vaga contemplados; (4) os requisitos relevantes da vaga ainda ausentes no currículo; (5) alertas quando uma adaptação não puder ser feita sem inventar informações. A versão adaptada continua sendo um currículo do usuário — não uma reprodução da descrição da vaga. O usuário pode copiar a versão final ou exportá-la em PDF — formato de exportação definido para o MVP; DOCX fica fora do MVP.
+
+**Pipeline de geração do PDF** (responsabilidades): IA — adequa o conteúdo do currículo à vaga; Laravel — orquestra o processo; Blade/HTML — apresenta o currículo adaptado; `spatie/laravel-pdf` — gera o PDF; driver `cloudflare` do `spatie/laravel-pdf` (Cloudflare Browser Run) — renderiza o HTML em PDF. A Cloudflare não participa da geração textual nem da adequação do currículo.
+
 ## 4. Dados
 
 **Armazenados**
 
 - **Vaga (unidade de observação)**: descrição (obrigatória), data de coleta (automática), link (opcional; apenas referência de origem, não é identificador único) e dados estruturados: cargo, empresa, tecnologias, linguagens, frameworks, bancos de dados, ferramentas, cloud, metodologias, habilidades, requisitos, experiência exigida e outros atributos relevantes (extraídos em F2 via modelo de IA; campos podem ficar vazios quando não identificáveis). Apenas a versão revisada pelo usuário é armazenada: a sugestão do modelo é usada na etapa de revisão (F2) e não é mantida após a revisão.
 - **Currículo**: texto atual (uma versão corrente, atualizável; histórico de versões não é obrigatório no MVP).
+- **Versão adaptada do currículo (por vaga)**: resultado da adequação (F6) — a última versão adaptada de cada vaga, acompanhada da explicação das alterações realizadas, dos requisitos/palavras-chave contemplados, dos requisitos relevantes ainda ausentes e dos alertas de adaptação; uma nova geração substitui a anterior (sem histórico de versões no MVP).
 
 **Extraídos ou derivados por análise**
 
-- Frequências por categoria (tecnologias, linguagens, frameworks, bancos de dados, ferramentas, cloud, metodologias, habilidades, requisitos, experiência exigida); combinações recorrentes entre tecnologias e requisitos; posicionamento do currículo diante dos padrões agregados (presente/ausente por item); lacunas (itens frequentes nas vagas e ausentes do currículo, priorizados por frequência); evolução das frequências ao longo do tempo — possível porque cada vaga tem data de coleta.
+- Frequências por categoria (tecnologias, linguagens, frameworks, bancos de dados, ferramentas, cloud, metodologias, habilidades, requisitos, experiência exigida); combinações recorrentes entre tecnologias e requisitos; posicionamento do currículo diante dos padrões agregados (presente/ausente por item); lacunas (itens frequentes nas vagas e ausentes do currículo, priorizados por frequência); evolução das frequências ao longo do tempo — possível porque cada vaga tem data de coleta. Para a adequação por vaga (F6), a IA deriva a versão adaptada do currículo e seus itens associados (alterações, contemplados, lacunas, alertas) a partir do currículo atual, da descrição original e dos dados estruturados da vaga.
 
 ## 5. Análises
 
@@ -101,10 +111,11 @@ O produto deve permitir:
 - **Comparação com o currículo**: posicionamento do currículo diante dos padrões agregados das vagas (ex.: item × frequência nas vagas × presente/ausente no currículo), com visão de aderência e lacunas.
 - **Lacunas identificadas**: itens frequentes nas vagas e ausentes do currículo, priorizados por frequência.
 - **Evolução ao longo do tempo**: variação das frequências por período (ex.: mensal/trimestral), para identificar itens em alta ou queda, quando houver dados suficientes.
+- **Adequação por vaga**: aplicação complementar à análise agregada — posicionamento do currículo em relação a uma vaga específica (descrição original + dados estruturados), com geração de versão adaptada, alterações realizadas, requisitos contemplados e lacunas. A análise agregada do mercado permanece o objetivo principal do produto.
 
 ## 6. Fluxo principal
 
-Fluxo conceitual: vagas coletadas → dados estruturados → base de mercado → agregação → padrões/frequências/tendências → comparação com currículo → identificação de lacunas e aderências.
+Fluxo conceitual: vagas coletadas → dados estruturados → base de mercado → agregação → padrões/frequências/tendências → comparação com currículo → identificação de lacunas e aderências → adequação do currículo para uma vaga específica (aplicação complementar).
 
 Fluxo operacional:
 
@@ -115,6 +126,18 @@ Fluxo operacional:
 5. O sistema cruza os padrões agregados com o currículo atual, mostrando aderências e lacunas.
 6. O usuário usa os resultados para decidir o que desenvolver e como ajustar o currículo — e pode atualizar o currículo no sistema quando necessário.
 7. A coleta contínua ao longo do tempo enriquece a base e as análises, incluindo as tendências temporais.
+
+Fluxo da adequação de currículo para uma vaga (F6):
+
+1. O usuário seleciona uma vaga cadastrada (com dados estruturados confirmados) e solicita a adequação do currículo atual para aquela vaga.
+2. O sistema recupera o currículo atual.
+3. O sistema recupera a descrição original e os dados estruturados da vaga.
+4. O sistema envia currículo, descrição, dados estruturados e a comparação mercado × currículo ao agente de adequação (Laravel AI SDK, provedor OpenCode Go, modelo `deepseek-v4-flash`).
+5. A IA analisa a aderência do currículo aos requisitos da vaga.
+6. A IA gera a versão adaptada do currículo e os demais resultados (alterações, contemplados, lacunas, alertas).
+7. O sistema apresenta o resultado ao usuário.
+8. O usuário revisa a versão adaptada.
+9. O usuário pode copiar a versão final ou exportá-la em PDF — gerado via `spatie/laravel-pdf` com driver `cloudflare` (Cloudflare Browser Run).
 
 ## 7. MVP
 
@@ -128,6 +151,7 @@ Fluxo operacional:
 - Visualização das principais frequências e padrões.
 - Cruzamento com o currículo: aderências e lacunas em relação aos padrões agregados.
 - Análise temporal básica (evolução de frequências por período, ex.: mensal/trimestral); os resultados dependem do acúmulo de dados ao longo do tempo.
+- Adequação de currículo para uma vaga (F6): seleção de vaga cadastrada, geração da versão adaptada com os resultados associados (alterações, requisitos contemplados, lacunas, alertas), revisão, cópia e exportação em PDF (`spatie/laravel-pdf` com driver `cloudflare` / Cloudflare Browser Run — formato de exportação do MVP); persistência da última versão adaptada por vaga (sem histórico).
 
 **Interessante, mas pode esperar**
 
@@ -136,6 +160,7 @@ Fluxo operacional:
 - Filtros avançados na listagem (por categoria, empresa, período).
 - Histórico de versões do currículo.
 - Exportação dos dados (CSV/JSON).
+- Exportação da versão adaptada em DOCX (não faz parte do MVP; pode ser considerada futuramente).
 
 **Fora do escopo do produto**
 
@@ -143,6 +168,10 @@ Fluxo operacional:
 - Captura automática de vagas (scraping, crawling ou integração com LinkedIn).
 - Recomendação de vagas.
 - Gestão de candidaturas (status de aplicação) e análise de salários.
+- Geração de carta de apresentação.
+- Candidatura automática e envio automático de currículo.
+- Integração com LinkedIn como fluxo do produto (ex.: publicação ou candidatura), além da captura de vagas.
+- Múltiplas versões persistentes do currículo adaptado (persiste-se apenas a última versão por vaga, sem histórico).
 
 ## 8. Critérios de aceitação
 
@@ -152,10 +181,13 @@ Fluxo operacional:
 - **Comparação agregada**: com vagas contendo "Python" e "React" e um currículo com "Python" sem "React", a visão comparativa mostra Python como presente no currículo e React como ausente, junto com a frequência de cada item nas vagas.
 - **Análises**: com 3 vagas cadastradas (ex.: 2 com Python, 1 com React), o relatório lista Python com frequência 2 e React com frequência 1; as lacunas listam apenas itens frequentes nas vagas e ausentes do currículo.
 - **Base para o tempo**: toda vaga registrada possui data de coleta, permitindo análises temporais.
+- **Adequação de currículo**: com uma vaga confirmada exigindo, por exemplo, "Python" e "React" e um currículo com "Python" sem "React", a adequação gera uma versão adaptada que reformula e destaca a experiência com Python (apenas informações existentes), lista "React" como requisito ausente (lacuna) e não introduz nenhuma informação factual ausente do currículo original; a versão adaptada não é uma reprodução da descrição da vaga.
+- **Integridade**: em qualquer cenário, a versão adaptada contém apenas informações verdadeiras presentes no currículo (reformuladas, nunca inventadas); requisitos da vaga sem correspondência no currículo aparecem como lacunas; quando uma adaptação exigiria inventar informação, o sistema exibe um alerta.
+- **Resultado da adequação**: a resposta apresenta os cinco itens — versão adaptada, explicação das alterações, requisitos contemplados, requisitos ausentes e alertas.
+- **Persistência da adequação**: gerar uma nova adequação para a mesma vaga substitui a versão adaptada anterior (sem histórico).
 
 ## Decisões ainda pendentes
 
 Questões que precisam ser decididas antes do desenvolvimento:
 
-- Nome do produto.
 - Formato de arquivo do currículo além de texto simples (PDF, DOCX).

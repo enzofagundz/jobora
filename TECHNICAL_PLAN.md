@@ -7,9 +7,9 @@
 
 Aplicação Laravel 13 single-user com painel Filament. O usuário cadastra descrições de vagas (texto + link opcional de referência). As vagas são **fontes de dados**: um agente do Laravel AI SDK (provider OpenAI-compatible apontando para OpenCode Go, modelo `deepseek-v4-flash`) extrai dados estruturados da descrição; a sugestão passa por revisão humana; somente a versão confirmada é persistida como itens normalizados e passa a alimentar as análises agregadas — frequências por categoria, combinações recorrentes, evolução temporal e o posicionamento do currículo diante dessas tendências (aderências e lacunas).
 
-O produto **não** é um gerenciador de vagas nem de candidaturas: a vaga é a unidade de observação que alimenta a base de mercado; a comparação com o currículo é uma visão derivada, não a finalidade principal.
+O produto **não** é um gerenciador de vagas nem de candidaturas: a vaga é a unidade de observação que alimenta a base de mercado; a comparação com o currículo é uma visão derivada, não a finalidade principal. Como aplicação complementar da mesma análise, o produto gera uma versão do currículo adequada a uma vaga específica (F6 — Adequação de currículo para ATS): a IA adapta o texto do currículo com base na descrição e nos dados estruturados da vaga, e a versão adaptada pode ser exportada em PDF — renderizado via `spatie/laravel-pdf` com o driver Cloudflare (Cloudflare Browser Run API). A Cloudflare atua exclusivamente como driver de renderização de PDF; a IA da adequação usa o mesmo provedor OpenCode Go (modelo `deepseek-v4-flash`).
 
-Fluxo de dados: Filament (UI) → Services (análise, normalização, comparação) → Models (`JobPosting`, `JobPostingItem`, `Resume`) → SQLite. IA: `JobAnalysisService` → `JobExtractionAgent` (laravel/ai) → provider `opencode-go` → OpenCode Go. A aplicação nunca fala HTTP com o provedor diretamente.
+Fluxo de dados: Filament (UI) → Services (análise, normalização, comparação, adequação) → Models (`JobPosting`, `JobPostingItem`, `Resume`, `ResumeAdaptation`) → SQLite. IA: `JobAnalysisService` → `JobExtractionAgent` (laravel/ai) → provider `opencode-go` → OpenCode Go; adequação (F6): `ResumeAdaptationService` → `ResumeAdaptationAgent` (laravel/ai) → mesmo provider `opencode-go`. PDF (F6): `ResumePdfService` → `spatie/laravel-pdf` (driver `cloudflare`) → Cloudflare Browser Run. A aplicação nunca fala HTTP com o provedor de IA diretamente; a única integração com a Cloudflare é o driver de PDF.
 
 ## 2. Stack
 
@@ -20,19 +20,20 @@ Fluxo de dados: Filament (UI) → Services (análise, normalização, comparaç�
 - **Modelo**: `deepseek-v4-flash`.
 - **Banco**: SQLite (`database/database.sqlite`, default do Laravel 13) — decisão do usuário.
 - **Testes**: Pest (default do Laravel 13).
+- **`spatie/laravel-pdf`** — geração do PDF do currículo adaptado (F6), com driver `cloudflare` (Cloudflare Browser Run API); sem Chromium/Puppeteer local.
 - Nenhuma outra tecnologia. Sem Redis, filas, Elasticsearch, microserviços (justificativa: escala pessoal, extração síncrona suficiente — ver §16 etapa 7 para a contingência, que usa a fila `database` nativa do Laravel, sem infra nova).
 
 ## 3. Arquitetura
 
 Camadas: Models (Eloquent) / Enums / DTO / Services (lógica de negócio) / Agent (integração com IA) / Filament (Resource, Pages, Widgets).
 
-- **Models**: `User` (default do Laravel), `JobPosting`, `JobPostingItem`, `Resume`.
+- **Models**: `User` (default do Laravel), `JobPosting`, `JobPostingItem`, `Resume`, `ResumeAdaptation`.
 - **Enums** (string-backed):
   - `JobPostingStatus`: `pending` | `needs_review` | `confirmed` | `failed` — ciclo de **processamento dos dados**, não status de candidatura.
   - `ConceptCategory`: `technology` | `language` | `framework` | `database` | `tool` | `cloud` | `methodology` | `skill` | `requirement` | `experience`.
   - `ItemSource`: `ai` | `user`.
-- **DTO**: `JobAnalysisResult` — resultado estruturado e validado da extração (role, company, arrays por categoria). Sem DTOs adicionais no MVP.
-- **Agent**: `JobExtractionAgent` (laravel/ai: implementa `Laravel\Ai\Contracts\Agent`, trait `Promptable`) — único ponto de contato com o SDK.
+- **DTO**: `JobAnalysisResult` — resultado estruturado e validado da extração (role, company, arrays por categoria); `ResumeAdaptationResult` — resultado validado da adequação (F6): currículo adaptado + alterações + contemplados + ausentes + alertas (§8). Sem DTOs adicionais no MVP.
+- **Agent**: `JobExtractionAgent` (laravel/ai: implementa `Laravel\Ai\Contracts\Agent`, trait `Promptable`) — extração (F2). `ResumeAdaptationAgent` — adequação (F6), mesmo contrato, mesmo provider `opencode-go` e modelo `deepseek-v4-flash`. Agents são o único ponto de contato com o SDK.
 - **Services**:
   - `JobAnalysisService` — orquestra a extração: chama o agent, valida, normaliza, grava `suggested_data` e transiciona status.
   - `ConceptNormalizer` — normalização de nomes de conceitos (alias map, §9).
@@ -40,9 +41,11 @@ Camadas: Models (Eloquent) / Enums / DTO / Services (lógica de negócio) / Agen
   - `ResumeAnalyzer` — texto do currículo → conjunto de conceitos presentes.
   - `MarketAnalysisService` — frequências, rankings, combinações, série mensal.
   - `MarketComparisonService` — tabela mercado × currículo (frequência + presente/ausente + lacunas).
+  - `ResumeAdaptationService` — orquestra a adequação (F6): reúne currículo + vaga (descrição + itens estruturados) + posicionamento mercado × currículo, chama o agent, valida estrutura e integridade, persiste a última versão por vaga.
+  - `ResumePdfService` — currículo adaptado → HTML/Blade de impressão → PDF via `spatie/laravel-pdf` (driver `cloudflare`).
 - **Actions**: nenhuma classe `Action` no MVP (as ações de confirmar/descartar/analisar são métodos das próprias páginas/actions do Filament; lógica de negócio vive nos Services). Criar Actions só se houver reuso real.
 - **Jobs**: nenhum no MVP (fluxo síncrono). Contingência documentada na etapa 7: se o provedor ficar instável em produção, mover a extração para uma fila `database` do Laravel (sem Redis).
-- **Filament**: 1 Resource (`JobPostingResource` — List/Create) + Pages custom (`JobReviewPage`, `ResumePage`, `MarketComparisonPage`, `MarketTrendsPage`) + Dashboard com widgets.
+- **Filament**: 1 Resource (`JobPostingResource` — List/Create) + Pages custom (`JobReviewPage`, `ResumePage`, `MarketComparisonPage`, `MarketTrendsPage`, `ResumeAdaptationPage`) + Dashboard com widgets.
 - Sem repository pattern (Eloquent usado direto nos services). Abstrações só onde há variação real: a IA é isolada atrás do Agent + SDK por ser substituível.
 
 ## 4. Modelo de domínio
@@ -68,6 +71,14 @@ Camadas: Models (Eloquent) / Enums / DTO / Services (lógica de negócio) / Agen
 - **Atributos**: `content` (text, obrigatório), timestamps.
 - **Relacionamentos**: nenhum (linha única garantida pelo `ResumeService`).
 - **Origem**: 100% usuário. Derivados: conjunto de conceitos presentes (computado pelo `ResumeAnalyzer`, não persistido).
+
+### ResumeAdaptation (Currículo adaptado por vaga)
+
+- **Responsabilidade**: resultado da adequação (F6) para uma vaga específica — a **última** versão adaptada, sem histórico. O currículo original (`Resume`) continua sendo a fonte: a adaptação nunca o substitui.
+- **Atributos**: `job_posting_id` (FK, UNIQUE — uma adaptação por vaga), `adapted_content` (text, obrigatório — texto do currículo adaptado), `changes` (json nullable — explicação das principais alterações), `covered_keywords` (json nullable — requisitos/palavras-chave contemplados), `missing_requirements` (json nullable — requisitos relevantes ausentes), `alerts` (json nullable — alertas de integridade), timestamps.
+- **Relacionamentos**: `belongsTo JobPosting` (1:1; regenerar = atualizar a linha).
+- **Origem**: derivado pela IA (F6) e validado pela aplicação; o usuário revisa antes de exportar. O PDF é uma representação/exportação derivada do `adapted_content` (não é persistido; gerado sob demanda).
+- **Justificativa**: a adaptação é específica da vaga (não faz sentido global); regenerar substitui (PRD: última versão por vaga); histórico complexo de versões é desnecessário no MVP — o original sempre permanece em `resumes`.
 
 ## 5. Banco de dados (SQLite)
 
@@ -99,6 +110,16 @@ Migrations:
   - `content` TEXT NOT NULL
   - `created_at`/`updated_at`
   - `ResumeService` garante 1 linha: salvar = atualizar a linha existente.
+5. **resume_adaptations**
+  - `id` BIGINT PK
+  - `job_posting_id` BIGINT NOT NULL UNIQUE FK → `job_postings.id` ON DELETE CASCADE
+  - `adapted_content` TEXT NOT NULL
+  - `changes` TEXT NULL (JSON)
+  - `covered_keywords` TEXT NULL (JSON)
+  - `missing_requirements` TEXT NULL (JSON)
+  - `alerts` TEXT NULL (JSON)
+  - `created_at`/`updated_at`
+  - UNIQUE `job_posting_id` garante 1 adaptação por vaga (regenerar = UPSERT); sem tabela de histórico no MVP.
 
 **Eficiência das consultas agregadas**: frequências = `GROUP BY category, name` sobre o índice `(category, name)`; evolução temporal = JOIN com `job_postings.collected_at` (indexado) + `GROUP BY strftime('%Y-%m', collected_at)`; combinações = self-join sobre o índice `(job_posting_id)`. Nenhuma tabela de métricas materializada — tudo é calculado diretamente dos dados armazenados (volume pessoal, sem necessidade). `suggested_data` nunca entra nas agregações.
 
@@ -112,6 +133,16 @@ Migrations:
 6. **Falha**: exceção do SDK, JSON inválido ou validação → `status=failed` + `error_message` legível + log; ação "Tentar novamente" (repete a análise).
 
 **Diferenciação IA × usuário**: `ItemSource` por item persiste no banco; a sugestão bruta (`suggested_data`) existe apenas durante a revisão e é removida no confirm (PRD: a sugestão do modelo não é mantida após a revisão).
+
+### Fluxo da adequação de currículo (F6)
+
+1. **Disparo**: ação "Adequar currículo" na listagem (somente vaga `confirmed` com currículo cadastrado), síncrona com loading.
+2. **Coleta**: `ResumeAdaptationService` reúne currículo atual, descrição original + itens estruturados da vaga e o posicionamento mercado × currículo daquela vaga (presente/ausente via `ResumeAnalyzer`).
+3. **Geração**: `ResumeAdaptationAgent->prompt(...)` → JSON → `ResumeAdaptationResult` (validação estrutural + integridade, §8).
+4. **Persistência**: UPSERT em `resume_adaptations` por `job_posting_id` (regenerar substitui a anterior; nunca toca em `resumes`).
+5. **Apresentação**: página de resultado — versão adaptada, alterações, contemplados, ausentes, alertas.
+6. **Exportação**: "Baixar PDF" → `ResumePdfService` (Blade de impressão → `spatie/laravel-pdf` driver `cloudflare` → Cloudflare Browser Run).
+7. **Falha**: exceção do SDK/validação → erro legível na UI + `Log::channel('ai')`; nada é persistido; o status da vaga não é alterado.
 
 ## 7. Integração com IA
 
@@ -135,6 +166,7 @@ Migrations:
 - **Erros/timeout**: `try/catch` em `JobAnalysisService` — qualquer `Throwable` (SDK, HTTP, JSON inválido) → `status=failed` + `error_message` legível + `Log::channel('ai')` (job_posting_id, modelo, sucesso/falha, latência; nunca API key). Timeout de request 120s no agent.
 - **Desacoplamento**: trocar modelo = mudar `AI_MODEL`; trocar provedor = nova entrada em `config/ai.php` + apontar o agent (ajustar prompt/schema se necessário). Lógica de negócio intocada.
 - **Testes/mocks**: fakes do SDK (`JobExtractionAgent::fake(...)` com respostas fixas: válida, JSON inválido, fora do schema, exceção) — sem chamadas reais em CI; smoke manual com chave real na etapa 7.
+- **Adequação (F6)**: `ResumeAdaptationAgent` — mesmo provider `opencode-go`, mesmo modelo (`AI_MODEL`, `deepseek-v4-flash`), timeout 120s, instruções pt-BR com o contrato JSON da F6 (§8) e a regra de integridade (reformular, nunca inventar). Também **não** implementa `HasStructuredOutput` (mesma restrição do provedor). Erros: `try/catch` no `ResumeAdaptationService` → erro legível + `Log::channel('ai')`; sem persistência parcial. **A Cloudflare não é provedor de IA desta funcionalidade**: nenhuma chamada de modelo vai para Workers AI/AI Gateway — a Cloudflare participa apenas da renderização do PDF (§16 etapa 16).
 
 ## 8. Structured Output (schema)
 
@@ -161,6 +193,25 @@ Contrato JSON retornado pelo modelo (arrays opcionais; strings curtas; nomes can
 - **Instruções embutidas no prompt**: nomes canônicos e estáveis ("PostgreSQL", não "Postgres"; "Laravel", não "Laravel Framework"), sem variações do mesmo conceito, apenas o que está explícito na descrição, "responda APENAS com JSON válido, sem markdown".
 - **Regras de negócio pós-parsing**: categorias desconhecidas descartadas; duplicados (pós-normalização) colapsados; limites (≤ 100 itens, ≤ 100 chars/nome); role/company truncados em 255 chars.
 
+### Structured output da adequação (F6)
+
+Contrato JSON retornado pelo agente de adequação (conteúdo separado da apresentação — a IA **não** retorna HTML):
+
+```json
+{
+  "adapted_resume": "string — currículo adaptado em texto (mesma natureza do currículo original), apenas com informações presentes no currículo do usuário",
+  "changes": ["string — alteração realizada, ex.: \"Resumo reescrito com a terminologia da vaga\""],
+  "covered_keywords": ["string — requisito/palavra-chave da vaga contemplado no currículo adaptado"],
+  "missing_requirements": ["string — requisito relevante da vaga ausente do currículo"],
+  "alerts": ["string — alerta de integridade, ex.: quando uma adaptação exigiria inventar informação"]
+}
+```
+
+- **Separação conteúdo × apresentação**: `adapted_resume` é texto (o conteúdo); a apresentação visual é responsabilidade do Blade (template de impressão) e o PDF é gerado a partir desse HTML — a IA não produz HTML nem PDF.
+- **Regra de integridade no contrato**: as instruções exigem que (a) todo fato no `adapted_resume` exista no currículo original — reformular/organizar/reordenar é permitido; inventar (experiências, tecnologias, cargos, certificações, resultados, projetos, responsabilidades, formação) é proibido; (b) requisitos da vaga sem correspondência no currículo vão para `missing_requirements`, nunca para o `adapted_resume`; (c) quando a vaga exigir algo que só poderia ser atendido inventando informação, registrar em `alerts`.
+- **Validação de integridade pela aplicação** (2 camadas, como F2): (a) `ResumeAdaptationResult::fromStructured` — tipos e limites (≤ 50 itens por lista, ≤ 200 chars/item, `adapted_resume` ≤ 20.000 chars); (b) `ResumeAdaptationService` — **checagem de conceitos**: todo conceito canônico detectado no `adapted_resume` (via `ConceptNormalizer`/`ResumeAnalyzer`) deve existir no currículo original — conceito novo ⇒ resposta rejeitada com mensagem de integridade; `covered_keywords` devem corresponder a conceitos presentes no currículo; `missing_requirements` devem corresponder a itens da vaga ausentes do currículo (consistência com os dados estruturados).
+- **Limite da validação automática**: conteúdo narrativo (redação, ênfase, ordem) não é verificável por regra — é coberto pelas instruções, pelos `alerts` e pela revisão humana antes da exportação.
+
 ## 9. Normalização
 
 - **Onde**: camada de serviço (`ConceptNormalizer`), aplicada na escrita — na sugestão da IA (antes de exibir para revisão) e novamente no confirm (idempotente). Assim o usuário revisa nomes canônicos e a base só guarda nomes canônicos. O currículo usa o **mesmo** normalizador para casar conceitos (consistência obrigatória entre as duas pontas).
@@ -176,11 +227,14 @@ Contrato JSON retornado pelo modelo (arrays opcionais; strings curtas; nomes can
   Regras: trim, lowercase para lookup, colapso de whitespace; alias match exato sobre o nome extraído; canônico desconhecido mantém o nome limpo.
 - **Onde não**: nem em triggers no banco, nem nos relatórios (relatórios só consomem nomes já canônicos).
 - **Evolução futura (fora do MVP)**: tabela `concepts` gerenciável; hoje, edição via config.
+- **Reuso na F6**: o mesmo normalizador alimenta a checagem de integridade da adequação (conceitos do adaptado ⊆ conceitos do currículo original) e o casamento com os itens da vaga.
 
 ## 10. Currículo
 
 - **Armazenamento**: tabela `resumes` com linha única. `ResumeService::save(content)`: salvar = atualizar a linha existente — novo envio substitui o texto atual (sem histórico no MVP, conforme PRD).
 - **Formato MVP**: texto puro colado em textarea. Upload de PDF/DOCX: **PENDENTE** (PRD) — fora do MVP.
+- **Formatos de entrada (PRD mantém PDF/DOCX)**: quando habilitados, o arquivo será **convertido para texto antes de qualquer análise** (a IA só recebe texto). Biblioteca/abordagem de extração de texto (PDF/DOCX): **PENDENTE** — não definida; registrar decisão antes de implementar (não antecipar dependência).
+- **Não confundir**: formato de **entrada** do currículo (PDF/DOCX, PENDENTE) ≠ formato de **exportação** do currículo adaptado no MVP (PDF via `spatie/laravel-pdf` + driver `cloudflare`).
 - **Representação para análise**: `ResumeAnalyzer` normaliza o texto (lowercase, trim, colapso de whitespace) e, para cada conceito do `config/concepts.php`, verifica se algum `keyword` ocorre como substring no texto normalizado → conjunto de conceitos presentes (não persistido; calculado por request).
 - **Comparação**: `MarketComparisonService` cruza as frequências agregadas das vagas `confirmed` com esse conjunto → item × frequência × presente/ausente. Nenhum fluxo de candidatura.
 
@@ -202,6 +256,7 @@ Contrato JSON retornado pelo modelo (arrays opcionais; strings curtas; nomes can
 - Presença no currículo = conceito no conjunto do `ResumeAnalyzer`.
 - **Enquadramento**: a presença/ausência é um atributo de cada **item agregado** (posicionamento do currículo diante das tendências), não um casamento binário vaga-a-vaga. O objetivo é identificar lacunas e aderências em relação ao mercado, não dizer se o usuário atende cada vaga.
 - Tudo dinâmico, sem cache (escala pessoal).
+- **Reuso na F6**: o posicionamento por vaga (itens da vaga × presença no currículo) usa `ResumeAnalyzer` + `ConceptNormalizer` — os mesmos componentes da tabela agregada; a adequação consome esse posicionamento como entrada para o agente.
 
 ## 12. Motor de análise (`MarketAnalysisService`)
 
@@ -237,6 +292,7 @@ Contrato JSON retornado pelo modelo (arrays opcionais; strings curtas; nomes can
   - `ResumePage` (`/resume`) — textarea + Salvar (`ResumeService`); mostra data da última atualização.
   - `MarketComparisonPage` (`/market-comparison`) — tabela do §11 com filtro de categoria.
   - `MarketTrendsPage` (`/market-trends`) — §13.
+  - `ResumeAdaptationPage` (`/job-postings/{record}/adapt`) — §14 (F6), abaixo.
 - **Widgets (Dashboard)**:
   - `StatsOverviewWidget` — total de vagas, confirmadas, aguardando revisão, falhas, itens distintos.
   - `TopConceptsWidget` — top 10 por categoria (seletor).
@@ -250,6 +306,13 @@ Contrato JSON retornado pelo modelo (arrays opcionais; strings curtas; nomes can
   - Consultar tendências: `MarketTrendsPage` + Dashboard.
   - Consultar aderência: `MarketComparisonPage` + Dashboard.
 - Análises **não** são CRUD: páginas de leitura específicas (comparação/tendências), dashboard com widgets, currículo como formulário singleton.
+- **F6 — `ResumeAdaptationPage`** (`/job-postings/{record}/adapt`): página de resultado da adequação, **não** CRUD:
+  - seleção da vaga: ação "Adequar currículo" na listagem (`JobPostingsTable`, linha de vaga `confirmed` com currículo cadastrado);
+  - mostra a vaga (cargo/empresa), o currículo original (fonte) e o currículo adaptado;
+  - painéis: alterações realizadas, palavras-chave/requisitos contemplados, requisitos ausentes (lacunas), alertas de integridade;
+  - ações: "Copiar" (texto do adaptado), "Baixar PDF" (`ResumePdfService`), "Adequar novamente" (regenera e substitui);
+  - avisos: sem currículo cadastrado ou vaga não confirmada ⇒ ação indisponível com mensagem;
+  - **PDF**: template Blade próprio de impressão (`resources/views/pdf/adapted-resume.blade.php`) — A4, sem cores de fundo, texto selecionável, apropriado para impressão e leitura por ATS; gerado sob demanda (não persistido).
 
 ## 15. Testes (Pest)
 
@@ -263,10 +326,11 @@ Contrato JSON retornado pelo modelo (arrays opcionais; strings curtas; nomes can
 - **Structured output**: fixtures de resposta (válida / JSON malformado / fora do schema / tipos errados) → caminhos ok/erro.
 - **Integração laravel/ai**: testes com `Ai::fakeAgents()` / `JobExtractionAgent::fake(...)` (resposta válida; JSON inválido; exceção genérica → failed). Sem chamadas reais em CI.
 - **Filament**: testes Livewire/TestCase — páginas renderizam (List, Review, Resume, Comparison, Trends); ações mudam estado (analisar com fake, confirmar, descartar); widgets exibem dados corretos.
+- **F6 — adequação**: Unit — `ResumeAdaptationResultTest` (tipos, limites, integridade: conceito inventado rejeitado); Feature — `ResumeAdaptationFlowTest` (geração com `ResumeAdaptationAgent::fake(...)`: válida / JSON inválido / fora do schema; UPSERT por vaga; regenerar substitui; currículo original intocado; sem adaptação para vaga não confirmada ou sem currículo); `ResumePdfTest` com `Pdf::fake()` (`spatie/laravel-pdf`) — PDF gerado do Blade com conteúdo correto; Filament — página de resultado renderiza e ações funcionam. Sem chamadas reais em CI.
 
 ## 16. Ordem de implementação
 
-Cada etapa termina com seus testes verdes antes de avançar. Dependências: etapa 5 antes de 6–11; 7 antes de 8; 9 antes de 11; 10 antes de 11–13; 12/13 dependem de 10; 14 por último.
+Cada etapa termina com seus testes verdes antes de avançar. Dependências: etapa 5 antes de 6–11; 7 antes de 8; 9 antes de 11; 10 antes de 11–13; 12/13 dependem de 10; etapas 15–17 (F6) dependem de 7–11 (9 e 11 em especial) e podem rodar em paralelo com 12–13; 14 e 17 por último.
 
 1. **Criação do Laravel** — `composer create-project laravel/laravel` (repo root contém PRD.md/TECHNICAL_PLAN.md → criar em diretório temporário e mover os arquivos para a raiz, preservando os .md); `.env` (`APP_*`, `DB_CONNECTION=sqlite`, `touch database/database.sqlite`); `php artisan migrate`; seed de 1 usuário. *Objetivo*: app Laravel 13 rodando (`php artisan serve` + página inicial). *Testes*: suite default verde.
 2. **Configuração do ambiente** — `.env` com `AI_URL`/`AI_API_KEY`/`AI_MODEL`; `.env.example` espelhado; gitignore ok. *Resultado*: variáveis de IA lidas sem hardcode.
@@ -282,15 +346,18 @@ Cada etapa termina com seus testes verdes antes de avançar. Dependências: etap
 12. **Dashboard** — widgets (stats, top conceitos, lacunas, tendências). *Resultado*: visão agregada na home.
 13. **Análise temporal** — `MarketTrendsPage` (série mensal, comparação de períodos, aviso de dados insuficientes). *Resultado*: evolução por mês.
 14. **Testes e refinamentos** — cobertura final (fluxo completo + Filament), polimento pt-BR, revisão de limites/erros. *Resultado*: suite verde + smoke manual ponta-a-ponta.
+15. **Adequação de currículo — IA (F6)** — migration `resume_adaptations` + Model `ResumeAdaptation` + `ResumeAdaptationAgent` + contrato JSON + `ResumeAdaptationResult` + `ResumeAdaptationService` (coleta, validação estrutural e de integridade, UPSERT) + testes com fakes. *Resultado*: adaptação gerada e persistida por vaga, sem tocar no currículo original.
+16. **Adequação — UI e PDF (F6)** — instalação/configuração do `spatie/laravel-pdf` + driver `cloudflare` + credenciais via env (sem hardcode) + `ResumePdfService` + template Blade de impressão + `ResumeAdaptationPage` + ação na listagem + testes com `Pdf::fake()`. *Resultado*: fluxo ponta a ponta com exportação PDF via Cloudflare Browser Run.
+17. **Testes e refinamentos F6** — cobertura final da F6 (Unit + Feature + Filament + PDF) + smoke manual (chave real + credencial Cloudflare). *Resultado*: suite verde + smoke validado.
 
 ## 17. Decisões pendentes
 
-**Já decidido (definitivas)**: Laravel 13; Filament; Laravel AI SDK; OpenCode Go; endpoint `https://opencode.ai/zen/go/v1/chat/completions`; modelo `deepseek-v4-flash`; banco relacional SQLite; single-user; vagas como fonte de dados (não gerenciador de vagas/candidaturas); link opcional e não identificador (sem deduplicação por link); sem scraping; comparação agregada (não vaga-a-vaga binária); currículo atualizável (substituição); sem infra adicional (Redis, filas, Elasticsearch, microserviços).
+**Já decidido (definitivas)**: Laravel 13; Filament; Laravel AI SDK; OpenCode Go; endpoint `https://opencode.ai/zen/go/v1/chat/completions`; modelo `deepseek-v4-flash`; banco relacional SQLite; single-user; vagas como fonte de dados (não gerenciador de vagas/candidaturas); link opcional e não identificador (sem deduplicação por link); sem scraping; comparação agregada (não vaga-a-vaga binária); currículo atualizável (substituição); sem infra adicional (Redis, filas, Elasticsearch, microserviços). F6: adequação no MVP; IA da adequação = mesmo provedor OpenCode Go + `deepseek-v4-flash` (Cloudflare **não** é provedor de IA); persistência da última versão adaptada por vaga (sem histórico; original nunca substituído); exportação em PDF no MVP via `spatie/laravel-pdf` + driver `cloudflare` (Cloudflare Browser Run); DOCX fora do MVP; nome do produto definido no projeto (não é mais pendência).
 
-**Recomendações técnicas (implementar sem perguntar)**: extração síncrona no MVP (contingência: fila `database` do Laravel se instável — sem Redis); normalização via `config/concepts.php`; `ItemSource` por item; UI pt-BR / código em inglês; sem materialização de métricas; limites de validação (description 20–100k chars, ≤ 100 itens/vaga, ≤ 100 chars/nome); aviso de dados insuficientes &lt; 2 meses; comparação de períodos 3×3 meses com threshold ±20%; structured output via contrato JSON nas instruções + validação no app (provedor rejeita `json_schema`).
+**Recomendações técnicas (implementar sem perguntar)**: extração síncrona no MVP (contingência: fila `database` do Laravel se instável — sem Redis); normalização via `config/concepts.php`; `ItemSource` por item; UI pt-BR / código em inglês; sem materialização de métricas; limites de validação (description 20–100k chars, ≤ 100 itens/vaga, ≤ 100 chars/nome); aviso de dados insuficientes &lt; 2 meses; comparação de períodos 3×3 meses com threshold ±20%; structured output via contrato JSON nas instruções + validação no app (provedor rejeita `json_schema`). F6: adequação síncrona (mesmo padrão da extração); UPSERT em `resume_adaptations`; checagem de integridade por conceitos (mesmo normalizador); PDF testado com `Pdf::fake()`.
 
-**Pendências reais (decisão do usuário — nenhuma bloqueia a implementação)**:
+**Pendências reais (decisão do usuário — nenhuma bloqueia o MVP de F6)**:
 
-- Nome do produto (PRD: **PENDENTE**) — afeta título/branding da UI.
-- Formato do currículo além de texto simples, PDF/DOCX (PRD: **PENDENTE**) — MVP usa texto puro; decisão só necessária para versões futuras.
+- **Extração de texto de PDF/DOCX (entrada do currículo)**: biblioteca/abordagem não definida — decidir antes de habilitar esses formatos de entrada; não bloqueia o MVP (currículo em texto puro).
+- **Credenciais Cloudflare para o driver `cloudflare` do `spatie/laravel-pdf`**: conta/token do Cloudflare Browser Run e nomes das variáveis de ambiente (sem hardcode) — necessárias apenas para a etapa 16 com chamada real; testes usam `Pdf::fake()`.
 
