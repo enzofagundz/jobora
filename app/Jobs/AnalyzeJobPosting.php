@@ -4,10 +4,10 @@ namespace App\Jobs;
 
 use App\Models\JobPosting;
 use App\Services\JobAnalysisService;
-use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Contracts\Queue\ShouldQueueAfterCommit;
 use Illuminate\Foundation\Queue\Queueable;
 
-class AnalyzeJobPosting implements ShouldQueue
+class AnalyzeJobPosting implements ShouldQueueAfterCommit
 {
     use Queueable;
 
