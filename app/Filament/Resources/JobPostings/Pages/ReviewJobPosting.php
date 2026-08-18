@@ -10,6 +10,7 @@ use App\Jobs\AnalyzeJobPosting;
 use App\Services\ConceptNormalizer;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Repeater;
+use Filament\Forms\Components\RichEditor;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
@@ -17,6 +18,7 @@ use Filament\Resources\Pages\Concerns\InteractsWithRecord;
 use Filament\Resources\Pages\Page;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 
 class ReviewJobPosting extends Page
 {
@@ -32,6 +34,8 @@ class ReviewJobPosting extends Page
     {
         $this->record = $this->resolveRecord($record);
 
+        Gate::authorize('update', $this->record);
+
         if ($this->record->status !== JobPostingStatus::NeedsReview) {
             $this->redirect(ListJobPostings::getUrl());
         }
@@ -43,6 +47,10 @@ class ReviewJobPosting extends Page
     {
         return $schema
             ->components([
+                RichEditor::make('description')
+                    ->label('Descrição original (imutável)')
+                    ->disabled()
+                    ->columnSpanFull(),
                 TextInput::make('role')
                     ->label('Cargo')
                     ->maxLength(255),
@@ -79,6 +87,7 @@ class ReviewJobPosting extends Page
             ->all();
 
         $this->form->fill([
+            'description' => $this->record->description,
             'role' => $this->record->role,
             'company' => $this->record->company,
             'items' => $items,
@@ -87,6 +96,8 @@ class ReviewJobPosting extends Page
 
     public function confirm(): void
     {
+        Gate::authorize('update', $this->record);
+
         $data = $this->form->getState();
 
         $normalizer = app(ConceptNormalizer::class);
@@ -133,6 +144,8 @@ class ReviewJobPosting extends Page
 
     public function discard(): void
     {
+        Gate::authorize('update', $this->record);
+
         $this->record->forceFill([
             'status' => JobPostingStatus::Pending,
             'suggested_data' => null,
@@ -152,6 +165,8 @@ class ReviewJobPosting extends Page
 
     public function analyzeAgain(): void
     {
+        Gate::authorize('update', $this->record);
+
         AnalyzeJobPosting::dispatch($this->record);
 
         Notification::make()

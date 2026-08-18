@@ -4,9 +4,12 @@ namespace App\Filament\Resources\JobPostings\Tables;
 
 use App\Enums\ConceptCategory;
 use App\Enums\JobPostingStatus;
+use App\Filament\Resources\JobPostings\Pages\ResumeAdaptationPage;
 use App\Filament\Resources\JobPostings\Pages\ReviewJobPosting;
+use App\Filament\Resources\JobPostings\Pages\ViewJobPosting;
 use App\Jobs\AnalyzeJobPosting;
 use App\Models\JobPosting;
+use App\Models\Resume;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
@@ -83,7 +86,12 @@ class JobPostingsTable
                     ->label('Analisar com IA')
                     ->icon('heroicon-o-sparkles')
                     ->color('primary')
+                    ->authorize('update')
                     ->visible(fn (JobPosting $record): bool => $record->status !== JobPostingStatus::Confirmed)
+                    ->disabled(fn (JobPosting $record): bool => $record->status === JobPostingStatus::Confirmed)
+                    ->requiresConfirmation()
+                    ->modalHeading('Analisar com IA')
+                    ->modalDescription('A descrição da vaga será enviada ao modelo de linguagem para (re)estruturação. Custo de uma chamada de IA por execução.')
                     ->action(function (JobPosting $record): void {
                         AnalyzeJobPosting::dispatch($record);
 
@@ -93,12 +101,26 @@ class JobPostingsTable
                             ->body('A vaga está sendo analisada em segundo plano. O status será atualizado na listagem.')
                             ->send();
                     }),
+                Action::make('view')
+                    ->label('Ver')
+                    ->icon('heroicon-o-eye')
+                    ->color('gray')
+                    ->visible(fn (JobPosting $record): bool => $record->status === JobPostingStatus::Pending)
+                    ->url(fn (JobPosting $record): string => ViewJobPosting::getUrl(['record' => $record])),
                 Action::make('review')
                     ->label('Revisar')
                     ->icon('heroicon-o-clipboard-document-check')
                     ->color('warning')
                     ->visible(fn (JobPosting $record): bool => $record->status === JobPostingStatus::NeedsReview)
                     ->url(fn (JobPosting $record): string => ReviewJobPosting::getUrl(['record' => $record])),
+                Action::make('adaptResume')
+                    ->label('Adequar currículo')
+                    ->icon('heroicon-o-document-arrow-up')
+                    ->color('info')
+                    ->authorize('view')
+                    ->visible(fn (JobPosting $record): bool => $record->status === JobPostingStatus::Confirmed
+                        && once(fn (): bool => Resume::query()->exists()))
+                    ->url(fn (JobPosting $record): string => ResumeAdaptationPage::getUrl(['record' => $record])),
                 DeleteAction::make(),
             ])
             ->toolbarActions([

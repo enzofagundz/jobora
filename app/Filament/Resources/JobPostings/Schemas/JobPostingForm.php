@@ -2,7 +2,7 @@
 
 namespace App\Filament\Resources\JobPostings\Schemas;
 
-use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\RichEditor;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Schema;
 
@@ -12,14 +12,12 @@ class JobPostingForm
     {
         return $schema
             ->components([
-                Textarea::make('description')
+                RichEditor::make('description')
                     ->label('Descrição da vaga')
                     ->required()
                     ->helperText('Cole o texto completo da vaga. A descrição é imutável após o cadastro (correção = excluir e recadastrar).')
                     ->minLength(20)
                     ->maxLength(100000)
-                    ->rows(14)
-                    ->autosize()
                     ->columnSpanFull(),
                 TextInput::make('source_url')
                     ->label('Link de referência (opcional)')
