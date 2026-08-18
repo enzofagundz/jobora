@@ -4,6 +4,7 @@ namespace App\Filament\Widgets;
 
 use App\Services\MarketAnalysisService;
 use Filament\Widgets\LineChartWidget;
+use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Support\Carbon;
 
 class TrendsChartWidget extends LineChartWidget
@@ -14,6 +15,11 @@ class TrendsChartWidget extends LineChartWidget
     {
         $analysis = app(MarketAnalysisService::class);
         $months = $analysis->months();
+
+        if ($months === []) {
+            return ['datasets' => [], 'labels' => []];
+        }
+
         $series = collect($analysis->monthlySeries());
 
         $byName = $series->groupBy('name');
@@ -44,5 +50,14 @@ class TrendsChartWidget extends LineChartWidget
             'datasets' => $datasets,
             'labels' => collect($months)->map(fn (string $month): string => Carbon::createFromFormat('Y-m', $month)->translatedFormat('M/y'))->all(),
         ];
+    }
+
+    public function getDescription(): string|Htmlable|null
+    {
+        if (app(MarketAnalysisService::class)->months() !== []) {
+            return null;
+        }
+
+        return 'Sem dados suficientes para exibir a evolução mensal.';
     }
 }

@@ -7,6 +7,7 @@ use App\Services\MarketAnalysisService;
 use Filament\Pages\Page;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
+use Livewire\Attributes\Url;
 
 class MarketTrendsPage extends Page
 {
@@ -22,6 +23,7 @@ class MarketTrendsPage extends Page
 
     protected static ?int $navigationSort = 4;
 
+    #[Url]
     public ?string $category = null;
 
     /**

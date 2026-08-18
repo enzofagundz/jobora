@@ -81,13 +81,13 @@
                                         </td>
                                         <td class="py-2 text-right">
                                             @php
-                                                $trendBadge = match ($row['trend']) {
-                                                    'subiu' => 'bg-success-100 text-success-700 dark:bg-success-500/20 dark:text-success-300',
-                                                    'desceu' => 'bg-danger-100 text-danger-700 dark:bg-danger-500/20 dark:text-danger-300',
-                                                    default => 'bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-300',
+                                                $trendColor = match ($row['trend']) {
+                                                    'subiu' => 'success',
+                                                    'desceu' => 'danger',
+                                                    default => 'gray',
                                                 };
                                             @endphp
-                                            <span class="rounded px-2 py-0.5 text-xs font-medium {{ $trendBadge }}">{{ $row['trend'] }}</span>
+                                            <x-filament::badge :color="$trendColor">{{ $row['trend'] }}</x-filament::badge>
                                         </td>
                                     </tr>
                                 @endforeach
