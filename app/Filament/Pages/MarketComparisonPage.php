@@ -6,6 +6,7 @@ use App\Enums\ConceptCategory;
 use App\Services\MarketAnalysisService;
 use App\Services\MarketComparisonService;
 use App\Services\ResumeService;
+use App\Support\Number;
 use Filament\Pages\Page;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
@@ -54,7 +55,7 @@ class MarketComparisonPage extends Page implements HasSchemas, HasTable
                     ->width('14%'),
                 TextColumn::make('percent')
                     ->label('% das vagas')
-                    ->formatStateUsing(fn (float $state): string => $this->formatPercent($state))
+                    ->formatStateUsing(fn (float $state): string => Number::percent($state))
                     ->alignEnd()
                     ->width('16%'),
                 TextColumn::make('present')
@@ -112,10 +113,5 @@ class MarketComparisonPage extends Page implements HasSchemas, HasTable
         $value = $filters['category']['value'] ?? null;
 
         return blank($value) ? null : ConceptCategory::tryFrom($value);
-    }
-
-    private function formatPercent(float $state): string
-    {
-        return rtrim(rtrim(number_format($state, 1), '0'), '.').'%';
     }
 }

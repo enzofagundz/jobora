@@ -4,6 +4,7 @@ namespace App\Filament\Widgets;
 
 use App\Enums\ConceptCategory;
 use App\Services\MarketComparisonService;
+use App\Support\Number;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Filament\Widgets\TableWidget;
@@ -33,16 +34,11 @@ class ComparisonSummaryWidget extends TableWidget
                     ->width('14%'),
                 TextColumn::make('percent')
                     ->label('% das vagas')
-                    ->formatStateUsing(fn (float $state): string => $this->formatPercent($state))
+                    ->formatStateUsing(fn (float $state): string => Number::percent($state))
                     ->alignEnd()
                     ->width('18%'),
             ])
             ->emptyStateHeading('Nenhuma lacuna identificada')
             ->emptyStateDescription('Ou não há vagas confirmadas ou o currículo não está cadastrado.');
-    }
-
-    private function formatPercent(float $state): string
-    {
-        return rtrim(rtrim(number_format($state, 1), '0'), '.').'%';
     }
 }
