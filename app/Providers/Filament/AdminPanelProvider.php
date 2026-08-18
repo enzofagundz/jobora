@@ -2,10 +2,14 @@
 
 namespace App\Providers\Filament;
 
+use App\Models\JobPosting;
+use App\Models\ResumeAdaptation;
+use App\Services\ResumePdfService;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
+use Filament\Notifications\Notification;
 use Filament\Pages\Dashboard;
 use Filament\Panel;
 use Filament\PanelProvider;
@@ -17,6 +21,9 @@ use Illuminate\Cookie\Middleware\EncryptCookies;
 use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Session\Middleware\StartSession;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Route;
 use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 class AdminPanelProvider extends PanelProvider
@@ -54,6 +61,37 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->authMiddleware([
                 Authenticate::class,
-            ]);
+            ])
+            // Download do PDF da versão adaptada (F6) — rota GET dedicada:
+            // respostas de arquivo não podem ser retornadas de ações Livewire
+            // (o valor retornado é serializado no snapshot JSON e bytes
+            // binários quebram o encode). Falhas de geração (ex.: credenciais
+            // Cloudflare ausentes) viram notificação + redirect, não 500.
+            ->authenticatedRoutes(function (): void {
+                Route::get('/job-postings/{posting}/resume-pdf', function (JobPosting $posting) {
+                    Gate::authorize('view', $posting);
+
+                    $adaptation = ResumeAdaptation::where('job_posting_id', $posting->id)->firstOrFail();
+
+                    try {
+                        // toResponse gera o conteúdo (chamada real ao driver);
+                        // precisa estar dentro do try para falhas virarem redirect.
+                        return app(ResumePdfService::class)->download($adaptation)->toResponse(request());
+                    } catch (\Throwable $e) {
+                        Log::channel('ai')->error('PDF generation failed.', [
+                            'job_posting_id' => $posting->id,
+                            'error' => $e->getMessage(),
+                        ]);
+
+                        Notification::make()
+                            ->danger()
+                            ->title('Falha ao gerar o PDF')
+                            ->body($e->getMessage())
+                            ->send();
+
+                        return redirect()->to(url('/job-postings/'.$posting->id.'/adapt'));
+                    }
+                })->name('resume-pdf.download');
+            });
     }
 }
