@@ -3,12 +3,18 @@
 use App\Enums\ConceptCategory;
 use App\Filament\Pages\MarketTrendsPage;
 use App\Models\JobPosting;
+use App\Models\User;
 use App\Services\MarketAnalysisService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
+
+// As páginas do painel exigem usuário autenticado (policy + middleware do painel).
+beforeEach(function (): void {
+    $this->actingAs(User::factory()->create());
+});
 
 function postingAt(Carbon $date, array $items): JobPosting
 {
@@ -88,4 +94,12 @@ it('classifica tendência subiu/desceu/estável entre os dois últimos trimestre
 
     expect($comparison->firstWhere('name', 'Python')['trend'])->toBe('subiu')
         ->and($comparison->firstWhere('name', 'React')['trend'])->toBe('desceu');
+});
+
+it('persiste a categoria selecionada na URL (deep-link)', function () {
+    postingAt(Carbon::now()->subMonths(2), ['Python']);
+
+    Livewire::withQueryParams(['category' => 'framework'])
+        ->test(MarketTrendsPage::class)
+        ->assertSet('category', 'framework');
 });

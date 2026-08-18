@@ -1,25 +1,37 @@
 <?php
 
 use App\Agents\JobExtractionAgent;
+use App\Agents\ResumeAdaptationAgent;
 use App\Enums\JobPostingStatus;
 use App\Filament\Pages\MarketComparisonPage;
 use App\Filament\Pages\MarketTrendsPage;
 use App\Filament\Pages\ResumePage;
 use App\Filament\Resources\JobPostings\Pages\ListJobPostings;
+use App\Filament\Resources\JobPostings\Pages\ResumeAdaptationPage;
 use App\Filament\Resources\JobPostings\Pages\ReviewJobPosting;
+use App\Filament\Resources\JobPostings\Pages\ViewJobPosting;
 use App\Filament\Widgets\ComparisonSummaryWidget;
 use App\Filament\Widgets\StatsOverviewWidget;
 use App\Filament\Widgets\TopConceptsWidget;
 use App\Filament\Widgets\TrendsChartWidget;
 use App\Jobs\AnalyzeJobPosting;
 use App\Models\JobPosting;
+use App\Models\ResumeAdaptation;
+use App\Models\User;
 use App\Services\JobAnalysisService;
 use App\Services\ResumeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
+use Spatie\LaravelPdf\Facades\Pdf;
+use Spatie\LaravelPdf\PdfBuilder;
 
 uses(RefreshDatabase::class);
+
+// As páginas do painel exigem usuário autenticado (policy + middleware do painel).
+beforeEach(function (): void {
+    $this->actingAs(User::factory()->create());
+});
 
 function longDescription(): string
 {
@@ -50,13 +62,37 @@ it('renderiza a página de revisão com a sugestão', function () {
         ->assertSet('data.role', 'Dev Python');
 });
 
+it('renderiza a descrição original como conteúdo rico na revisão', function () {
+    JobExtractionAgent::fake([[
+        'role' => 'Dev Python',
+        'technologies' => ['React'],
+        'languages' => ['Python'],
+    ]]);
+
+    $posting = JobPosting::factory()->create([
+        'description' => '<p><strong>Vaga</strong> para dev com <em>Laravel</em>.</p>',
+    ]);
+    app(JobAnalysisService::class)->analyze($posting);
+
+    Livewire::test(ReviewJobPosting::class, ['record' => $posting->id])
+        ->assertSuccessful()
+        ->assertSet('data.description', fn (mixed $value): bool => is_array($value)
+            && str_contains((new \Tiptap\Editor)->setContent($value)->getHTML(), '<strong>Vaga</strong>'));
+});
+
 it('renderiza a página do currículo e salva o texto', function () {
     Livewire::test(ResumePage::class)
         ->assertSuccessful()
-        ->set('data.content', 'Currículo com Python e Docker.')
-        ->call('save');
+        ->fillForm([
+            'content' => '<p><strong>Currículo</strong> com Python e Docker.</p>',
+        ])
+        ->call('save')
+        ->assertHasNoFormErrors();
 
-    expect(app(ResumeService::class)->content())->toBe('Currículo com Python e Docker.');
+    $content = app(ResumeService::class)->content();
+
+    expect($content)->toContain('<strong>Currículo</strong>')
+        ->and($content)->toContain('com Python e Docker');
 });
 
 it('renderiza a comparação mercado × currículo com dados do PRD', function () {
@@ -151,9 +187,157 @@ it('ações da listagem mudam o estado da vaga', function () {
         ->and($posting->suggested_data)->not->toBeNull();
 });
 
+it('esconde a análise com IA em vagas confirmadas', function () {
+    $pending = JobPosting::factory()->create(['description' => longDescription()]);
+    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+
+    Livewire::test(ListJobPostings::class)
+        ->assertTableActionVisible('analyze', $pending)
+        ->assertTableActionHidden('analyze', $confirmed);
+});
+
+it('widget de tendências lida com base vazia', function () {
+    $chart = Livewire::test(TrendsChartWidget::class);
+
+    expect($chart->instance()->getData()['labels'])->toBe([])
+        ->and($chart->instance()->getData()['datasets'])->toBe([])
+        ->and($chart->instance()->getDescription())->toContain('Sem dados suficientes');
+});
+
 it('redireciona para a listagem ao abrir a revisão de vaga já confirmada', function () {
     $posting = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
 
     Livewire::test(ReviewJobPosting::class, ['record' => $posting->id])
         ->assertRedirect(ListJobPostings::getUrl());
+});
+
+it('renderiza a página de adequação e gera a adaptação pela ação', function () {
+    ResumeAdaptationAgent::fake([[
+        'adapted_resume' => "Currículo adaptado.\nDestaque para Python.",
+        'changes' => ['Resumo reescrito'],
+        'covered_keywords' => ['Python'],
+        'missing_requirements' => ['React'],
+        'alerts' => [],
+    ]]);
+
+    $posting = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $posting->items()->createMany([
+        ['category' => 'language', 'name' => 'Python', 'source' => 'ai'],
+        ['category' => 'framework', 'name' => 'React', 'source' => 'ai'],
+    ]);
+    app(ResumeService::class)->save('Currículo com Python.');
+
+    Livewire::test(ResumeAdaptationPage::class, ['record' => $posting->id])
+        ->assertSuccessful()
+        ->assertSee('Currículo original')
+        ->callAction('adapt')
+        ->assertSuccessful()
+        ->assertSet('data.adapted_resume', fn (mixed $value): bool => is_array($value)
+            && str_contains((new \Tiptap\Editor)->setContent($value)->getHTML(), 'Currículo adaptado')
+            && str_contains((new \Tiptap\Editor)->setContent($value)->getHTML(), '<br>'))
+        ->assertSee('Currículo adaptado');
+
+    expect(ResumeAdaptation::where('job_posting_id', $posting->id)->exists())->toBeTrue();
+});
+
+it('renderiza o currículo adaptado como conteúdo rico na adequação', function () {
+    $posting = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    ResumeAdaptation::create([
+        'job_posting_id' => $posting->id,
+        'adapted_content' => "Currículo adaptado.\nDestaque para Python.",
+        'changes' => [],
+        'covered_keywords' => [],
+        'missing_requirements' => [],
+        'alerts' => [],
+    ]);
+
+    Livewire::test(ResumeAdaptationPage::class, ['record' => $posting->id])
+        ->assertSuccessful()
+        ->assertSet('data.adapted_resume', fn (mixed $value): bool => is_array($value)
+            && str_contains((new \Tiptap\Editor)->setContent($value)->getHTML(), 'Currículo adaptado')
+            && str_contains((new \Tiptap\Editor)->setContent($value)->getHTML(), '<br>'));
+});
+
+it('renderiza o currículo original como conteúdo rico na adequação', function () {
+    $posting = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    app(ResumeService::class)->save('<p><strong>Currículo</strong> com <em>Laravel</em>.</p>');
+
+    Livewire::test(ResumeAdaptationPage::class, ['record' => $posting->id])
+        ->assertSuccessful()
+        ->assertSet('data.original_resume', fn (mixed $value): bool => is_array($value)
+            && str_contains((new \Tiptap\Editor)->setContent($value)->getHTML(), '<strong>Currículo</strong>'));
+});
+
+it('expõe o link de download do PDF na página', function () {
+    $posting = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    ResumeAdaptation::create([
+        'job_posting_id' => $posting->id,
+        'adapted_content' => 'Currículo adaptado para a vaga.',
+        'changes' => [],
+        'covered_keywords' => [],
+        'missing_requirements' => [],
+        'alerts' => [],
+    ]);
+
+    Livewire::test(ResumeAdaptationPage::class, ['record' => $posting->id])
+        ->assertSuccessful()
+        ->assertActionHasUrl('downloadPdf', route('filament.admin.resume-pdf.download', $posting));
+});
+
+it('baixa o PDF da adaptação pela rota dedicada', function () {
+    Pdf::fake();
+
+    $posting = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    ResumeAdaptation::create([
+        'job_posting_id' => $posting->id,
+        'adapted_content' => 'Currículo adaptado para a vaga.',
+        'changes' => [],
+        'covered_keywords' => [],
+        'missing_requirements' => [],
+        'alerts' => [],
+    ]);
+
+    $this->actingAs(User::factory()->create())
+        ->get(route('filament.admin.resume-pdf.download', $posting))
+        ->assertOk();
+
+    Pdf::assertRespondedWithPdf(fn (PdfBuilder $pdf) => $pdf->viewName === 'pdf.adapted-resume');
+});
+
+it('redireciona para a listagem ao abrir a adequação de vaga não confirmada', function () {
+    $posting = JobPosting::factory()->create(['description' => longDescription()]);
+
+    Livewire::test(ResumeAdaptationPage::class, ['record' => $posting->id])
+        ->assertRedirect(ListJobPostings::getUrl());
+});
+
+it('renderiza a página de view com a descrição rica', function () {
+    $posting = JobPosting::factory()->create([
+        'description' => '<p><strong>Vaga</strong> para dev com <em>Laravel</em>.</p>',
+    ]);
+
+    Livewire::test(ViewJobPosting::class, ['record' => $posting->id])
+        ->assertSuccessful()
+        ->assertSet('data.description', fn (mixed $value): bool => is_array($value)
+            && str_contains((new \Tiptap\Editor)->setContent($value)->getHTML(), '<strong>Vaga</strong>'));
+});
+
+it('redireciona para a listagem ao abrir a view de vaga já enviada para análise', function () {
+    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $failed = JobPosting::factory()->failed()->create(['description' => longDescription()]);
+
+    Livewire::test(ViewJobPosting::class, ['record' => $confirmed->id])
+        ->assertRedirect(ListJobPostings::getUrl());
+
+    Livewire::test(ViewJobPosting::class, ['record' => $failed->id])
+        ->assertRedirect(ListJobPostings::getUrl());
+});
+
+it('mostra a ação ver somente em vagas pendentes', function () {
+    $pending = JobPosting::factory()->create(['description' => longDescription()]);
+    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+
+    Livewire::test(ListJobPostings::class)
+        ->assertTableActionVisible('view', $pending)
+        ->assertTableActionHidden('view', $confirmed);
 });

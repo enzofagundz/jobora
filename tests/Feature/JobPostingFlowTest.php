@@ -7,6 +7,7 @@ use App\Filament\Resources\JobPostings\Pages\CreateJobPosting;
 use App\Filament\Resources\JobPostings\Pages\ReviewJobPosting;
 use App\Jobs\AnalyzeJobPosting;
 use App\Models\JobPosting;
+use App\Models\User;
 use App\Services\JobAnalysisService;
 use App\Services\MarketAnalysisService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -14,6 +15,11 @@ use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
+
+// As páginas do painel exigem usuário autenticado (policy + middleware do painel).
+beforeEach(function (): void {
+    $this->actingAs(User::factory()->create());
+});
 
 function flowDescription(): string
 {
@@ -182,4 +188,21 @@ it('vaga pendente/aguardando revisão não entra nas análises', function () {
 
     expect($frequencies)->toHaveCount(1)
         ->and($frequencies[0]['name'])->toBe('PHP');
+});
+
+it('persiste a descrição rica como HTML vinda do editor', function () {
+    Queue::fake();
+
+    Livewire::test(CreateJobPosting::class)
+        ->fillForm([
+            'description' => '<p><strong>Vaga para desenvolvedor PHP</strong> com Laravel.</p>',
+            'source_url' => null,
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    $stored = JobPosting::query()->sole()->description;
+
+    expect($stored)->toContain('<strong>Vaga para desenvolvedor PHP</strong>')
+        ->and($stored)->toContain('com Laravel');
 });

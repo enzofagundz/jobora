@@ -31,6 +31,14 @@ it('is case and whitespace insensitive', function () {
         ->and($concepts)->not->toContain('AWS');
 });
 
+it('detects concepts inside rich HTML content', function () {
+    $content = '<p><strong>Experiência</strong> com <em>Laravel</em> e <u>PostgreSQL</u>.</p><ul><li>Docker</li></ul>';
+
+    expect(analyzer()->conceptsIn($content))
+        ->toContain('Laravel', 'PostgreSQL', 'Docker')
+        ->not->toContain('Kubernetes');
+});
+
 it('returns an empty set for a blank resume', function () {
     expect(analyzer()->conceptsIn(null))->toBe([])
         ->and(analyzer()->conceptsIn(''))->toBe([]);
