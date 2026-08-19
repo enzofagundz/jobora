@@ -1,6 +1,9 @@
 <?php
 
+use App\Enums\JobCaptureTriageResult;
+use App\Enums\JobCaptureTriageStatus;
 use App\Enums\JobPostingStatus;
+use App\Filament\Resources\JobCaptures\Pages\ListJobCaptures;
 use App\Filament\Resources\JobCaptures\Pages\ViewJobCapture;
 use App\Jobs\AnalyzeJobPosting;
 use App\Models\JobCapture;
@@ -185,6 +188,61 @@ it('esconde a ação de promoção para captura já promovida', function () {
         ->assertActionHidden('promote');
 
     expect(JobPosting::query()->count())->toBe(1);
+});
+
+it('renderiza a página de view com o conteúdo da captura', function () {
+    $capture = JobCapture::factory()->create([
+        'description' => 'Vaga para desenvolvedor PHP com Laravel e PostgreSQL.',
+        'company' => 'Acme Ltda',
+        'location' => 'Remoto',
+        'triage_status' => JobCaptureTriageStatus::Completed,
+        'triage_result' => JobCaptureTriageResult::Relevant,
+        'triage_reason' => 'Vaga de Laravel; atende às preferências.',
+    ]);
+
+    Livewire::test(ViewJobCapture::class, ['record' => $capture->id])
+        ->assertSuccessful()
+        ->assertSet('data.description', $capture->description)
+        ->assertSet('data.company', 'Acme Ltda')
+        ->assertSet('data.location', 'Remoto')
+        ->assertSet('data.triage_status', 'Triagem concluída')
+        ->assertSet('data.triage_result', 'Relevante')
+        ->assertSet('data.triage_reason', 'Vaga de Laravel; atende às preferências.');
+});
+
+it('exclui captura pela ação da tabela mantendo a vaga promovida', function () {
+    $posting = JobPosting::factory()->create();
+    $capture = JobCapture::factory()->create(['job_posting_id' => $posting->id]);
+
+    Livewire::test(ListJobCaptures::class)
+        ->callTableAction('delete', $capture);
+
+    expect(JobCapture::query()->count())->toBe(0)
+        ->and(JobPosting::query()->count())->toBe(1);
+});
+
+it('exclui capturas selecionadas em lote', function () {
+    $c1 = JobCapture::factory()->create();
+    $c2 = JobCapture::factory()->create();
+
+    Livewire::test(ListJobCaptures::class)
+        ->callTableBulkAction('delete', [$c1, $c2]);
+
+    expect(JobCapture::query()->count())->toBe(0);
+});
+
+it('filtra capturas pela situação promovida/pendente', function () {
+    $posting = JobPosting::factory()->create();
+    JobCapture::factory()->create(['job_posting_id' => $posting->id, 'description' => 'Vaga promovida única.']);
+    JobCapture::factory()->create(['description' => 'Vaga pendente única.']);
+
+    Livewire::test(ListJobCaptures::class)
+        ->filterTable('situacao', 'promoted')
+        ->assertSee('Vaga promovida única.')
+        ->assertDontSee('Vaga pendente única.')
+        ->filterTable('situacao', 'pending')
+        ->assertSee('Vaga pendente única.')
+        ->assertDontSee('Vaga promovida única.');
 });
 
 it('impede no banco dois registros com mesmo source e external_id', function () {

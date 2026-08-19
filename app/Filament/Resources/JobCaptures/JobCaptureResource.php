@@ -4,10 +4,12 @@ namespace App\Filament\Resources\JobCaptures;
 
 use App\Filament\Resources\JobCaptures\Pages\ListJobCaptures;
 use App\Filament\Resources\JobCaptures\Pages\ViewJobCapture;
+use App\Filament\Resources\JobCaptures\Schemas\JobCaptureForm;
 use App\Filament\Resources\JobCaptures\Tables\JobCapturesTable;
 use App\Models\JobCapture;
 use BackedEnum;
 use Filament\Resources\Resource;
+use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 
@@ -22,6 +24,11 @@ class JobCaptureResource extends Resource
     protected static ?string $modelLabel = 'captura';
 
     protected static ?string $pluralModelLabel = 'capturas';
+
+    public static function form(Schema $schema): Schema
+    {
+        return JobCaptureForm::configure($schema);
+    }
 
     public static function table(Table $table): Table
     {

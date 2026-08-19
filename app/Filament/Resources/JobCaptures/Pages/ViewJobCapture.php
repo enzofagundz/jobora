@@ -2,16 +2,14 @@
 
 namespace App\Filament\Resources\JobCaptures\Pages;
 
-use App\Enums\JobPostingStatus;
 use App\Filament\Resources\JobCaptures\JobCaptureResource;
 use App\Filament\Resources\JobPostings\JobPostingResource;
-use App\Jobs\AnalyzeJobPosting;
-use App\Models\JobPosting;
-use App\Services\JobAnalysisService;
+use App\Services\JobPromotionService;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Support\Icons\Heroicon;
+use LogicException;
 
 class ViewJobCapture extends ViewRecord
 {
@@ -25,28 +23,16 @@ class ViewJobCapture extends ViewRecord
                 ->icon(Heroicon::OutlinedPlusCircle)
                 ->visible(fn (): bool => $this->record->job_posting_id === null)
                 ->action(function (): void {
-                    $capture = $this->record;
-
-                    if (mb_strlen((string) $capture->description) < JobAnalysisService::MIN_DESCRIPTION_LENGTH) {
+                    try {
+                        $posting = app(JobPromotionService::class)->promote($this->record);
+                    } catch (LogicException $e) {
                         Notification::make()
                             ->danger()
-                            ->title('Descrição insuficiente para criar vaga')
-                            ->body('Mínimo de '.JobAnalysisService::MIN_DESCRIPTION_LENGTH.' caracteres.')
+                            ->title($e->getMessage())
                             ->send();
 
                         return;
                     }
-
-                    $posting = JobPosting::create([
-                        'description' => $capture->description,
-                        'source_url' => $capture->url,
-                        'collected_at' => $capture->captured_at ?? now(),
-                        'status' => JobPostingStatus::Pending,
-                    ]);
-
-                    AnalyzeJobPosting::dispatch($posting);
-
-                    $capture->update(['job_posting_id' => $posting->id]);
 
                     Notification::make()
                         ->success()
