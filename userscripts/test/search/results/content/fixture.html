@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Fixture — Resultados de conteúdo LinkedIn (simulação)</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; background: #f3f2ef; color: #191919; }
+  .app-bar { background: #fff; border-bottom: 1px solid #e0dfdc; padding: 12px 24px; font-weight: 600; }
+  .feed { max-width: 720px; margin: 24px auto; display: flex; flex-direction: column; gap: 16px; }
+  [role="listitem"] { background: #fff; border: 1px solid #e0dfdc; border-radius: 8px; padding: 16px; }
+  .author { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+  .author img { width: 40px; height: 40px; border-radius: 50%; }
+  .hashtag { color: #0a66c2; }
+  .more { color: #0a66c2; background: none; border: none; cursor: pointer; padding: 0; font-size: 14px; }
+</style>
+</head>
+<body>
+  <div class="app-bar">LinkedIn — Resultados de conteúdo (simulação)</div>
+
+  <div class="feed">
+
+    <!-- Card A: autor com imagem, urn 111, texto com quebras, link e hashtag -->
+    <article role="listitem">
+      <div class="author">
+        <a href="https://www.linkedin.com/in/maria?trk=tracking">
+          <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" alt="Maria Silva">
+        </a>
+        <a href="https://www.linkedin.com/in/maria?trk=tracking">Maria Silva</a>
+      </div>
+      <div data-testid="expandable-text-box">
+        <p>Vaga para desenvolvedor PHP sênior.</p>
+        <br>
+        <p>Requisitos: Laravel, PostgreSQL.</p>
+        <a href="https://exemplo.com/vaga">https://exemplo.com/vaga</a>
+        <span class="hashtag">#vagas</span>
+      </div>
+      <a href="https://www.linkedin.com/feed/update/urn:li:activity:111?lipi=abc">Ver publicação</a>
+    </article>
+
+    <!-- Card B: autor João Souza, urn 222, texto truncado com "ver mais" -->
+    <article role="listitem">
+      <div class="author">
+        <a href="https://www.linkedin.com/in/joao">João Souza</a>
+      </div>
+      <div data-testid="expandable-text-box">
+        <p>Oportunidade para QA com foco em automação.</p>
+        <span style="display:none" id="full-text-b"> Requisitos: Cypress, Playwright e CI/CD.</span>
+        <button class="more" type="button" aria-expanded="false" aria-label="Ver mais">…ver mais</button>
+      </div>
+      <a href="https://www.linkedin.com/feed/update/urn:li:activity:222?lipi=def">Ver publicação</a>
+    </article>
+
+    <!-- Card C: mesma urn 111 do card A → duplicata de sessão -->
+    <article role="listitem">
+      <div class="author">
+        <a href="https://www.linkedin.com/in/maria">Maria Silva</a>
+      </div>
+      <div data-testid="expandable-text-box">
+        <p>Vaga PHP sênior — inscrições abertas (postagem repetida).</p>
+      </div>
+      <a href="https://www.linkedin.com/feed/update/urn:li:activity:111?lipi=ghi">Ver publicação</a>
+    </article>
+
+  </div>
+
+  <script>
+    // Revela o texto truncado ao clicar em "ver mais" (simula o expand do LinkedIn).
+    document.querySelectorAll('button.more').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        btn.previousElementSibling.style.display = 'inline';
+        btn.setAttribute('aria-expanded', 'true');
+        btn.style.display = 'none';
+      });
+    });
+  </script>
+</body>
+</html>
