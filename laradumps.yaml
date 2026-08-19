@@ -1,0 +1,69 @@
+app:
+  dispatcher: curl
+  primary_host: 127.0.0.1
+  secondary_host: host.docker.internal
+  port: 9191
+  workdir: /var/www/html/
+  project_path: /home/enzo/Projects/vagas/
+  wsl_config: wsl+Ubuntu/
+config:
+  sleep: 0
+  macos_auto_launch: false
+  grouped_dumps: false
+  color_in_screen: false
+observers:
+  auto_invoke_app: false
+  enabled_in_testing: false
+  dump: false
+  original_dump: true
+  queries: false
+  slow_queries: false
+  mail: false
+  logs: true
+  http: false
+  jobs: false
+  commands: false
+  scheduled_commands: false
+  gate: false
+  cache: false
+  brain: false
+  profiler: false
+xdebug:
+  client_host: 0.0.0.0
+  client_port: 9003
+code_snippet:
+  above: 7
+  below: 3
+logs:
+  info: true
+  warning: true
+  emergency: true
+  alert: false
+  debug: true
+  error: true
+  critical: true
+  notice: true
+  vendor: true
+  deprecated_message: true
+  boost_info: false
+slow_queries:
+  threshold_in_ms: 500
+extra:
+  context: false
+queries:
+  explain: false
+profiler:
+  auto_middleware: false
+  max_entries: 300
+  xhprof: true
+  capture:
+    app: true
+    events: true
+    queries: true
+    eloquent: true
+    views: true
+    controller: true
+    http: true
+    cache: true
+    jobs: true
+    method: true
