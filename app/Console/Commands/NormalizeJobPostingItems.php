@@ -26,7 +26,9 @@ class NormalizeJobPostingItems extends Command
 
     private int $removed = 0;
 
-    private int $orphans = 0;
+    private int $orphansFound = 0;
+
+    private int $orphansRemoved = 0;
 
     private int $skippedAmbiguous = 0;
 
@@ -44,7 +46,7 @@ class NormalizeJobPostingItems extends Command
             ->whereHas('jobPosting', fn ($query) => $query->where('status', JobPostingStatus::Confirmed))
             ->count();
 
-        $this->collectOrphans();
+        $this->handleOrphans();
 
         JobPosting::query()
             ->where('status', JobPostingStatus::Confirmed)
@@ -142,24 +144,34 @@ class NormalizeJobPostingItems extends Command
         }
     }
 
-    private function collectOrphans(): void
+    private function handleOrphans(): void
     {
         $orphanIds = JobPostingItem::query()
             ->whereDoesntHave('jobPosting')
             ->orderBy('id')
             ->pluck('id');
 
-        $this->orphans = $orphanIds->count();
+        $this->orphansFound = $orphanIds->count();
 
-        if ($this->orphans === 0) {
+        if ($this->orphansFound === 0) {
             return;
         }
 
         $this->components->warn(sprintf(
-            'Ignorados %d itens órfãos (sem vaga correspondente): %s',
-            $this->orphans,
+            'Encontrados %d itens órfãos (sem vaga correspondente): %s',
+            $this->orphansFound,
             $orphanIds->implode(', '),
         ));
+
+        if ($this->option('dry-run')) {
+            return;
+        }
+
+        DB::transaction(function () use ($orphanIds): void {
+            JobPostingItem::query()->whereIn('id', $orphanIds)->delete();
+        });
+
+        $this->orphansRemoved = $this->orphansFound;
     }
 
     private function renderReport(): void
@@ -177,7 +189,8 @@ class NormalizeJobPostingItems extends Command
         $this->line('  Registros removidos: '.$this->removed);
         $this->line('  Referências atualizadas: 0'); // ponytail: nenhuma tabela referencia job_posting_items.id
         $this->line('  Grupos ignorados por ambiguidade: '.$this->skippedAmbiguous);
-        $this->line('  Itens órfãos ignorados: '.$this->orphans);
+        $this->line('  Itens órfãos encontrados: '.$this->orphansFound);
+        $this->line('  Itens órfãos removidos: '.$this->orphansRemoved);
         $this->line('  Erros: '.count($this->errors));
 
         foreach ($this->errors as $error) {

@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\DB;
 
 uses(DatabaseMigrations::class);
 
-it('ignora itens órfãos sem vaga correspondente', function () {
+it('remove itens órfãos sem vaga correspondente na execução normal', function () {
     DB::statement('PRAGMA foreign_keys = OFF');
     $orphan = JobPostingItem::create([
         'job_posting_id' => 999999,
@@ -21,6 +21,20 @@ it('ignora itens órfãos sem vaga correspondente', function () {
 
     $this->artisan('job-posting-items:normalize')->assertSuccessful();
 
-    expect(JobPostingItem::find($orphan->id))->not->toBeNull()
+    expect(JobPostingItem::find($orphan->id))->toBeNull()
         ->and($posting->refresh()->items()->count())->toBe(1);
+});
+
+it('preserva itens órfãos sem vaga correspondente no dry-run', function () {
+    DB::statement('PRAGMA foreign_keys = OFF');
+    $orphan = JobPostingItem::create([
+        'job_posting_id' => 999999,
+        'category' => 'skill',
+        'name' => 'laravel',
+    ]);
+    DB::statement('PRAGMA foreign_keys = ON');
+
+    $this->artisan('job-posting-items:normalize', ['--dry-run' => true])->assertSuccessful();
+
+    expect(JobPostingItem::find($orphan->id))->not->toBeNull();
 });
