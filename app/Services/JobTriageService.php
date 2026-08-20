@@ -69,6 +69,8 @@ final class JobTriageService
     {
         $started = microtime(true);
         $ids = $captures->pluck('id')->all();
+        $inputChars = 0;
+        $usage = null;
 
         try {
             $criteria = $user?->screeningPreference;
@@ -76,19 +78,20 @@ final class JobTriageService
             $payload = [
                 'captures' => $captures->map(fn (JobCapture $c) => [
                     'id' => $c->id,
-                    'source' => $c->source,
-                    'external_id' => $c->external_id,
                     'title' => $c->title,
                     'description' => $c->description,
                     'company' => $c->company,
                     'location' => $c->location,
-                    'url' => $c->url,
                 ])->values()->all(),
                 'preferences' => $criteria?->preferences ?? [],
                 'rejections' => $criteria?->rejections ?? [],
             ];
 
-            $response = $this->agent->prompt(json_encode($payload, JSON_UNESCAPED_UNICODE));
+            $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
+            $inputChars = mb_strlen($jsonPayload);
+
+            $response = $this->agent->prompt($jsonPayload);
+            $usage = $response->usage ?? null;
 
             $data = json_decode($response->text, true);
 
@@ -136,12 +139,15 @@ final class JobTriageService
                 ]);
             }
 
-            Log::channel('ai')->info('Job captures triaged.', [
+            Log::channel('ai')->info('Job captures triaged.', array_merge([
                 'job_capture_ids' => $ids,
+                'operation' => 'job_triage',
+                'provider' => $this->agent->provider(),
                 'model' => $this->agent->model(),
+                'input_chars' => $inputChars,
                 'success' => true,
                 'latency_ms' => (int) round((microtime(true) - $started) * 1000),
-            ]);
+            ], $this->extractUsageData($usage)));
         } catch (Throwable $e) {
             foreach ($captures as $capture) {
                 $capture->update([
@@ -152,12 +158,50 @@ final class JobTriageService
                 ]);
             }
 
-            Log::channel('ai')->error('Job captures triage failed.', [
+            Log::channel('ai')->error('Job captures triage failed.', array_merge([
                 'job_capture_ids' => $ids,
+                'operation' => 'job_triage',
+                'provider' => $this->agent->provider(),
                 'model' => $this->agent->model(),
+                'input_chars' => $inputChars,
                 'success' => false,
+                'latency_ms' => (int) round((microtime(true) - $started) * 1000),
                 'error' => $e->getMessage(),
-            ]);
+            ], $this->extractUsageData($usage)));
+        }
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function extractUsageData(mixed $usage): array
+    {
+        try {
+            if ($usage === null) {
+                return [
+                    'prompt_tokens' => 0,
+                    'completion_tokens' => 0,
+                    'cache_write_input_tokens' => 0,
+                    'cache_read_input_tokens' => 0,
+                    'reasoning_tokens' => 0,
+                ];
+            }
+
+            return [
+                'prompt_tokens' => (int) ($usage->promptTokens ?? $usage->prompt_tokens ?? 0),
+                'completion_tokens' => (int) ($usage->completionTokens ?? $usage->completion_tokens ?? 0),
+                'cache_write_input_tokens' => (int) ($usage->cacheWriteInputTokens ?? $usage->cache_write_input_tokens ?? 0),
+                'cache_read_input_tokens' => (int) ($usage->cacheReadInputTokens ?? $usage->cache_read_input_tokens ?? 0),
+                'reasoning_tokens' => (int) ($usage->reasoningTokens ?? $usage->reasoning_tokens ?? 0),
+            ];
+        } catch (Throwable) {
+            return [
+                'prompt_tokens' => 0,
+                'completion_tokens' => 0,
+                'cache_write_input_tokens' => 0,
+                'cache_read_input_tokens' => 0,
+                'reasoning_tokens' => 0,
+            ];
         }
     }
 }
