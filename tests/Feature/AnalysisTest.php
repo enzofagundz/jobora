@@ -20,22 +20,22 @@ function confirmedPosting(array $items): JobPosting
 }
 
 it('calcula frequências absolutas por (categoria, nome) entre vagas confirmadas', function () {
-    confirmedPosting([['language', 'Python'], ['framework', 'React']]);
-    confirmedPosting([['language', 'Python']]);
-    confirmedPosting([['framework', 'React']]);
+    confirmedPosting([['skill', 'Python'], ['skill', 'React']]);
+    confirmedPosting([['skill', 'Python']]);
+    confirmedPosting([['skill', 'React']]);
 
     $frequencies = app(MarketAnalysisService::class)->frequencies();
 
     expect($frequencies)->toBe([
-        ['category' => 'language', 'name' => 'Python', 'total' => 2],
-        ['category' => 'framework', 'name' => 'React', 'total' => 2],
+        ['category' => 'skill', 'name' => 'Python', 'total' => 2],
+        ['category' => 'skill', 'name' => 'React', 'total' => 2],
     ]);
 });
 
 it('calcula frequências relativas ao total de vagas confirmadas', function () {
-    confirmedPosting([['language', 'Python'], ['framework', 'React']]);
-    confirmedPosting([['language', 'Python']]);
-    confirmedPosting([['framework', 'React']]);
+    confirmedPosting([['skill', 'Python'], ['skill', 'React']]);
+    confirmedPosting([['skill', 'Python']]);
+    confirmedPosting([['skill', 'React']]);
 
     $frequencies = app(MarketAnalysisService::class)->relativeFrequencies();
 
@@ -45,18 +45,18 @@ it('calcula frequências relativas ao total de vagas confirmadas', function () {
 });
 
 it('filtra por categoria', function () {
-    confirmedPosting([['language', 'Python']]);
-    confirmedPosting([['framework', 'React']]);
+    confirmedPosting([['skill', 'Python']]);
+    confirmedPosting([['tool', 'React']]);
 
-    $frequencies = app(MarketAnalysisService::class)->frequencies(ConceptCategory::Language);
+    $frequencies = app(MarketAnalysisService::class)->frequencies(ConceptCategory::Skill);
 
     expect($frequencies)->toHaveCount(1)
         ->and($frequencies[0]['name'])->toBe('Python');
 });
 
 it('retorna ranking top N ordenado por frequência', function () {
-    confirmedPosting([['language', 'Python']]);
-    confirmedPosting([['language', 'Python'], ['language', 'PHP']]);
+    confirmedPosting([['skill', 'Python']]);
+    confirmedPosting([['skill', 'Python'], ['skill', 'PHP']]);
 
     $top = app(MarketAnalysisService::class)->top(1);
 
@@ -66,15 +66,15 @@ it('retorna ranking top N ordenado por frequência', function () {
 });
 
 it('calcula combinações recorrentes na mesma categoria', function () {
-    confirmedPosting([['framework', 'Laravel'], ['framework', 'Vue.js']]);
-    confirmedPosting([['framework', 'Laravel'], ['framework', 'Vue.js']]);
-    confirmedPosting([['framework', 'Laravel'], ['framework', 'Symfony']]);
+    confirmedPosting([['skill', 'Laravel'], ['skill', 'Vue.js']]);
+    confirmedPosting([['skill', 'Laravel'], ['skill', 'Vue.js']]);
+    confirmedPosting([['skill', 'Laravel'], ['skill', 'Symfony']]);
 
     $pairs = app(MarketAnalysisService::class)->pairsByCategory();
 
     expect($pairs)->toHaveCount(2)
         ->and($pairs[0])->toBe([
-            'category' => 'framework',
+            'category' => 'skill',
             'name_a' => 'Laravel',
             'name_b' => 'Vue.js',
             'total' => 2,
@@ -84,9 +84,9 @@ it('calcula combinações recorrentes na mesma categoria', function () {
 });
 
 it('não duplica o mesmo conceito dentro de uma vaga', function () {
-    $posting = confirmedPosting([['language', 'Python']]);
+    $posting = confirmedPosting([['skill', 'Python']]);
 
     // unique (job_posting_id, category, name) — inserir duplicado falha.
-    expect(fn () => $posting->items()->create(['category' => 'language', 'name' => 'Python', 'source' => 'ai']))
+    expect(fn () => $posting->items()->create(['category' => 'skill', 'name' => 'Python', 'source' => 'ai']))
         ->toThrow(QueryException::class);
 });

@@ -21,7 +21,7 @@ function postingAt(Carbon $date, array $items): JobPosting
     $posting = JobPosting::factory()->confirmed()->create(['collected_at' => $date]);
 
     foreach ($items as $name) {
-        $posting->items()->create(['category' => 'language', 'name' => $name, 'source' => 'ai']);
+        $posting->items()->create(['category' => 'skill', 'name' => $name, 'source' => 'ai']);
     }
 
     return $posting;
@@ -51,10 +51,10 @@ it('lista meses distintos com vagas confirmadas', function () {
 
 it('filtra série mensal por categoria', function () {
     $posting = JobPosting::factory()->confirmed()->create(['collected_at' => Carbon::create(2026, 5, 10)]);
-    $posting->items()->create(['category' => 'language', 'name' => 'Python', 'source' => 'ai']);
-    $posting->items()->create(['category' => 'framework', 'name' => 'React', 'source' => 'ai']);
+    $posting->items()->create(['category' => 'skill', 'name' => 'Python', 'source' => 'ai']);
+    $posting->items()->create(['category' => 'tool', 'name' => 'React', 'source' => 'ai']);
 
-    $series = app(MarketAnalysisService::class)->monthlySeries(ConceptCategory::Language);
+    $series = app(MarketAnalysisService::class)->monthlySeries(ConceptCategory::Skill);
 
     expect($series)->toHaveCount(1)
         ->and($series[0]['name'])->toBe('Python');
@@ -99,7 +99,7 @@ it('classifica tendência subiu/desceu/estável entre os dois últimos trimestre
 it('persiste a categoria selecionada na URL (deep-link)', function () {
     postingAt(Carbon::now()->subMonths(2), ['Python']);
 
-    Livewire::withQueryParams(['category' => 'framework'])
+    Livewire::withQueryParams(['category' => 'skill'])
         ->test(MarketTrendsPage::class)
-        ->assertSet('category', 'framework');
+        ->assertSet('category', 'skill');
 });

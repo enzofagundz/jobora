@@ -13,7 +13,7 @@ function confirmedWithItems(array $items): JobPosting
     $posting = JobPosting::factory()->confirmed()->create();
 
     foreach ($items as $name) {
-        $posting->items()->create(['category' => 'language', 'name' => $name, 'source' => 'ai']);
+        $posting->items()->create(['category' => 'skill', 'name' => $name, 'source' => 'ai']);
     }
 
     return $posting;

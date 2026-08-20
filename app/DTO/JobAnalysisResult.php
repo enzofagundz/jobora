@@ -129,14 +129,9 @@ final class JobAnalysisResult
     private static function schemaKey(ConceptCategory $category): string
     {
         return match ($category) {
-            ConceptCategory::Technology => 'technologies',
-            ConceptCategory::Language => 'languages',
-            ConceptCategory::Framework => 'frameworks',
-            ConceptCategory::Database => 'databases',
-            ConceptCategory::Tool => 'tools',
-            ConceptCategory::Cloud => 'cloud',
-            ConceptCategory::Methodology => 'methodologies',
             ConceptCategory::Skill => 'skills',
+            ConceptCategory::Tool => 'tools',
+            ConceptCategory::Methodology => 'methodologies',
             ConceptCategory::Requirement => 'requirements',
             ConceptCategory::Experience => 'experience',
         };

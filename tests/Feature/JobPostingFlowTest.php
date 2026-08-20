@@ -63,8 +63,7 @@ it('analisa e confirma a vaga pela página de revisão', function () {
     JobExtractionAgent::fake([[
         'role' => 'Desenvolvedor PHP',
         'company' => 'Acme',
-        'technologies' => ['Laravel', 'PostgreSQL'],
-        'languages' => ['PHP'],
+        'skills' => ['Laravel', 'PostgreSQL', 'PHP'],
     ]]);
 
     $posting = JobPosting::factory()->create(['description' => flowDescription()]);
@@ -78,9 +77,9 @@ it('analisa e confirma a vaga pela página de revisão', function () {
     Livewire::test(ListJobPostings::class)->callTableAction('review', $posting, data: [
         'role' => 'Desenvolvedor PHP Sênior',
         'items' => [
-            ['category' => 'technology', 'name' => 'Laravel'],
-            ['category' => 'technology', 'name' => 'PostgreSQL'],
-            ['category' => 'language', 'name' => 'PHP'],
+            ['category' => 'skill', 'name' => 'Laravel'],
+            ['category' => 'skill', 'name' => 'PostgreSQL'],
+            ['category' => 'skill', 'name' => 'PHP'],
             ['category' => 'methodology', 'name' => 'Scrum'],
         ],
     ]);
@@ -96,16 +95,16 @@ it('analisa e confirma a vaga pela página de revisão', function () {
 
     $byName = $posting->items()->get()->keyBy(fn ($item) => $item->category->value.'|'.$item->name);
 
-    expect($byName['language|PHP']->source)->toBe(ItemSource::Ai)
-        ->and($byName['technology|Laravel']->source)->toBe(ItemSource::Ai)
-        ->and($byName['technology|PostgreSQL']->source)->toBe(ItemSource::Ai)
+    expect($byName['skill|PHP']->source)->toBe(ItemSource::Ai)
+        ->and($byName['skill|Laravel']->source)->toBe(ItemSource::Ai)
+        ->and($byName['skill|PostgreSQL']->source)->toBe(ItemSource::Ai)
         ->and($byName['methodology|Scrum']->source)->toBe(ItemSource::User);
 });
 
 it('persiste correção manual após recarregar e marca origem como user', function () {
     JobExtractionAgent::fake([[
         'role' => 'Dev',
-        'technologies' => ['postgres'],
+        'skills' => ['postgres'],
     ]]);
 
     $posting = JobPosting::factory()->create(['description' => flowDescription()]);
@@ -113,15 +112,15 @@ it('persiste correção manual após recarregar e marca origem como user', funct
 
     Livewire::test(ListJobPostings::class)->callTableAction('review', $posting, data: [
         'items' => [
-            ['category' => 'database', 'name' => 'PostgreSQL'],
+            ['category' => 'tool', 'name' => 'PostgreSQL'],
         ],
     ]);
 
     $item = $posting->refresh()->items()->first();
 
-    // A IA sugeriu 'postgres' (normalizado para 'PostgreSQL'); como a sugestão
-    // original foi em 'technology', a correção manual para 'database' marca user.
-    expect($item->category->value)->toBe('database')
+    // A IA sugeriu 'postgres' (normalizado para 'PostgreSQL') em 'skill'; como a
+    // correção manual para 'tool' difere da sugestão, a origem vira user.
+    expect($item->category->value)->toBe('tool')
         ->and($item->name)->toBe('PostgreSQL')
         ->and($item->source)->toBe(ItemSource::User);
 });
@@ -129,7 +128,7 @@ it('persiste correção manual após recarregar e marca origem como user', funct
 it('descarta a sugestão e volta para pending', function () {
     JobExtractionAgent::fake([[
         'role' => 'Dev',
-        'technologies' => ['Laravel'],
+        'skills' => ['Laravel'],
     ]]);
 
     $posting = JobPosting::factory()->create(['description' => flowDescription()]);
@@ -155,7 +154,7 @@ it('falha, registra error_message e permite nova análise com sucesso', function
             throw new RuntimeException('Serviço indisponível');
         }
 
-        return ['role' => 'Dev', 'technologies' => ['PHP']];
+        return ['role' => 'Dev', 'skills' => ['PHP']];
     });
 
     $posting = JobPosting::factory()->create(['description' => flowDescription()]);
@@ -173,15 +172,15 @@ it('falha, registra error_message e permite nova análise com sucesso', function
     $posting->refresh();
     expect($posting->status)->toBe(JobPostingStatus::NeedsReview)
         ->and($posting->error_message)->toBeNull()
-        ->and($posting->suggested_data['items'])->toContain(['category' => 'technology', 'name' => 'PHP']);
+        ->and($posting->suggested_data['items'])->toContain(['category' => 'skill', 'name' => 'PHP']);
 });
 
 it('vaga pendente/aguardando revisão não entra nas análises', function () {
     JobPosting::factory()->confirmed()->create(['description' => flowDescription()])
-        ->items()->create(['category' => 'language', 'name' => 'PHP', 'source' => 'ai']);
+        ->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
 
     JobPosting::factory()->create(['description' => flowDescription()])
-        ->items()->create(['category' => 'language', 'name' => 'Python', 'source' => 'ai']);
+        ->items()->create(['category' => 'skill', 'name' => 'Python', 'source' => 'ai']);
 
     $frequencies = app(MarketAnalysisService::class)->frequencies();
 

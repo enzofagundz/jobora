@@ -22,8 +22,7 @@ it('moves a pending posting to needs_review with the suggestion stored', functio
     JobExtractionAgent::fake([[
         'role' => 'Desenvolvedor PHP',
         'company' => null,
-        'technologies' => ['Laravel', 'postgres'],
-        'languages' => ['PHP'],
+        'skills' => ['Laravel', 'postgres', 'PHP'],
     ]]);
 
     $posting = postingWithDescription();
@@ -36,9 +35,9 @@ it('moves a pending posting to needs_review with the suggestion stored', functio
         ->and($posting->role)->toBe('Desenvolvedor PHP')
         ->and($posting->company)->toBeNull()
         ->and($posting->error_message)->toBeNull()
-        ->and($posting->suggested_data['items'])->toContain(['category' => 'technology', 'name' => 'Laravel'])
-        ->and($posting->suggested_data['items'])->toContain(['category' => 'technology', 'name' => 'PostgreSQL'])
-        ->and($posting->suggested_data['items'])->toContain(['category' => 'language', 'name' => 'PHP']);
+        ->and($posting->suggested_data['items'])->toContain(['category' => 'skill', 'name' => 'Laravel'])
+        ->and($posting->suggested_data['items'])->toContain(['category' => 'skill', 'name' => 'PostgreSQL'])
+        ->and($posting->suggested_data['items'])->toContain(['category' => 'skill', 'name' => 'PHP']);
 });
 
 it('marks the posting failed when the agent throws', function () {
@@ -75,7 +74,7 @@ it('keeps the posting pending on a transient provider error', function () {
 });
 
 it('marks the posting failed on structurally invalid output', function () {
-    JobExtractionAgent::fake([['technologies' => 'not-a-list']]);
+    JobExtractionAgent::fake([['skills' => 'not-a-list']]);
 
     $posting = postingWithDescription();
 
@@ -123,7 +122,7 @@ it('retries a failed posting', function () {
             throw new RuntimeException('boom');
         }
 
-        return ['role' => 'Dev', 'technologies' => ['PHP']];
+        return ['role' => 'Dev', 'skills' => ['PHP']];
     });
 
     $posting = postingWithDescription();

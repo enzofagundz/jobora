@@ -16,8 +16,8 @@ function adaptationPosting(): JobPosting
         'description' => 'Vaga para desenvolvedor Python com React. Requisitos: Docker e AWS.',
     ]);
     $posting->items()->createMany([
-        ['category' => 'language', 'name' => 'Python', 'source' => 'ai'],
-        ['category' => 'framework', 'name' => 'React', 'source' => 'ai'],
+        ['category' => 'skill', 'name' => 'Python', 'source' => 'ai'],
+        ['category' => 'skill', 'name' => 'React', 'source' => 'ai'],
     ]);
 
     return $posting;

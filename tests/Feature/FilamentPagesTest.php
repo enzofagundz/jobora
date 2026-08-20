@@ -24,6 +24,7 @@ use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 use Spatie\LaravelPdf\Facades\Pdf;
 use Spatie\LaravelPdf\PdfBuilder;
+use Tiptap\Editor;
 
 uses(RefreshDatabase::class);
 
@@ -48,8 +49,7 @@ it('renderiza a listagem de vagas', function () {
 it('abre o modal de revisão com a sugestão', function () {
     JobExtractionAgent::fake([[
         'role' => 'Dev Python',
-        'technologies' => ['React'],
-        'languages' => ['Python'],
+        'skills' => ['React', 'Python'],
     ]]);
 
     $posting = JobPosting::factory()->create(['description' => longDescription()]);
@@ -64,8 +64,7 @@ it('abre o modal de revisão com a sugestão', function () {
 it('renderiza a descrição original como conteúdo rico na revisão', function () {
     JobExtractionAgent::fake([[
         'role' => 'Dev Python',
-        'technologies' => ['React'],
-        'languages' => ['Python'],
+        'skills' => ['React', 'Python'],
     ]]);
 
     $posting = JobPosting::factory()->create([
@@ -76,7 +75,7 @@ it('renderiza a descrição original como conteúdo rico na revisão', function 
     Livewire::test(ListJobPostings::class)
         ->mountTableAction('review', $posting)
         ->assertSet('mountedActions.0.data.description', fn (mixed $value): bool => is_array($value)
-            && str_contains((new \Tiptap\Editor)->setContent($value)->getHTML(), '<strong>Vaga</strong>'));
+            && str_contains((new Editor)->setContent($value)->getHTML(), '<strong>Vaga</strong>'));
 });
 
 it('renderiza a página do currículo e salva o texto', function () {
@@ -95,11 +94,11 @@ it('renderiza a página do currículo e salva o texto', function () {
 it('renderiza a comparação mercado × currículo com dados do PRD', function () {
     $p1 = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
     $p1->items()->createMany([
-        ['category' => 'language', 'name' => 'Python', 'source' => 'ai'],
-        ['category' => 'framework', 'name' => 'React', 'source' => 'ai'],
+        ['category' => 'skill', 'name' => 'Python', 'source' => 'ai'],
+        ['category' => 'skill', 'name' => 'React', 'source' => 'ai'],
     ]);
     $p2 = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
-    $p2->items()->create(['category' => 'language', 'name' => 'Python', 'source' => 'ai']);
+    $p2->items()->create(['category' => 'skill', 'name' => 'Python', 'source' => 'ai']);
 
     app(ResumeService::class)->save('Currículo com Python.');
 
@@ -121,13 +120,13 @@ it('renderiza as tendências com série mensal', function () {
         'description' => longDescription(),
         'collected_at' => now()->subMonths(2),
     ]);
-    $posting->items()->create(['category' => 'language', 'name' => 'Python', 'source' => 'ai']);
+    $posting->items()->create(['category' => 'skill', 'name' => 'Python', 'source' => 'ai']);
 
     $posting2 = JobPosting::factory()->confirmed()->create([
         'description' => longDescription(),
         'collected_at' => now()->subMonth(),
     ]);
-    $posting2->items()->create(['category' => 'language', 'name' => 'Python', 'source' => 'ai']);
+    $posting2->items()->create(['category' => 'skill', 'name' => 'Python', 'source' => 'ai']);
 
     Livewire::test(MarketTrendsPage::class)
         ->assertSuccessful()
@@ -136,7 +135,7 @@ it('renderiza as tendências com série mensal', function () {
 
 it('widgets exibem dados corretos', function () {
     $posting = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
-    $posting->items()->create(['category' => 'language', 'name' => 'Python', 'source' => 'ai']);
+    $posting->items()->create(['category' => 'skill', 'name' => 'Python', 'source' => 'ai']);
     JobPosting::factory()->needsReview()->create(['description' => longDescription()]);
 
     Livewire::test(StatsOverviewWidget::class)
@@ -162,7 +161,7 @@ it('ações da listagem mudam o estado da vaga', function () {
 
     JobExtractionAgent::fake([[
         'role' => 'Dev',
-        'technologies' => ['Python'],
+        'skills' => ['Python'],
     ]]);
 
     $posting = JobPosting::factory()->create(['description' => longDescription()]);
@@ -227,8 +226,8 @@ it('renderiza a página de adequação e gera a adaptação pela ação', functi
 
     $posting = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
     $posting->items()->createMany([
-        ['category' => 'language', 'name' => 'Python', 'source' => 'ai'],
-        ['category' => 'framework', 'name' => 'React', 'source' => 'ai'],
+        ['category' => 'skill', 'name' => 'Python', 'source' => 'ai'],
+        ['category' => 'skill', 'name' => 'React', 'source' => 'ai'],
     ]);
     app(ResumeService::class)->save('Currículo com Python.');
 
@@ -319,7 +318,7 @@ it('renderiza a página de view com a descrição rica', function () {
     Livewire::test(ViewJobPosting::class, ['record' => $posting->id])
         ->assertSuccessful()
         ->assertSet('data.description', fn (mixed $value): bool => is_array($value)
-            && str_contains((new \Tiptap\Editor)->setContent($value)->getHTML(), '<strong>Vaga</strong>'));
+            && str_contains((new Editor)->setContent($value)->getHTML(), '<strong>Vaga</strong>'));
 });
 
 it('redireciona para a listagem ao abrir a view de vaga já enviada para análise', function () {
