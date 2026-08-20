@@ -157,7 +157,7 @@ class JobCapturesTable
                                 'triage_error' => null,
                             ]);
 
-                            TriageJobCaptures::dispatch($ids);
+                            TriageJobCaptures::dispatch($ids, (int) auth()->id());
 
                             Notification::make()
                                 ->info()

@@ -4,6 +4,8 @@ use App\Agents\JobTriageAgent;
 use App\Enums\JobCaptureTriageResult;
 use App\Enums\JobCaptureTriageStatus;
 use App\Models\JobCapture;
+use App\Models\ScreeningPreference;
+use App\Models\User;
 use App\Services\JobTriageService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
@@ -79,7 +81,12 @@ it('persists uncertain', function () {
 });
 
 it('sends ids, preferences and rejections in the payload', function () {
-    config(['triage.preferences' => ['Laravel'], 'triage.rejections' => ['Tech Lead']]);
+    $user = User::factory()->create();
+    ScreeningPreference::factory()->create([
+        'user_id' => $user->id,
+        'preferences' => ['Laravel'],
+        'rejections' => ['Tech Lead'],
+    ]);
 
     [$c1] = triageCaptures(1)->all();
 
@@ -93,7 +100,7 @@ it('sends ids, preferences and rejections in the payload', function () {
         ]];
     });
 
-    app(JobTriageService::class)->triageBatch(collect([$c1]));
+    app(JobTriageService::class)->triageBatch(collect([$c1]), $user);
 
     $payload = json_decode($capturedPrompt, true);
 

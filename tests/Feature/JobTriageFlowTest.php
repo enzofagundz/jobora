@@ -41,7 +41,8 @@ it('marks captures as processing and dispatches TriageJobCaptures with the ids',
 
         // A ordem vem da query da tabela (defaultSort), não da seleção —
         // o serviço associa resultados por capture_id, não por posição.
-        return $ids === [$c1->id, $c2->id];
+        return $ids === [$c1->id, $c2->id]
+            && $job->userId === auth()->id();
     });
 
     expect(JobCapture::find($c1->id)->triage_status)->toBe(JobCaptureTriageStatus::Processing)
@@ -59,7 +60,7 @@ it('ignores ineligible captures in the selection', function () {
     Livewire::test(ListJobCaptures::class)
         ->callTableBulkAction('triage', [$pending, $completed, $processing, $promoted]);
 
-    Queue::assertPushed(TriageJobCaptures::class, fn (TriageJobCaptures $job): bool => $job->captureIds === [$pending->id]);
+    Queue::assertPushed(TriageJobCaptures::class, fn (TriageJobCaptures $job): bool => $job->captureIds === [$pending->id] && $job->userId === auth()->id());
 
     expect(JobCapture::find($pending->id)->triage_status)->toBe(JobCaptureTriageStatus::Processing);
 });
@@ -159,7 +160,7 @@ it('runs the triage end to end through the job', function () {
         ],
     ]]);
 
-    (new TriageJobCaptures([$c1->id, $c2->id]))->handle(app(JobTriageService::class));
+    (new TriageJobCaptures([$c1->id, $c2->id], auth()->id()))->handle(app(JobTriageService::class));
 
     expect(JobCapture::find($c1->id)->triage_status)->toBe(JobCaptureTriageStatus::Completed)
         ->and(JobCapture::find($c1->id)->triage_result)->toBe(JobCaptureTriageResult::Relevant)

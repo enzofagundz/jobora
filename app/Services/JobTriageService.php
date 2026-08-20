@@ -6,6 +6,7 @@ use App\Agents\JobTriageAgent;
 use App\DTO\JobTriageResult;
 use App\Enums\JobCaptureTriageStatus;
 use App\Models\JobCapture;
+use App\Models\User;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
@@ -29,12 +30,14 @@ final class JobTriageService
     /**
      * @param  Collection<int, JobCapture>  $captures
      */
-    public function triageBatch(Collection $captures): void
+    public function triageBatch(Collection $captures, ?User $user = null): void
     {
         $started = microtime(true);
         $ids = $captures->pluck('id')->all();
 
         try {
+            $criteria = $user?->screeningPreference;
+
             $payload = [
                 'captures' => $captures->map(fn (JobCapture $c) => [
                     'id' => $c->id,
@@ -46,8 +49,8 @@ final class JobTriageService
                     'location' => $c->location,
                     'url' => $c->url,
                 ])->values()->all(),
-                'preferences' => config('triage.preferences', []),
-                'rejections' => config('triage.rejections', []),
+                'preferences' => $criteria?->preferences ?? [],
+                'rejections' => $criteria?->rejections ?? [],
             ];
 
             $response = $this->agent->prompt(json_encode($payload, JSON_UNESCAPED_UNICODE));

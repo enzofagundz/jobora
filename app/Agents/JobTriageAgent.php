@@ -59,7 +59,7 @@ Regras:
 - result "rejected": é uma vaga, mas viola pelo menos uma rejeição ou não atende às preferências.
 - result "uncertain": é uma vaga, mas não há informação suficiente para decidir entre "relevant" e "rejected" com segurança. Use apenas nesse caso.
 - result "not_a_job": não é uma oportunidade de trabalho (lista acima).
-- CONFLITO: uma rejeição explícita tem prioridade sobre qualquer preferência. Exemplo: preferência "Laravel" + rejeição "Tech Lead" → "Tech Lead Laravel" é "rejected", mesmo contendo Laravel.
+- CONFLITO: uma rejeição explícita tem prioridade sobre qualquer preferência. Exemplo: preferência "Excel" + rejeição "cargo de gestão" → "Analista de Vendas com Excel" é "rejected", mesmo contendo Excel.
 - Você é uma ferramenta de PRÉ-SELEÇÃO: suas decisões serão revisadas por um humano. Não descarte nada por medo de errar; só use "uncertain" com informação genuinamente insuficiente.
 
 Formato de resposta:
@@ -74,7 +74,7 @@ Formato de resposta:
       "capture_id": 123,
       "is_job": true,
       "result": "relevant",
-      "reason": "Vaga de Desenvolvedor PHP/Laravel; atende às preferências."
+      "reason": "Vaga de Analista de Vendas com CRM; atende às preferências."
     }
   ]
 }
