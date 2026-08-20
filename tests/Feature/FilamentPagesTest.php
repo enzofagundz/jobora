@@ -184,13 +184,17 @@ it('ações da listagem mudam o estado da vaga', function () {
         ->and($posting->suggested_data)->not->toBeNull();
 });
 
-it('esconde a análise com IA em vagas confirmadas', function () {
+it('mostra a análise com IA somente em vagas pendentes ou com falha', function () {
     $pending = JobPosting::factory()->create(['description' => longDescription()]);
     $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $needsReview = JobPosting::factory()->needsReview()->create(['description' => longDescription()]);
+    $failed = JobPosting::factory()->failed()->create(['description' => longDescription()]);
 
     Livewire::test(ListJobPostings::class)
         ->assertTableActionVisible('analyze', $pending)
-        ->assertTableActionHidden('analyze', $confirmed);
+        ->assertTableActionVisible('analyze', $failed)
+        ->assertTableActionHidden('analyze', $confirmed)
+        ->assertTableActionHidden('analyze', $needsReview);
 });
 
 it('widget de tendências lida com base vazia', function () {
