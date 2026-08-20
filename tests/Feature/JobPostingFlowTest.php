@@ -4,7 +4,7 @@ use App\Agents\JobExtractionAgent;
 use App\Enums\ItemSource;
 use App\Enums\JobPostingStatus;
 use App\Filament\Resources\JobPostings\Pages\CreateJobPosting;
-use App\Filament\Resources\JobPostings\Pages\ReviewJobPosting;
+use App\Filament\Resources\JobPostings\Pages\ListJobPostings;
 use App\Jobs\AnalyzeJobPosting;
 use App\Models\JobPosting;
 use App\Models\User;
@@ -74,17 +74,16 @@ it('analisa e confirma a vaga pela página de revisão', function () {
     expect($posting->status)->toBe(JobPostingStatus::NeedsReview)
         ->and($posting->suggested_data['items'])->toHaveCount(3);
 
-    $component = Livewire::test(ReviewJobPosting::class, ['record' => $posting->id]);
-
     // Mantém um item como veio da IA, edita outro e adiciona um novo.
-    $component->set('data.role', 'Desenvolvedor PHP Sênior')
-        ->set('data.items', [
+    Livewire::test(ListJobPostings::class)->callTableAction('review', $posting, data: [
+        'role' => 'Desenvolvedor PHP Sênior',
+        'items' => [
             ['category' => 'technology', 'name' => 'Laravel'],
             ['category' => 'technology', 'name' => 'PostgreSQL'],
             ['category' => 'language', 'name' => 'PHP'],
             ['category' => 'methodology', 'name' => 'Scrum'],
-        ])
-        ->call('confirm');
+        ],
+    ]);
 
     $posting->refresh();
 
@@ -112,11 +111,11 @@ it('persiste correção manual após recarregar e marca origem como user', funct
     $posting = JobPosting::factory()->create(['description' => flowDescription()]);
     app(JobAnalysisService::class)->analyze($posting);
 
-    Livewire::test(ReviewJobPosting::class, ['record' => $posting->id])
-        ->set('data.items', [
+    Livewire::test(ListJobPostings::class)->callTableAction('review', $posting, data: [
+        'items' => [
             ['category' => 'database', 'name' => 'PostgreSQL'],
-        ])
-        ->call('confirm');
+        ],
+    ]);
 
     $item = $posting->refresh()->items()->first();
 
@@ -136,7 +135,7 @@ it('descarta a sugestão e volta para pending', function () {
     $posting = JobPosting::factory()->create(['description' => flowDescription()]);
     app(JobAnalysisService::class)->analyze($posting);
 
-    Livewire::test(ReviewJobPosting::class, ['record' => $posting->id])->call('discard');
+    Livewire::test(ListJobPostings::class)->mountTableAction('review', $posting)->callAction('discard');
 
     $posting->refresh();
 

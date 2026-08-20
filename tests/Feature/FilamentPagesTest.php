@@ -8,7 +8,6 @@ use App\Filament\Pages\MarketTrendsPage;
 use App\Filament\Pages\ResumePage;
 use App\Filament\Resources\JobPostings\Pages\ListJobPostings;
 use App\Filament\Resources\JobPostings\Pages\ResumeAdaptationPage;
-use App\Filament\Resources\JobPostings\Pages\ReviewJobPosting;
 use App\Filament\Resources\JobPostings\Pages\ViewJobPosting;
 use App\Filament\Widgets\ComparisonSummaryWidget;
 use App\Filament\Widgets\StatsOverviewWidget;
@@ -46,7 +45,7 @@ it('renderiza a listagem de vagas', function () {
         ->assertSee('Vagas');
 });
 
-it('renderiza a página de revisão com a sugestão', function () {
+it('abre o modal de revisão com a sugestão', function () {
     JobExtractionAgent::fake([[
         'role' => 'Dev Python',
         'technologies' => ['React'],
@@ -56,10 +55,10 @@ it('renderiza a página de revisão com a sugestão', function () {
     $posting = JobPosting::factory()->create(['description' => longDescription()]);
     app(JobAnalysisService::class)->analyze($posting);
 
-    Livewire::test(ReviewJobPosting::class, ['record' => $posting->id])
-        ->assertSuccessful()
-        ->assertSee('Descrição original')
-        ->assertSet('data.role', 'Dev Python');
+    Livewire::test(ListJobPostings::class)
+        ->mountTableAction('review', $posting)
+        ->assertMountedActionModalSee('Descrição original')
+        ->assertSet('mountedActions.0.data.role', 'Dev Python');
 });
 
 it('renderiza a descrição original como conteúdo rico na revisão', function () {
@@ -74,9 +73,9 @@ it('renderiza a descrição original como conteúdo rico na revisão', function 
     ]);
     app(JobAnalysisService::class)->analyze($posting);
 
-    Livewire::test(ReviewJobPosting::class, ['record' => $posting->id])
-        ->assertSuccessful()
-        ->assertSet('data.description', fn (mixed $value): bool => is_array($value)
+    Livewire::test(ListJobPostings::class)
+        ->mountTableAction('review', $posting)
+        ->assertSet('mountedActions.0.data.description', fn (mixed $value): bool => is_array($value)
             && str_contains((new \Tiptap\Editor)->setContent($value)->getHTML(), '<strong>Vaga</strong>'));
 });
 
@@ -202,11 +201,15 @@ it('widget de tendências lida com base vazia', function () {
         ->and($chart->instance()->getDescription())->toContain('Sem dados suficientes');
 });
 
-it('redireciona para a listagem ao abrir a revisão de vaga já confirmada', function () {
-    $posting = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+it('esconde a ação revisar fora de vagas aguardando revisão', function () {
+    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $pending = JobPosting::factory()->create(['description' => longDescription()]);
+    $needsReview = JobPosting::factory()->needsReview()->create(['description' => longDescription()]);
 
-    Livewire::test(ReviewJobPosting::class, ['record' => $posting->id])
-        ->assertRedirect(ListJobPostings::getUrl());
+    Livewire::test(ListJobPostings::class)
+        ->assertTableActionHidden('review', $confirmed)
+        ->assertTableActionHidden('review', $pending)
+        ->assertTableActionVisible('review', $needsReview);
 });
 
 it('renderiza a página de adequação e gera a adaptação pela ação', function () {

@@ -5,7 +5,6 @@ namespace App\Filament\Resources\JobPostings;
 use App\Filament\Resources\JobPostings\Pages\CreateJobPosting;
 use App\Filament\Resources\JobPostings\Pages\ListJobPostings;
 use App\Filament\Resources\JobPostings\Pages\ResumeAdaptationPage;
-use App\Filament\Resources\JobPostings\Pages\ReviewJobPosting;
 use App\Filament\Resources\JobPostings\Pages\ViewJobPosting;
 use App\Filament\Resources\JobPostings\Schemas\JobPostingForm;
 use App\Filament\Resources\JobPostings\Tables\JobPostingsTable;
@@ -44,7 +43,6 @@ class JobPostingResource extends Resource
             'index' => ListJobPostings::route('/'),
             'create' => CreateJobPosting::route('/create'),
             'view' => ViewJobPosting::route('/{record}'),
-            'review' => ReviewJobPosting::route('/{record}/review'),
             'adapt' => ResumeAdaptationPage::route('/{record}/adapt'),
         ];
     }
