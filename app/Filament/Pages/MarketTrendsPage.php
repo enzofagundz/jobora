@@ -5,6 +5,7 @@ namespace App\Filament\Pages;
 use App\Enums\ConceptCategory;
 use App\Services\MarketAnalysisService;
 use Filament\Pages\Page;
+use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Url;
@@ -19,12 +20,14 @@ class MarketTrendsPage extends Page
 
     protected static ?string $title = 'Tendências do mercado';
 
-    protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-arrow-trending-up';
+    protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedArrowTrendingUp;
 
-    protected static ?int $navigationSort = 4;
+    protected static ?int $navigationSort = 5;
 
     #[Url]
     public ?string $category = null;
+
+    private ?array $memoizedMonths = null;
 
     /**
      * @return array<string, string>
@@ -32,23 +35,20 @@ class MarketTrendsPage extends Page
     public function categories(): array
     {
         return collect(ConceptCategory::all())
-            ->mapWithKeys(fn (ConceptCategory $case): array => [$case->value => $case->label()])
+            ->mapWithKeys(fn (ConceptCategory $case): array => [$case->value => $case->getLabel()])
             ->all();
-    }
-
-    public function categoryLabel(string $value): string
-    {
-        return ConceptCategory::from($value)->label();
     }
 
     /**
      * Distinct months (YYYY-MM) with confirmed postings in scope.
+     * Memoizado por request: a query roda uma vez mesmo com múltiplas
+     * chamadas (blade, hasEnoughData, monthlyRows, comparison).
      *
      * @return array<int, string>
      */
     public function months(): array
     {
-        return app(MarketAnalysisService::class)->months();
+        return $this->memoizedMonths ??= app(MarketAnalysisService::class)->months();
     }
 
     /**

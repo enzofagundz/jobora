@@ -317,8 +317,7 @@ it('renderiza a página de view com a descrição rica', function () {
 
     Livewire::test(ViewJobPosting::class, ['record' => $posting->id])
         ->assertSuccessful()
-        ->assertSet('data.description', fn (mixed $value): bool => is_array($value)
-            && str_contains((new Editor)->setContent($value)->getHTML(), '<strong>Vaga</strong>'));
+        ->assertSeeHtml('<strong>Vaga</strong>');
 });
 
 it('redireciona para a listagem ao abrir a view de vaga já enviada para análise', function () {

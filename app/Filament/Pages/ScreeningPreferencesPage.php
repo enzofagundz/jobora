@@ -8,6 +8,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Schema;
+use Filament\Support\Icons\Heroicon;
 
 class ScreeningPreferencesPage extends Page
 {
@@ -19,7 +20,7 @@ class ScreeningPreferencesPage extends Page
 
     protected static ?string $title = 'Critérios de triagem';
 
-    protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-funnel';
+    protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedFunnel;
 
     protected static ?int $navigationSort = 3;
 

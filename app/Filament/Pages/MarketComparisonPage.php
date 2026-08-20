@@ -10,6 +10,7 @@ use App\Support\Number;
 use Filament\Pages\Page;
 use Filament\Schemas\Concerns\InteractsWithSchemas;
 use Filament\Schemas\Contracts\HasSchemas;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
@@ -29,9 +30,9 @@ class MarketComparisonPage extends Page implements HasSchemas, HasTable
 
     protected static ?string $title = 'Mercado × Currículo';
 
-    protected static string|\BackedEnum|null $navigationIcon = 'heroicon-o-clipboard-document-list';
+    protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedClipboardDocumentList;
 
-    protected static ?int $navigationSort = 3;
+    protected static ?int $navigationSort = 4;
 
     public function table(Table $table): Table
     {
@@ -69,7 +70,7 @@ class MarketComparisonPage extends Page implements HasSchemas, HasTable
             ->filters([
                 SelectFilter::make('category')
                     ->label('Categoria')
-                    ->options(fn (): array => $this->categories()),
+                    ->options(ConceptCategory::class),
             ])
             ->emptyStateHeading('Sem itens para exibir')
             ->emptyStateDescription('Cadastre vagas, analise com IA e confirme-as para popular a comparação.');
@@ -93,19 +94,9 @@ class MarketComparisonPage extends Page implements HasSchemas, HasTable
         return ! blank(app(ResumeService::class)->content());
     }
 
-    /**
-     * @return array<string, string>
-     */
-    public function categories(): array
-    {
-        return collect(ConceptCategory::all())
-            ->mapWithKeys(fn (ConceptCategory $case): array => [$case->value => $case->label()])
-            ->all();
-    }
-
     public function categoryLabel(string $value): string
     {
-        return ConceptCategory::from($value)->label();
+        return ConceptCategory::from($value)->getLabel();
     }
 
     private function selectedCategory(array $filters): ?ConceptCategory

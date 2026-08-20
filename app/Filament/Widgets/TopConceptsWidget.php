@@ -40,14 +40,13 @@ class TopConceptsWidget extends TableWidget
                 TextColumn::make('name')->label('Conceito')->searchable(),
                 TextColumn::make('category')
                     ->label('Categoria')
-                    ->badge()
-                    ->formatStateUsing(fn (ConceptCategory $state): string => $state->label()),
+                    ->badge(),
                 TextColumn::make('total')->label('Vagas')->sortable(),
             ])
             ->filters([
                 SelectFilter::make('category')
                     ->label('Categoria')
-                    ->options(collect(ConceptCategory::all())->mapWithKeys(fn ($case) => [$case->value => $case->label()])->all()),
+                    ->options(ConceptCategory::class),
             ])
             ->paginated(false);
     }

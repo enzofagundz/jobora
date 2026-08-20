@@ -165,4 +165,12 @@ class MarketAnalysisService
     {
         return blank($month) ? null : Carbon::createFromFormat('Y-m', $month)->startOfMonth();
     }
+
+    /**
+     * Label pt-BR curto de um mês "YYYY-MM" (ex.: "mai/26").
+     */
+    public static function monthLabel(string $month): string
+    {
+        return Carbon::createFromFormat('Y-m', $month)->translatedFormat('M/y');
+    }
 }

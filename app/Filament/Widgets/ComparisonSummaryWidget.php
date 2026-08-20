@@ -25,7 +25,7 @@ class ComparisonSummaryWidget extends TableWidget
                     ->width('42%'),
                 TextColumn::make('category')
                     ->label('Categoria')
-                    ->formatStateUsing(fn (string $state): string => ConceptCategory::from($state)->label())
+                    ->formatStateUsing(fn (string $state): string => ConceptCategory::from($state)->getLabel())
                     ->width('26%'),
                 TextColumn::make('total')
                     ->label('Vagas')

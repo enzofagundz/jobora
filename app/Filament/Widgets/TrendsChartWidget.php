@@ -5,7 +5,6 @@ namespace App\Filament\Widgets;
 use App\Services\MarketAnalysisService;
 use Filament\Widgets\LineChartWidget;
 use Illuminate\Contracts\Support\Htmlable;
-use Illuminate\Support\Carbon;
 
 class TrendsChartWidget extends LineChartWidget
 {
@@ -48,7 +47,7 @@ class TrendsChartWidget extends LineChartWidget
 
         return [
             'datasets' => $datasets,
-            'labels' => collect($months)->map(fn (string $month): string => Carbon::createFromFormat('Y-m', $month)->translatedFormat('M/y'))->all(),
+            'labels' => collect($months)->map(fn (string $month): string => MarketAnalysisService::monthLabel($month))->all(),
         ];
     }
 

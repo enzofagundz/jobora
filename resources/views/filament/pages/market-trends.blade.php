@@ -26,7 +26,7 @@
                         <tr class="border-b text-left text-gray-500 dark:text-gray-400">
                             <th class="py-2 pr-4 font-medium">Item</th>
                             @foreach ($this->months() as $month)
-                                <th class="py-2 pr-4 text-right font-medium tabular-nums">{{ \Illuminate\Support\Carbon::createFromFormat('Y-m', $month)->translatedFormat('M/y') }}</th>
+                                <th class="py-2 pr-4 text-right font-medium tabular-nums">{{ \App\Services\MarketAnalysisService::monthLabel($month) }}</th>
                             @endforeach
                             <th class="py-2 text-right font-medium">Total</th>
                         </tr>
