@@ -28,11 +28,11 @@ class MarketComparisonService
      */
     public function table(?ConceptCategory $category = null): array
     {
-        $present = $this->analyzer->conceptsIn($this->resumes->content());
+        $content = $this->resumes->content();
         $rows = $this->analysis->relativeFrequencies($category);
 
-        return array_map(function (array $row) use ($present): array {
-            $isPresent = in_array($row['name'], $present, true);
+        return array_map(function (array $row) use ($content): array {
+            $isPresent = $this->analyzer->contains($content, $row['name']);
 
             return [
                 'name' => $row['name'],

@@ -50,3 +50,31 @@ it('checks a single concept presence', function () {
     expect(analyzer()->hasConcept($content, 'Laravel'))->toBeTrue()
         ->and(analyzer()->hasConcept($content, 'React'))->toBeFalse();
 });
+
+it('detects any item name present in the resume text', function () {
+    $content = 'Stack: GitHub, CI/CD e Vue.js.';
+
+    expect(analyzer()->contains($content, 'github'))->toBeTrue()
+        ->and(analyzer()->contains($content, 'ci/cd'))->toBeTrue()
+        ->and(analyzer()->contains($content, 'vue.js'))->toBeTrue()
+        ->and(analyzer()->contains($content, 'gitlab'))->toBeFalse();
+});
+
+it('does not match partial words', function () {
+    $content = 'JavaScript e MySQL.';
+
+    expect(analyzer()->contains($content, 'java'))->toBeFalse()
+        ->and(analyzer()->contains($content, 'sql'))->toBeFalse()
+        ->and(analyzer()->contains('consolidado', 'solid'))->toBeFalse();
+});
+
+it('detects removal of a competence', function () {
+    expect(analyzer()->contains('Aplico Clean Code.', 'clean code'))->toBeTrue()
+        ->and(analyzer()->contains('Sem menção.', 'clean code'))->toBeFalse();
+});
+
+it('contains returns false for blank inputs', function () {
+    expect(analyzer()->contains(null, 'x'))->toBeFalse()
+        ->and(analyzer()->contains('', 'x'))->toBeFalse()
+        ->and(analyzer()->contains('texto', ''))->toBeFalse();
+});

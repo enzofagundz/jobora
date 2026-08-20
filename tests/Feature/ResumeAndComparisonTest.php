@@ -83,3 +83,29 @@ it('retorna tabela vazia sem vagas confirmadas', function () {
 
     expect(app(MarketComparisonService::class)->table())->toBe([]);
 });
+
+it('itens com nome cru refletem o currículo salvo', function () {
+    confirmedWithItems(['github']);
+    confirmedWithItems(['clean code']);
+
+    app(ResumeService::class)->save('Currículo com GitHub e Clean Code.');
+
+    $table = collect(app(MarketComparisonService::class)->table());
+
+    expect($table->firstWhere('name', 'github')['present'])->toBeTrue()
+        ->and($table->firstWhere('name', 'github')['is_gap'])->toBeFalse()
+        ->and($table->firstWhere('name', 'clean code')['present'])->toBeTrue()
+        ->and($table->firstWhere('name', 'clean code')['is_gap'])->toBeFalse();
+});
+
+it('competência removida volta a ser lacuna', function () {
+    confirmedWithItems(['clean code']);
+
+    app(ResumeService::class)->save('Aplico Clean Code.');
+
+    expect(collect(app(MarketComparisonService::class)->gaps())->pluck('name')->all())->not->toContain('clean code');
+
+    app(ResumeService::class)->save('Currículo sem menções.');
+
+    expect(collect(app(MarketComparisonService::class)->gaps())->pluck('name')->all())->toContain('clean code');
+});

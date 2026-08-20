@@ -38,6 +38,38 @@ class ResumeAnalyzer
      */
     public function hasConcept(?string $content, string $canonicalName): bool
     {
-        return in_array($canonicalName, $this->conceptsIn($content), true);
+        return $this->contains($content, $canonicalName);
+    }
+
+    /**
+     * O currículo contém o item (canônico ou nome cru, ex.: 'github', 'ci/cd')?
+     * Canônicos casam pelas keywords configuradas; qualquer outro nome casa
+     * como texto livre, case-insensitive, delimitado por não-alfanuméricos.
+     */
+    public function contains(?string $content, string $name): bool
+    {
+        if (blank($content) || blank($name)) {
+            return false;
+        }
+
+        $text = $this->normalizer->clean($content);
+        $canonical = $this->normalizer->normalize($name);
+
+        foreach ($this->normalizer->keywordsFor($canonical) as $keyword) {
+            if ($this->containsText($text, $this->normalizer->clean($keyword))) {
+                return true;
+            }
+        }
+
+        return $this->containsText($text, $this->normalizer->clean($name));
+    }
+
+    private function containsText(string $text, string $needle): bool
+    {
+        if ($needle === '') {
+            return false;
+        }
+
+        return preg_match('/(?:^|[^\p{L}\p{N}])'.preg_quote($needle, '/').'(?:$|[^\p{L}\p{N}])/u', $text) === 1;
     }
 }
