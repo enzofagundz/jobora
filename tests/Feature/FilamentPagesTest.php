@@ -84,15 +84,13 @@ it('renderiza a página do currículo e salva o texto', function () {
     Livewire::test(ResumePage::class)
         ->assertSuccessful()
         ->fillForm([
-            'content' => '<p><strong>Currículo</strong> com Python e Docker.</p>',
+            'content' => 'Currículo com Python e Docker.',
         ])
         ->call('save')
-        ->assertHasNoFormErrors();
+        ->assertHasNoFormErrors()
+        ->assertSet('data.content', fn (mixed $value): bool => is_string($value));
 
-    $content = app(ResumeService::class)->content();
-
-    expect($content)->toContain('<strong>Currículo</strong>')
-        ->and($content)->toContain('com Python e Docker');
+    expect(app(ResumeService::class)->content())->toBe('Currículo com Python e Docker.');
 });
 
 it('renderiza a comparação mercado × currículo com dados do PRD', function () {
@@ -232,15 +230,13 @@ it('renderiza a página de adequação e gera a adaptação pela ação', functi
         ->assertSee('Currículo original')
         ->callAction('adapt')
         ->assertSuccessful()
-        ->assertSet('data.adapted_resume', fn (mixed $value): bool => is_array($value)
-            && str_contains((new \Tiptap\Editor)->setContent($value)->getHTML(), 'Currículo adaptado')
-            && str_contains((new \Tiptap\Editor)->setContent($value)->getHTML(), '<br>'))
+        ->assertSet('data.adapted_resume', "Currículo adaptado.\nDestaque para Python.")
         ->assertSee('Currículo adaptado');
 
     expect(ResumeAdaptation::where('job_posting_id', $posting->id)->exists())->toBeTrue();
 });
 
-it('renderiza o currículo adaptado como conteúdo rico na adequação', function () {
+it('renderiza o currículo adaptado como texto na adequação', function () {
     $posting = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
     ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
@@ -253,19 +249,16 @@ it('renderiza o currículo adaptado como conteúdo rico na adequação', functio
 
     Livewire::test(ResumeAdaptationPage::class, ['record' => $posting->id])
         ->assertSuccessful()
-        ->assertSet('data.adapted_resume', fn (mixed $value): bool => is_array($value)
-            && str_contains((new \Tiptap\Editor)->setContent($value)->getHTML(), 'Currículo adaptado')
-            && str_contains((new \Tiptap\Editor)->setContent($value)->getHTML(), '<br>'));
+        ->assertSet('data.adapted_resume', "Currículo adaptado.\nDestaque para Python.");
 });
 
-it('renderiza o currículo original como conteúdo rico na adequação', function () {
+it('renderiza o currículo original como texto na adequação', function () {
     $posting = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
     app(ResumeService::class)->save('<p><strong>Currículo</strong> com <em>Laravel</em>.</p>');
 
     Livewire::test(ResumeAdaptationPage::class, ['record' => $posting->id])
         ->assertSuccessful()
-        ->assertSet('data.original_resume', fn (mixed $value): bool => is_array($value)
-            && str_contains((new \Tiptap\Editor)->setContent($value)->getHTML(), '<strong>Currículo</strong>'));
+        ->assertSet('data.original_resume', 'Currículo com Laravel.');
 });
 
 it('expõe o link de download do PDF na página', function () {

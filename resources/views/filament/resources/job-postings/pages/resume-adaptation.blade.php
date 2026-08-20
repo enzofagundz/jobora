@@ -44,7 +44,7 @@
                                 size="sm"
                                 color="gray"
                                 icon="heroicon-o-clipboard-document"
-                                x-on:click="navigator.clipboard.writeText($refs.adaptedBox.querySelector('[contenteditable]').innerText).then(() => { copied = true; setTimeout(() => copied = false, 1500) })"
+                                x-on:click="navigator.clipboard.writeText($refs.adaptedBox.querySelector('textarea').value).then(() => { copied = true; setTimeout(() => copied = false, 1500) })"
                             >
                                 <span x-show="!copied">Copiar</span>
                                 <span x-show="copied" x-cloak>Copiado</span>

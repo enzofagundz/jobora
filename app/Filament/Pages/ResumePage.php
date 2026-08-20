@@ -3,7 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Services\ResumeService;
-use Filament\Forms\Components\RichEditor;
+use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Schema;
@@ -27,7 +27,7 @@ class ResumePage extends Page
     public function mount(): void
     {
         $this->form->fill([
-            'content' => app(ResumeService::class)->content() ?? '',
+            'content' => ResumeService::plainText(app(ResumeService::class)->content()),
         ]);
     }
 
@@ -35,9 +35,10 @@ class ResumePage extends Page
     {
         return $schema
             ->components([
-                RichEditor::make('content')
+                Textarea::make('content')
                     ->label('Texto do currículo')
                     ->required()
+                    ->rows(24)
                     ->helperText('Cole o texto do seu currículo. Um novo envio substitui a versão anterior (sem histórico).')
                     ->columnSpanFull(),
             ])

@@ -8,7 +8,7 @@ use App\Models\ResumeAdaptation;
 use App\Services\ResumeAdaptationService;
 use App\Services\ResumeService;
 use Filament\Actions\Action;
-use Filament\Forms\Components\RichEditor;
+use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Concerns\InteractsWithRecord;
 use Filament\Resources\Pages\Page;
@@ -44,7 +44,7 @@ class ResumeAdaptationPage extends Page
         }
 
         $this->form->fill([
-            'original_resume' => app(ResumeService::class)->content(),
+            'original_resume' => ResumeService::plainText(app(ResumeService::class)->content()),
         ]);
 
         $this->fillAdaptedForm();
@@ -54,10 +54,11 @@ class ResumeAdaptationPage extends Page
     {
         return $schema
             ->components([
-                RichEditor::make('original_resume')
+                Textarea::make('original_resume')
                     ->label('Currículo original')
                     ->hiddenLabel()
                     ->disabled()
+                    ->rows(24)
                     ->columnSpanFull(),
             ])
             ->statePath('data');
@@ -67,10 +68,11 @@ class ResumeAdaptationPage extends Page
     {
         return $schema
             ->components([
-                RichEditor::make('adapted_resume')
+                Textarea::make('adapted_resume')
                     ->label('Currículo adaptado')
                     ->hiddenLabel()
                     ->disabled()
+                    ->rows(24)
                     ->columnSpanFull(),
             ])
             ->statePath('data');
@@ -86,9 +88,7 @@ class ResumeAdaptationPage extends Page
         // fillPartially preserva data.original_resume (fill() substituiria o array data inteiro).
         $this->adaptedForm->fillPartially(
             [
-                // adapted_content é texto puro (o agente é instruído a não retornar HTML);
-                // a conversão para HTML acontece só na exibição — o armazenamento e o PDF ficam intactos.
-                'adapted_resume' => nl2br(e($this->adaptation()?->adapted_content ?? '')),
+                'adapted_resume' => $this->adaptation()?->adapted_content ?? '',
             ],
             ['adapted_resume'],
         );
