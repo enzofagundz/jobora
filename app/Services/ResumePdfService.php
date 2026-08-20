@@ -19,10 +19,9 @@ class ResumePdfService
     {
         return Pdf::view('pdf.adapted-resume', [
             'adaptation' => $adaptation,
-            'posting' => $adaptation->jobPosting,
         ])
             ->format('a4')
             ->margins(16, 16, 16, 16)
-            ->name('curriculo-adaptado-vaga-'.$adaptation->job_posting_id.'.pdf');
+            ->name('curriculo-adaptado.pdf');
     }
 }
