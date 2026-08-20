@@ -2,7 +2,9 @@
 
 namespace App\Enums;
 
-enum ConceptCategory: string
+use Filament\Support\Contracts\HasLabel;
+
+enum ConceptCategory: string implements HasLabel
 {
     case Skill = 'skill';
     case Tool = 'tool';
@@ -10,7 +12,7 @@ enum ConceptCategory: string
     case Requirement = 'requirement';
     case Experience = 'experience';
 
-    public function label(): string
+    public function getLabel(): string
     {
         return match ($this) {
             self::Skill => 'Habilidades',

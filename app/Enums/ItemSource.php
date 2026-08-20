@@ -2,12 +2,14 @@
 
 namespace App\Enums;
 
-enum ItemSource: string
+use Filament\Support\Contracts\HasLabel;
+
+enum ItemSource: string implements HasLabel
 {
     case Ai = 'ai';
     case User = 'user';
 
-    public function label(): string
+    public function getLabel(): string
     {
         return match ($this) {
             self::Ai => 'IA',

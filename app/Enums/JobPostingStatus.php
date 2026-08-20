@@ -2,14 +2,16 @@
 
 namespace App\Enums;
 
-enum JobPostingStatus: string
+use Filament\Support\Contracts\HasLabel;
+
+enum JobPostingStatus: string implements HasLabel
 {
     case Pending = 'pending';
     case NeedsReview = 'needs_review';
     case Confirmed = 'confirmed';
     case Failed = 'failed';
 
-    public function label(): string
+    public function getLabel(): string
     {
         return match ($this) {
             self::Pending => 'Pendente',

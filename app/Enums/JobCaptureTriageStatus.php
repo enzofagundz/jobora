@@ -2,14 +2,16 @@
 
 namespace App\Enums;
 
-enum JobCaptureTriageStatus: string
+use Filament\Support\Contracts\HasLabel;
+
+enum JobCaptureTriageStatus: string implements HasLabel
 {
     case Pending = 'pending';
     case Processing = 'processing';
     case Completed = 'completed';
     case Failed = 'failed';
 
-    public function label(): string
+    public function getLabel(): string
     {
         return match ($this) {
             self::Pending => 'Aguardando triagem',
