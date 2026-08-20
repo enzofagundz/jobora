@@ -4,22 +4,20 @@ namespace App\Filament\Resources\JobCaptures\Tables;
 
 use App\Enums\JobCaptureTriageResult;
 use App\Enums\JobCaptureTriageStatus;
-use App\Filament\Resources\JobCaptures\Pages\ViewJobCapture;
-use App\Jobs\TriageJobCaptures;
 use App\Models\JobCapture;
-use App\Services\JobAnalysisService;
 use App\Services\JobPromotionService;
 use App\Services\JobTriageService;
-use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
+use Filament\Actions\ViewAction;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Support\Collection;
+use InvalidArgumentException;
 
 class JobCapturesTable
 {
@@ -49,7 +47,6 @@ class JobCapturesTable
                 TextColumn::make('triage_status')
                     ->label('Triagem')
                     ->badge()
-                    ->formatStateUsing(fn (JobCaptureTriageStatus $state): string => $state->label())
                     ->color(fn (JobCaptureTriageStatus $state): string => match ($state) {
                         JobCaptureTriageStatus::Pending => 'gray',
                         JobCaptureTriageStatus::Processing => 'info',
@@ -60,7 +57,7 @@ class JobCapturesTable
                 TextColumn::make('triage_result')
                     ->label('Resultado')
                     ->badge()
-                    ->formatStateUsing(fn (?JobCaptureTriageResult $state): string => $state?->label() ?? '—')
+                    ->placeholder('—')
                     ->color(fn (?JobCaptureTriageResult $state): string => match ($state) {
                         JobCaptureTriageResult::Relevant => 'success',
                         JobCaptureTriageResult::Rejected => 'danger',
@@ -86,7 +83,7 @@ class JobCapturesTable
             ->filters([
                 SelectFilter::make('triage_status')
                     ->label('Triagem')
-                    ->options(collect(JobCaptureTriageStatus::cases())->mapWithKeys(fn ($case) => [$case->value => $case->label()])->all()),
+                    ->options(JobCaptureTriageStatus::class),
                 SelectFilter::make('triage_result')
                     ->label('Resultado')
                     ->options([
@@ -112,11 +109,8 @@ class JobCapturesTable
                     }),
             ])
             ->recordActions([
-                Action::make('view')
-                    ->label('Ver')
-                    ->icon('heroicon-o-eye')
-                    ->color('gray')
-                    ->url(fn (JobCapture $record): string => ViewJobCapture::getUrl(['record' => $record])),
+                ViewAction::make()
+                    ->label('Ver'),
                 DeleteAction::make(),
             ])
             ->toolbarActions([
@@ -125,17 +119,17 @@ class JobCapturesTable
                         ->label('Enviar para triagem')
                         ->icon('heroicon-o-sparkles')
                         ->color('primary')
+                        ->authorizeIndividualRecords('triage')
                         ->requiresConfirmation()
                         ->modalHeading('Enviar para triagem')
                         ->modalDescription('As capturas selecionadas serão avaliadas por IA em lote. Custo de 1 chamada de IA por lote.')
                         ->action(function (BulkAction $action, Collection $records): void {
-                            $eligible = $records->filter(fn (JobCapture $c): bool => $c->job_posting_id === null
-                                && in_array($c->triage_status, [JobCaptureTriageStatus::Pending, JobCaptureTriageStatus::Failed], true));
-
-                            if ($eligible->count() > JobTriageService::MAX_BATCH_SIZE) {
+                            try {
+                                $eligible = app(JobTriageService::class)->startBatch($records, auth()->user());
+                            } catch (InvalidArgumentException $e) {
                                 Notification::make()
                                     ->warning()
-                                    ->title('Selecione no máximo '.JobTriageService::MAX_BATCH_SIZE.' capturas por lote.')
+                                    ->title($e->getMessage())
                                     ->send();
 
                                 return;
@@ -150,47 +144,29 @@ class JobCapturesTable
                                 return;
                             }
 
-                            $ids = $eligible->pluck('id')->all();
-
-                            JobCapture::query()->whereIn('id', $ids)->update([
-                                'triage_status' => JobCaptureTriageStatus::Processing,
-                                'triage_error' => null,
-                            ]);
-
-                            TriageJobCaptures::dispatch($ids, (int) auth()->id());
-
                             Notification::make()
                                 ->info()
                                 ->title('Triagem em andamento')
-                                ->body(count($ids).' captura(s) enviada(s) para triagem em lote.')
+                                ->body(count($eligible).' captura(s) enviada(s) para triagem em lote.')
                                 ->send();
                         }),
                     BulkAction::make('promoteSelected')
                         ->label('Cadastrar selecionadas')
                         ->icon('heroicon-o-check-circle')
                         ->color('success')
+                        ->authorizeIndividualRecords('promote')
                         ->requiresConfirmation()
                         ->modalDescription('As capturas selecionadas viram vagas e entram na análise completa. Custo de 1 chamada de IA por vaga.')
                         ->action(function (BulkAction $action, Collection $records): void {
-                            $eligible = $records->filter(fn (JobCapture $c): bool => $c->job_posting_id === null
-                                && $c->triage_status === JobCaptureTriageStatus::Completed
-                                && in_array($c->triage_result, [JobCaptureTriageResult::Relevant, JobCaptureTriageResult::Uncertain], true)
-                                && mb_strlen((string) $c->description) >= JobAnalysisService::MIN_DESCRIPTION_LENGTH);
+                            $promoted = app(JobPromotionService::class)->promoteEligible($records);
 
-                            if ($eligible->isEmpty()) {
+                            if ($promoted === 0) {
                                 Notification::make()
                                     ->warning()
                                     ->title('Nenhuma captura elegível para cadastro.')
                                     ->send();
 
                                 return;
-                            }
-
-                            $promoted = 0;
-
-                            foreach ($eligible as $capture) {
-                                app(JobPromotionService::class)->promote($capture);
-                                $promoted++;
                             }
 
                             Notification::make()

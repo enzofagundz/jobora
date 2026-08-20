@@ -2,10 +2,13 @@
 
 namespace App\Services;
 
+use App\Enums\JobCaptureTriageResult;
+use App\Enums\JobCaptureTriageStatus;
 use App\Enums\JobPostingStatus;
 use App\Jobs\AnalyzeJobPosting;
 use App\Models\JobCapture;
 use App\Models\JobPosting;
+use Illuminate\Support\Collection;
 
 /**
  * Invariante único de promoção de captura → vaga (criação + análise +
@@ -31,5 +34,28 @@ final class JobPromotionService
         $capture->update(['job_posting_id' => $posting->id]);
 
         return $posting;
+    }
+
+    /**
+     * Promove todas as capturas elegíveis de uma seleção; retorna quantas
+     * vagas foram criadas.
+     *
+     * @param  Collection<int, JobCapture>  $captures
+     */
+    public function promoteEligible(Collection $captures): int
+    {
+        $eligible = $captures->filter(fn (JobCapture $c): bool => $c->job_posting_id === null
+            && $c->triage_status === JobCaptureTriageStatus::Completed
+            && in_array($c->triage_result, [JobCaptureTriageResult::Relevant, JobCaptureTriageResult::Uncertain], true)
+            && mb_strlen((string) $c->description) >= JobAnalysisService::MIN_DESCRIPTION_LENGTH);
+
+        $promoted = 0;
+
+        foreach ($eligible as $capture) {
+            $this->promote($capture);
+            $promoted++;
+        }
+
+        return $promoted;
     }
 }

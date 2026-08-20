@@ -9,7 +9,6 @@ use App\Jobs\AnalyzeJobPosting;
 use App\Models\JobCapture;
 use App\Models\JobPosting;
 use App\Models\User;
-use App\Services\JobAnalysisService;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -202,12 +201,12 @@ it('renderiza a página de view com o conteúdo da captura', function () {
 
     Livewire::test(ViewJobCapture::class, ['record' => $capture->id])
         ->assertSuccessful()
-        ->assertSet('data.description', $capture->description)
-        ->assertSet('data.company', 'Acme Ltda')
-        ->assertSet('data.location', 'Remoto')
-        ->assertSet('data.triage_status', 'Triagem concluída')
-        ->assertSet('data.triage_result', 'Relevante')
-        ->assertSet('data.triage_reason', 'Vaga de Laravel; atende às preferências.');
+        ->assertSee('Vaga para desenvolvedor PHP com Laravel e PostgreSQL.')
+        ->assertSee('Acme Ltda')
+        ->assertSee('Remoto')
+        ->assertSee('Triagem concluída')
+        ->assertSee('Relevante')
+        ->assertSee('Vaga de Laravel; atende às preferências.');
 });
 
 it('exclui captura pela ação da tabela mantendo a vaga promovida', function () {

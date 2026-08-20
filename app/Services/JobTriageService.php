@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Agents\JobTriageAgent;
 use App\DTO\JobTriageResult;
 use App\Enums\JobCaptureTriageStatus;
+use App\Jobs\TriageJobCaptures;
 use App\Models\JobCapture;
 use App\Models\User;
 use Illuminate\Support\Collection;
@@ -26,6 +27,40 @@ final class JobTriageService
     public const MAX_BATCH_SIZE = 50;
 
     public function __construct(private readonly JobTriageAgent $agent) {}
+
+    /**
+     * Inicia a triagem em lote das capturas elegíveis da seleção: marca
+     * como processing e despacha o job. Rejeita lotes acima do limite.
+     *
+     * @param  Collection<int, JobCapture>  $captures
+     * @return Collection<int, JobCapture> capturas elegíveis enviadas
+     *
+     * @throws InvalidArgumentException quando a seleção excede MAX_BATCH_SIZE
+     */
+    public function startBatch(Collection $captures, User $user): Collection
+    {
+        $eligible = $captures->filter(fn (JobCapture $c): bool => $c->job_posting_id === null
+            && in_array($c->triage_status, [JobCaptureTriageStatus::Pending, JobCaptureTriageStatus::Failed], true));
+
+        if ($eligible->count() > self::MAX_BATCH_SIZE) {
+            throw new InvalidArgumentException('Selecione no máximo '.self::MAX_BATCH_SIZE.' capturas por lote.');
+        }
+
+        if ($eligible->isEmpty()) {
+            return $eligible;
+        }
+
+        $ids = $eligible->pluck('id')->all();
+
+        JobCapture::query()->whereIn('id', $ids)->update([
+            'triage_status' => JobCaptureTriageStatus::Processing,
+            'triage_error' => null,
+        ]);
+
+        TriageJobCaptures::dispatch($ids, (int) $user->id);
+
+        return $eligible;
+    }
 
     /**
      * @param  Collection<int, JobCapture>  $captures

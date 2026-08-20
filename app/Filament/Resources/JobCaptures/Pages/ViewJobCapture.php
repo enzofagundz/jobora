@@ -21,6 +21,7 @@ class ViewJobCapture extends ViewRecord
             Action::make('promote')
                 ->label('Criar vaga')
                 ->icon(Heroicon::OutlinedPlusCircle)
+                ->authorize('promote')
                 ->visible(fn (): bool => $this->record->job_posting_id === null)
                 ->action(function (): void {
                     try {

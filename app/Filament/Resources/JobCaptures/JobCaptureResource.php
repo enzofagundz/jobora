@@ -4,10 +4,10 @@ namespace App\Filament\Resources\JobCaptures;
 
 use App\Filament\Resources\JobCaptures\Pages\ListJobCaptures;
 use App\Filament\Resources\JobCaptures\Pages\ViewJobCapture;
-use App\Filament\Resources\JobCaptures\Schemas\JobCaptureForm;
 use App\Filament\Resources\JobCaptures\Tables\JobCapturesTable;
 use App\Models\JobCapture;
 use BackedEnum;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
@@ -25,9 +25,63 @@ class JobCaptureResource extends Resource
 
     protected static ?string $pluralModelLabel = 'capturas';
 
-    public static function form(Schema $schema): Schema
+    public static function infolist(Schema $schema): Schema
     {
-        return JobCaptureForm::configure($schema);
+        return $schema
+            ->columns(2)
+            ->components([
+                TextEntry::make('description')
+                    ->label('Descrição')
+                    ->columnSpanFull(),
+                TextEntry::make('title')
+                    ->label('Título')
+                    ->placeholder('—'),
+                TextEntry::make('company')
+                    ->label('Empresa')
+                    ->placeholder('—'),
+                TextEntry::make('location')
+                    ->label('Localização')
+                    ->placeholder('—'),
+                TextEntry::make('source')
+                    ->label('Origem'),
+                TextEntry::make('external_id')
+                    ->label('ID externo')
+                    ->placeholder('—')
+                    ->columnSpanFull(),
+                TextEntry::make('url')
+                    ->label('URL')
+                    ->url(fn (string $state): string => $state)
+                    ->openUrlInNewTab()
+                    ->placeholder('—')
+                    ->columnSpanFull(),
+                TextEntry::make('search_url')
+                    ->label('URL de busca')
+                    ->placeholder('—')
+                    ->columnSpanFull(),
+                TextEntry::make('author_name')
+                    ->label('Autor')
+                    ->placeholder('—'),
+                TextEntry::make('author_profile_url')
+                    ->label('Perfil do autor')
+                    ->placeholder('—')
+                    ->columnSpanFull(),
+                TextEntry::make('captured_at')
+                    ->label('Capturada em')
+                    ->dateTime('d/m/Y H:i'),
+                TextEntry::make('triage_status')
+                    ->label('Triagem'),
+                TextEntry::make('triage_result')
+                    ->label('Resultado')
+                    ->placeholder('—'),
+                TextEntry::make('triage_reason')
+                    ->label('Justificativa')
+                    ->placeholder('—')
+                    ->columnSpanFull(),
+                TextEntry::make('triage_error')
+                    ->label('Erro')
+                    ->placeholder('—')
+                    ->columnSpanFull(),
+            ]);
     }
 
     public static function table(Table $table): Table
