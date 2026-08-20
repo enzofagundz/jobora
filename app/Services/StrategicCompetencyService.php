@@ -1,0 +1,310 @@
+<?php
+
+namespace App\Services;
+
+use App\Agents\StrategicCompetencyAgent;
+use App\DTO\StrategicCompetencyResult;
+use App\Enums\ProfessionalCompetencySource;
+use App\Enums\StrategicRole;
+use App\Models\ProfessionalCompetency;
+use App\Models\User;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use InvalidArgumentException;
+use LogicException;
+use Throwable;
+
+/**
+ * Classificação estratégica de competências do perfil profissional.
+ *
+ * O papel é contextual ao usuário: um mesmo conceito pode ter papéis
+ * diferentes em perfis diferentes. Presença no currículo e lacuna são
+ * dimensões separadas do papel — calculadas na leitura pelo ResumeAnalyzer,
+ * nunca persistidas aqui.
+ *
+ * Precedência: registros manuais são autoridade e nunca são sobrescritos
+ * pela IA; uma reclassificação AI substitui apenas registros AI anteriores.
+ */
+class StrategicCompetencyService
+{
+    public function __construct(
+        private readonly StrategicCompetencyAgent $agent,
+        private readonly ConceptNormalizer $normalizer,
+        private readonly ResumeAnalyzer $resumeAnalyzer,
+        private readonly ResumeService $resumeService,
+        private readonly MarketAnalysisService $marketAnalysis,
+    ) {}
+
+    /**
+     * Run the AI classification for the user's profile and persist valid
+     * results. Requires a non-empty resume; returns the number of AI
+     * classifications persisted (0 when there are no candidates).
+     *
+     * @throws LogicException when no resume is saved
+     * @throws RuntimeException on any failure (nothing is persisted)
+     */
+    public function classify(User $user): int
+    {
+        $resume = $this->resumeService->content();
+
+        if (blank($resume)) {
+            throw new LogicException('Cadastre o currículo antes de classificar as competências.');
+        }
+
+        $payload = $this->buildPayload($resume);
+
+        if ($payload['candidate_concepts'] === []) {
+            return 0;
+        }
+
+        $started = microtime(true);
+        $inputChars = mb_strlen(json_encode($payload, JSON_UNESCAPED_UNICODE));
+        $usage = null;
+
+        try {
+            $response = $this->agent->prompt(json_encode($payload, JSON_UNESCAPED_UNICODE));
+            $usage = $response->usage ?? null;
+
+            $data = json_decode($response->text, true);
+
+            if (! is_array($data)) {
+                throw new InvalidArgumentException('A resposta da IA não é um JSON válido.');
+            }
+
+            $result = StrategicCompetencyResult::fromStructured($data, $this->normalizer);
+
+            $accepted = array_values(array_filter(
+                $result->competencies,
+                fn (array $competency): bool => in_array($competency['concept'], $payload['candidate_concepts'], true),
+            ));
+
+            $this->persistAi($user, $accepted);
+
+            Log::channel('ai')->info('Strategic classification generated.', array_merge([
+                'user_id' => $user->id,
+                'operation' => 'strategic_classification',
+                'provider' => $this->agent->provider(),
+                'model' => $this->agent->model(),
+                'input_chars' => $inputChars,
+                'success' => true,
+                'latency_ms' => (int) round((microtime(true) - $started) * 1000),
+            ], $this->extractUsageData($usage)));
+
+            return count($accepted);
+        } catch (Throwable $e) {
+            Log::channel('ai')->error('Strategic classification failed.', array_merge([
+                'user_id' => $user->id,
+                'operation' => 'strategic_classification',
+                'provider' => $this->agent->provider(),
+                'model' => $this->agent->model(),
+                'input_chars' => $inputChars,
+                'success' => false,
+                'latency_ms' => (int) round((microtime(true) - $started) * 1000),
+                'error' => $e->getMessage(),
+            ], $this->extractUsageData($usage)));
+
+            throw new \RuntimeException('Falha na classificação estratégica: '.$e->getMessage(), 0, $e);
+        }
+    }
+
+    /**
+     * Persist (upsert) a manual classification. Manual is authority: it
+     * overwrites any previous AI classification for the same concept.
+     *
+     * @throws InvalidArgumentException when the name is empty after normalization
+     */
+    public function saveManual(User $user, string $concept, StrategicRole $role): ProfessionalCompetency
+    {
+        $normalized = $this->normalizer->normalize($concept);
+
+        if ($normalized === '') {
+            throw new InvalidArgumentException('Informe um nome de competência.');
+        }
+
+        if (strlen($normalized) > ProfessionalCompetency::MAX_NAME_LENGTH) {
+            throw new InvalidArgumentException(sprintf(
+                'O nome da competência excede o limite de %d caracteres.',
+                ProfessionalCompetency::MAX_NAME_LENGTH,
+            ));
+        }
+
+        return ProfessionalCompetency::updateOrCreate(
+            ['user_id' => $user->id, 'concept' => $normalized],
+            ['strategic_role' => $role, 'source' => ProfessionalCompetencySource::Manual],
+        );
+    }
+
+    /**
+     * Classified rows of the user with presence/gap computed on read.
+     *
+     * @return array<int, array{
+     *     __key: string,
+     *     id: int,
+     *     concept: string,
+     *     strategic_role: StrategicRole,
+     *     source: ProfessionalCompetencySource,
+     *     present: bool,
+     *     is_gap: bool,
+     * }>
+     */
+    public function rows(?User $user): array
+    {
+        if ($user === null) {
+            return [];
+        }
+
+        $content = $this->resumeService->content();
+
+        return $user->professionalCompetencies()
+            ->orderBy('concept')
+            ->get()
+            ->map(fn (ProfessionalCompetency $competency): array => [
+                '__key' => (string) $competency->id,
+                'id' => $competency->id,
+                'concept' => $competency->concept,
+                'strategic_role' => $competency->strategic_role,
+                'source' => $competency->source,
+                'present' => $this->resumeAnalyzer->contains($content, $competency->concept),
+                'is_gap' => ! $this->resumeAnalyzer->contains($content, $competency->concept),
+            ])
+            ->all();
+    }
+
+    /**
+     * Concept → classification map for the given user, for the market
+     * comparison. Empty without a user; the caller stays in control of
+     * whose context is consulted.
+     *
+     * @return array<string, ProfessionalCompetency>
+     */
+    public function roleMap(?User $user): array
+    {
+        if ($user === null) {
+            return [];
+        }
+
+        return $user->professionalCompetencies()
+            ->get()
+            ->keyBy('concept')
+            ->all();
+    }
+
+    /**
+     * Remove a classification row; only when it belongs to the given user.
+     */
+    public function remove(User $user, int $competencyId): void
+    {
+        $user->professionalCompetencies()
+            ->whereKey($competencyId)
+            ->delete();
+    }
+
+    /**
+     * Context sent to the agent: resume + market items with presence,
+     * and the closed set of classifiable candidates.
+     * Deduplicated: resume text already contains the concepts, so the
+     * separate resume_concepts list is omitted; candidate_concepts remains
+     * as the allowlist (market + resume concepts).
+     *
+     * @return array<string, mixed>
+     */
+    private function buildPayload(string $resume): array
+    {
+        $plainResume = ResumeService::plainText($resume);
+        $resumeConcepts = $this->resumeAnalyzer->conceptsIn($plainResume);
+
+        $marketItems = array_map(function (array $row) use ($plainResume): array {
+            return [
+                'category' => $row['category'],
+                'name' => $row['name'],
+                'total' => $row['total'],
+                'present_in_resume' => $this->resumeAnalyzer->contains($plainResume, $row['name']),
+            ];
+        }, $this->marketAnalysis->frequencies());
+
+        $candidates = [];
+
+        foreach ($marketItems as $item) {
+            $candidates[$item['name']] = true;
+        }
+
+        foreach ($resumeConcepts as $concept) {
+            $candidates[$concept] = true;
+        }
+
+        return [
+            'resume' => $plainResume,
+            'market_items' => $marketItems,
+            'candidate_concepts' => array_keys($candidates),
+        ];
+    }
+
+    /**
+     * Replace the user's AI classifications with the accepted response:
+     * manual rows are preserved and never overwritten; AI rows omitted by
+     * the new response are removed. Nothing is written on failure.
+     *
+     * @param  array<int, array{concept: string, strategic_role: StrategicRole}>  $accepted
+     */
+    private function persistAi(User $user, array $accepted): void
+    {
+        DB::transaction(function () use ($user, $accepted): void {
+            $manualConcepts = $user->professionalCompetencies()
+                ->where('source', ProfessionalCompetencySource::Manual)
+                ->pluck('concept')
+                ->all();
+
+            foreach ($accepted as $competency) {
+                if (in_array($competency['concept'], $manualConcepts, true)) {
+                    continue;
+                }
+
+                ProfessionalCompetency::updateOrCreate(
+                    ['user_id' => $user->id, 'concept' => $competency['concept']],
+                    ['strategic_role' => $competency['strategic_role'], 'source' => ProfessionalCompetencySource::Ai],
+                );
+            }
+
+            $acceptedConcepts = array_column($accepted, 'concept');
+
+            $user->professionalCompetencies()
+                ->where('source', ProfessionalCompetencySource::Ai)
+                ->whereNotIn('concept', $acceptedConcepts)
+                ->delete();
+        });
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function extractUsageData(mixed $usage): array
+    {
+        try {
+            if ($usage === null) {
+                return [
+                    'prompt_tokens' => 0,
+                    'completion_tokens' => 0,
+                    'cache_write_input_tokens' => 0,
+                    'cache_read_input_tokens' => 0,
+                    'reasoning_tokens' => 0,
+                ];
+            }
+
+            return [
+                'prompt_tokens' => (int) ($usage->promptTokens ?? $usage->prompt_tokens ?? 0),
+                'completion_tokens' => (int) ($usage->completionTokens ?? $usage->completion_tokens ?? 0),
+                'cache_write_input_tokens' => (int) ($usage->cacheWriteInputTokens ?? $usage->cache_write_input_tokens ?? 0),
+                'cache_read_input_tokens' => (int) ($usage->cacheReadInputTokens ?? $usage->cache_read_input_tokens ?? 0),
+                'reasoning_tokens' => (int) ($usage->reasoningTokens ?? $usage->reasoning_tokens ?? 0),
+            ];
+        } catch (Throwable) {
+            return [
+                'prompt_tokens' => 0,
+                'completion_tokens' => 0,
+                'cache_write_input_tokens' => 0,
+                'cache_read_input_tokens' => 0,
+                'reasoning_tokens' => 0,
+            ];
+        }
+    }
+}

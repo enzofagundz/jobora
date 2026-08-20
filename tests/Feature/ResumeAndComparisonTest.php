@@ -1,7 +1,11 @@
 <?php
 
+use App\Enums\ProfessionalCompetencySource;
+use App\Enums\StrategicRole;
 use App\Models\JobPosting;
+use App\Models\ProfessionalCompetency;
 use App\Models\Resume;
+use App\Models\User;
 use App\Services\MarketComparisonService;
 use App\Services\ResumeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -108,4 +112,60 @@ it('competência removida volta a ser lacuna', function () {
     app(ResumeService::class)->save('Currículo sem menções.');
 
     expect(collect(app(MarketComparisonService::class)->gaps())->pluck('name')->all())->toContain('clean code');
+});
+
+it('linha de mercado carrega papel e origem quando classificada e permanece lacuna quando ausente', function () {
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    confirmedWithItems(['Python']);
+    app(ResumeService::class)->save('Currículo sem tecnologias citadas.');
+
+    ProfessionalCompetency::factory()->create([
+        'user_id' => $user->id,
+        'concept' => 'Python',
+        'strategic_role' => StrategicRole::Expansion,
+        'source' => ProfessionalCompetencySource::Manual,
+    ]);
+
+    $row = collect(app(MarketComparisonService::class)->table())->firstWhere('name', 'Python');
+    $gap = collect(app(MarketComparisonService::class)->gaps(10))->firstWhere('name', 'Python');
+
+    expect($row['strategic_role'])->toBe('expansion')
+        ->and($row['strategic_source'])->toBe('manual')
+        ->and($row['present'])->toBeFalse()
+        ->and($row['is_gap'])->toBeTrue()
+        ->and($gap['strategic_role'])->toBe('expansion');
+});
+
+it('linha de mercado sem classificação não recebe papel', function () {
+    confirmedWithItems(['Python']);
+    app(ResumeService::class)->save('Currículo com Python.');
+
+    $row = collect(app(MarketComparisonService::class)->table())->firstWhere('name', 'Python');
+
+    expect($row['strategic_role'])->toBeNull()
+        ->and($row['strategic_source'])->toBeNull()
+        ->and($row['present'])->toBeTrue()
+        ->and($row['is_gap'])->toBeFalse();
+});
+
+it('papel da linha resolve aliases do item de mercado legado', function () {
+    $user = User::factory()->create();
+    $this->actingAs($user);
+
+    confirmedWithItems(['postgres']);
+    app(ResumeService::class)->save('Currículo com PostgreSQL.');
+
+    ProfessionalCompetency::factory()->create([
+        'user_id' => $user->id,
+        'concept' => 'PostgreSQL',
+        'strategic_role' => StrategicRole::Core,
+        'source' => ProfessionalCompetencySource::Manual,
+    ]);
+
+    $row = collect(app(MarketComparisonService::class)->table())->firstWhere('name', 'postgres');
+
+    expect($row['strategic_role'])->toBe('core')
+        ->and($row['strategic_source'])->toBe('manual');
 });
