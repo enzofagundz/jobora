@@ -30,6 +30,7 @@ return [
         'wordpress',
         'sênior',
         'híbrido',
+        'afirmativa'
     ],
 
 ];
