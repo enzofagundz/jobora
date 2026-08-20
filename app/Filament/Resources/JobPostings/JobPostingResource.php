@@ -10,6 +10,7 @@ use App\Filament\Resources\JobPostings\Schemas\JobPostingForm;
 use App\Filament\Resources\JobPostings\Tables\JobPostingsTable;
 use App\Models\JobPosting;
 use BackedEnum;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
@@ -30,6 +31,23 @@ class JobPostingResource extends Resource
     public static function form(Schema $schema): Schema
     {
         return JobPostingForm::configure($schema);
+    }
+
+    public static function infolist(Schema $schema): Schema
+    {
+        return $schema
+            ->components([
+                TextEntry::make('description')
+                    ->label('Descrição da vaga')
+                    ->html()
+                    ->columnSpanFull(),
+                TextEntry::make('source_url')
+                    ->label('Link de referência (opcional)')
+                    ->url(fn (string $state): string => $state)
+                    ->openUrlInNewTab()
+                    ->placeholder('—')
+                    ->columnSpanFull(),
+            ]);
     }
 
     public static function table(Table $table): Table

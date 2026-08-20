@@ -6,15 +6,15 @@ use App\Enums\ConceptCategory;
 use App\Enums\ItemSource;
 use App\Enums\JobPostingStatus;
 use App\Filament\Resources\JobPostings\Pages\ResumeAdaptationPage;
-use App\Filament\Resources\JobPostings\Pages\ViewJobPosting;
 use App\Jobs\AnalyzeJobPosting;
 use App\Models\JobPosting;
 use App\Models\Resume;
-use App\Services\ConceptNormalizer;
+use App\Services\JobReviewService;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
+use Filament\Actions\ViewAction;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\RichEditor;
@@ -26,7 +26,6 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
-use Illuminate\Support\Facades\DB;
 
 class JobPostingsTable
 {
@@ -53,7 +52,6 @@ class JobPostingsTable
                 TextColumn::make('status')
                     ->label('Status')
                     ->badge()
-                    ->formatStateUsing(fn (JobPostingStatus $state): string => $state->label())
                     ->color(fn (JobPostingStatus $state): string => match ($state) {
                         JobPostingStatus::Pending => 'gray',
                         JobPostingStatus::NeedsReview => 'warning',
@@ -70,7 +68,7 @@ class JobPostingsTable
             ->filters([
                 SelectFilter::make('status')
                     ->label('Status')
-                    ->options(collect(JobPostingStatus::cases())->mapWithKeys(fn ($case) => [$case->value => $case->label()])->all()),
+                    ->options(JobPostingStatus::class),
                 Filter::make('collected_at')
                     ->label('Período de coleta')
                     ->form([
@@ -84,7 +82,7 @@ class JobPostingsTable
                     }),
                 SelectFilter::make('category')
                     ->label('Categoria de item')
-                    ->options(collect(ConceptCategory::all())->mapWithKeys(fn ($case) => [$case->value => $case->label()])->all())
+                    ->options(ConceptCategory::class)
                     ->query(fn ($query, array $data) => $query
                         ->when($data['value'], fn ($q, $value) => $q->whereHas('items', fn ($items) => $items->where('category', $value)))),
             ])
@@ -107,12 +105,9 @@ class JobPostingsTable
                             ->body('A vaga está sendo analisada em segundo plano. O status será atualizado na listagem.')
                             ->send();
                     }),
-                Action::make('view')
+                ViewAction::make()
                     ->label('Ver')
-                    ->icon('heroicon-o-eye')
-                    ->color('gray')
-                    ->visible(fn (JobPosting $record): bool => $record->status === JobPostingStatus::Pending)
-                    ->url(fn (JobPosting $record): string => ViewJobPosting::getUrl(['record' => $record])),
+                    ->visible(fn (JobPosting $record): bool => $record->status === JobPostingStatus::Pending),
                 Action::make('review')
                     ->label('Revisar')
                     ->icon('heroicon-o-clipboard-document-check')
@@ -138,7 +133,7 @@ class JobPostingsTable
                             ->schema([
                                 Select::make('category')
                                     ->label('Categoria')
-                                    ->options(collect(ConceptCategory::all())->mapWithKeys(fn ($case) => [$case->value => $case->label()])->all())
+                                    ->options(ConceptCategory::class)
                                     ->required(),
                                 TextInput::make('name')
                                     ->label('Nome')
@@ -172,13 +167,7 @@ class JobPostingsTable
                             ->modalDescription('A sugestão da IA será removida e a vaga voltará para "pendente".')
                             ->cancelParentActions()
                             ->action(function (JobPosting $record): void {
-                                $record->forceFill([
-                                    'status' => JobPostingStatus::Pending,
-                                    'suggested_data' => null,
-                                    'role' => null,
-                                    'company' => null,
-                                    'error_message' => null,
-                                ])->save();
+                                app(JobReviewService::class)->discard($record);
 
                                 Notification::make()
                                     ->warning()
@@ -188,38 +177,7 @@ class JobPostingsTable
                             }),
                     ])
                     ->action(function (array $data, JobPosting $record): void {
-                        $normalizer = app(ConceptNormalizer::class);
-                        $suggestedPairs = collect($record->suggested_data['items'] ?? [])
-                            ->map(fn (array $item): string => $item['category'].'|'.$item['name'])
-                            ->all();
-
-                        DB::transaction(function () use ($data, $record, $normalizer, $suggestedPairs): void {
-                            $record->items()->delete();
-
-                            foreach ($data['items'] as $item) {
-                                $name = $normalizer->normalize($item['name']);
-
-                                if ($name === '') {
-                                    continue;
-                                }
-
-                                $record->items()->create([
-                                    'category' => $item['category'],
-                                    'name' => $name,
-                                    'source' => in_array($item['category'].'|'.$name, $suggestedPairs, true)
-                                        ? ItemSource::Ai
-                                        : ItemSource::User,
-                                ]);
-                            }
-
-                            $record->forceFill([
-                                'role' => blank($data['role']) ? null : $data['role'],
-                                'company' => blank($data['company']) ? null : $data['company'],
-                                'status' => JobPostingStatus::Confirmed,
-                                'suggested_data' => null,
-                                'error_message' => null,
-                            ])->save();
-                        });
+                        app(JobReviewService::class)->confirm($record, $data['items'], $data['role'] ?? null, $data['company'] ?? null);
 
                         Notification::make()
                             ->success()

@@ -127,11 +127,6 @@ class ResumeAdaptationPage extends Page
         }
     }
 
-    public function downloadPdf(): ?string
-    {
-        return $this->adaptation() === null ? null : route('filament.admin.resume-pdf.download', $this->record);
-    }
-
     protected function getHeaderActions(): array
     {
         return [
