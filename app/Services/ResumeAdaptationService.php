@@ -42,9 +42,16 @@ class ResumeAdaptationService
         $this->assertEligible($posting);
 
         $started = microtime(true);
+        $inputChars = 0;
+        $usage = null;
 
         try {
-            $response = $this->agent->prompt(json_encode($this->buildPayload($posting), JSON_UNESCAPED_UNICODE));
+            $payload = $this->buildPayload($posting);
+            $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
+            $inputChars = mb_strlen($jsonPayload);
+
+            $response = $this->agent->prompt($jsonPayload);
+            $usage = $response->usage ?? null;
 
             $data = json_decode($response->text, true);
 
@@ -67,21 +74,28 @@ class ResumeAdaptationService
                 ],
             );
 
-            Log::channel('ai')->info('Resume adaptation generated.', [
+            Log::channel('ai')->info('Resume adaptation generated.', array_merge([
                 'job_posting_id' => $posting->id,
+                'operation' => 'resume_adaptation',
+                'provider' => $this->agent->provider(),
                 'model' => $this->agent->model(),
+                'input_chars' => $inputChars,
                 'success' => true,
                 'latency_ms' => (int) round((microtime(true) - $started) * 1000),
-            ]);
+            ], $this->extractUsageData($usage)));
 
             return $adaptation;
         } catch (Throwable $e) {
-            Log::channel('ai')->error('Resume adaptation failed.', [
+            Log::channel('ai')->error('Resume adaptation failed.', array_merge([
                 'job_posting_id' => $posting->id,
+                'operation' => 'resume_adaptation',
+                'provider' => $this->agent->provider(),
                 'model' => $this->agent->model(),
+                'input_chars' => $inputChars,
                 'success' => false,
+                'latency_ms' => (int) round((microtime(true) - $started) * 1000),
                 'error' => $e->getMessage(),
-            ]);
+            ], $this->extractUsageData($usage)));
 
             throw new \RuntimeException('Falha na adequação do currículo: '.$e->getMessage(), 0, $e);
         }
@@ -99,14 +113,16 @@ class ResumeAdaptationService
     }
 
     /**
-     * Context sent to the agent: resume + description + structured items
-     * + per-vacancy market × resume positioning.
+     * Context sent to the agent: resume + description + positioning.
+     * Deduplicated: positioning already carries category/name + presence flag,
+     * so the redundant job_items list and the derived resume_concepts are omitted.
      *
      * @return array<string, mixed>
      */
     private function buildPayload(JobPosting $posting): array
     {
-        $resume = $this->resumeService->content();
+        $resume = ResumeService::plainText($this->resumeService->content());
+        $description = ResumeService::plainText($posting->description);
 
         $positioning = $posting->items
             ->map(fn ($item): array => [
@@ -119,15 +135,10 @@ class ResumeAdaptationService
 
         return [
             'resume' => $resume,
-            'job_description' => $posting->description,
+            'job_description' => $description,
             'job_role' => $posting->role,
             'job_company' => $posting->company,
-            'job_items' => $posting->items
-                ->map(fn ($item): array => ['category' => $item->category->value, 'name' => $item->name])
-                ->values()
-                ->all(),
             'positioning' => $positioning,
-            'resume_concepts' => $this->resumeAnalyzer->conceptsIn($resume),
         ];
     }
 
@@ -182,6 +193,40 @@ class ResumeAdaptationService
                     $requirement,
                 ));
             }
+        }
+    }
+
+    /**
+     * @return array<string, int>
+     */
+    private function extractUsageData(mixed $usage): array
+    {
+        try {
+            if ($usage === null) {
+                return [
+                    'prompt_tokens' => 0,
+                    'completion_tokens' => 0,
+                    'cache_write_input_tokens' => 0,
+                    'cache_read_input_tokens' => 0,
+                    'reasoning_tokens' => 0,
+                ];
+            }
+
+            return [
+                'prompt_tokens' => (int) ($usage->promptTokens ?? $usage->prompt_tokens ?? 0),
+                'completion_tokens' => (int) ($usage->completionTokens ?? $usage->completion_tokens ?? 0),
+                'cache_write_input_tokens' => (int) ($usage->cacheWriteInputTokens ?? $usage->cache_write_input_tokens ?? 0),
+                'cache_read_input_tokens' => (int) ($usage->cacheReadInputTokens ?? $usage->cache_read_input_tokens ?? 0),
+                'reasoning_tokens' => (int) ($usage->reasoningTokens ?? $usage->reasoning_tokens ?? 0),
+            ];
+        } catch (Throwable) {
+            return [
+                'prompt_tokens' => 0,
+                'completion_tokens' => 0,
+                'cache_write_input_tokens' => 0,
+                'cache_read_input_tokens' => 0,
+                'reasoning_tokens' => 0,
+            ];
         }
     }
 }

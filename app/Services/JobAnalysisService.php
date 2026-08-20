@@ -38,11 +38,16 @@ class JobAnalysisService
         }
 
         $started = microtime(true);
+        $inputChars = 0;
+        $usage = null;
 
         try {
-            $this->assertDescriptionWithinLimits($posting->description);
+            $plainDescription = ResumeService::plainText($posting->description);
+            $inputChars = mb_strlen($plainDescription);
+            $this->assertDescriptionWithinLimits($plainDescription);
 
-            $response = $this->agent->prompt($posting->description);
+            $response = $this->agent->prompt($plainDescription);
+            $usage = $response->usage ?? null;
 
             $data = json_decode($response->text, true);
 
@@ -62,6 +67,10 @@ class JobAnalysisService
 
             $this->log('info', 'Job posting analyzed successfully.', $posting, $started, [
                 'item_count' => count($result->items, COUNT_RECURSIVE) - count($result->items),
+                'operation' => 'job_extraction',
+                'provider' => $this->agent->provider(),
+                'input_chars' => $inputChars,
+                'usage' => $usage,
             ]);
 
             return $posting;
@@ -69,6 +78,10 @@ class JobAnalysisService
             if ($this->isTransientProviderError($e)) {
                 $this->log('warning', 'Job posting analysis deferred due to a transient provider error.', $posting, $started, [
                     'error' => $e->getMessage(),
+                    'operation' => 'job_extraction',
+                    'provider' => $this->agent->provider(),
+                    'input_chars' => $inputChars,
+                    'usage' => $usage,
                 ]);
 
                 return $posting;
@@ -82,6 +95,10 @@ class JobAnalysisService
 
             $this->log('error', 'Job posting analysis failed.', $posting, $started, [
                 'error' => $e->getMessage(),
+                'operation' => 'job_extraction',
+                'provider' => $this->agent->provider(),
+                'input_chars' => $inputChars,
+                'usage' => $usage,
             ]);
 
             return $posting;
@@ -116,11 +133,55 @@ class JobAnalysisService
      */
     private function log(string $level, string $message, JobPosting $posting, float $started, array $context = []): void
     {
+        $usage = $context['usage'] ?? null;
+        unset($context['usage']);
+
+        $usageData = $this->extractUsageData($usage);
+
         Log::channel('ai')->{$level}($message, array_merge([
             'job_posting_id' => $posting->id,
+            'operation' => $context['operation'] ?? 'job_extraction',
+            'provider' => $context['provider'] ?? $this->agent->provider(),
             'model' => $this->agent->model(),
+            'input_chars' => $context['input_chars'] ?? 0,
             'success' => $level === 'info',
             'latency_ms' => (int) round((microtime(true) - $started) * 1000),
-        ], $context));
+        ], $usageData, $context));
+    }
+
+    /**
+     * Extract normalized usage fields defensively.
+     *
+     * @return array<string, int>
+     */
+    private function extractUsageData(mixed $usage): array
+    {
+        try {
+            if ($usage === null) {
+                return [
+                    'prompt_tokens' => 0,
+                    'completion_tokens' => 0,
+                    'cache_write_input_tokens' => 0,
+                    'cache_read_input_tokens' => 0,
+                    'reasoning_tokens' => 0,
+                ];
+            }
+
+            return [
+                'prompt_tokens' => (int) ($usage->promptTokens ?? $usage->prompt_tokens ?? 0),
+                'completion_tokens' => (int) ($usage->completionTokens ?? $usage->completion_tokens ?? 0),
+                'cache_write_input_tokens' => (int) ($usage->cacheWriteInputTokens ?? $usage->cache_write_input_tokens ?? 0),
+                'cache_read_input_tokens' => (int) ($usage->cacheReadInputTokens ?? $usage->cache_read_input_tokens ?? 0),
+                'reasoning_tokens' => (int) ($usage->reasoningTokens ?? $usage->reasoning_tokens ?? 0),
+            ];
+        } catch (Throwable) {
+            return [
+                'prompt_tokens' => 0,
+                'completion_tokens' => 0,
+                'cache_write_input_tokens' => 0,
+                'cache_read_input_tokens' => 0,
+                'reasoning_tokens' => 0,
+            ];
+        }
     }
 }

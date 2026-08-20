@@ -40,7 +40,9 @@ return [
             'connection' => env('DB_QUEUE_CONNECTION'),
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
-            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 90),
+            // Must exceed the longest AI agent timeout (120s) plus headroom to avoid
+            // releasing a job while the worker is still processing it.
+            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 180),
             'after_commit' => false,
         ],
 

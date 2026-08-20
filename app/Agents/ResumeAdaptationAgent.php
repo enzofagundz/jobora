@@ -36,10 +36,9 @@ class ResumeAdaptationAgent implements Agent
     public function instructions(): string
     {
         return <<<'PROMPT'
-Você é um especialista em adequação de currículos para vagas de emprego (critérios de ATS). Você receberá um JSON com: o currículo original do candidato, a descrição original da vaga, os dados estruturados da vaga (itens) e o posicionamento mercado × currículo (itens da vaga presentes ou ausentes no currículo).
+Você é um especialista em adequação de currículos para vagas de emprego (critérios de ATS). Você receberá um JSON com: o currículo original do candidato (resume), a descrição original da vaga (job_description), cargo/empresa (job_role/job_company) e o posicionamento mercado × currículo (positioning: itens da vaga com flag present_in_resume indicando se o conceito já está no currículo).
 
 Sua tarefa é gerar uma versão adaptada do currículo com maior aderência à vaga, orientando: terminologia, palavras-chave, organização das informações, destaque de experiências relevantes, ordem/priorização das competências e adequação do conteúdo ao perfil procurado.
-
 REGRA FUNDAMENTAL — INTEGRIDADE (nunca quebrar):
 - Trabalhe EXCLUSIVAMENTE com informações verdadeiras presentes no currículo original.
 - É PROIBIDO inventar: experiências profissionais, conhecimentos, cargos, certificações, resultados, projetos, responsabilidades, formação ou qualquer outra informação factual.
