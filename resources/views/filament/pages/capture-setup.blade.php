@@ -33,28 +33,31 @@
                     Use este token no popup da extensão. Ele aparece mascarado;
                     revele para conferir antes de colar.
                 </p>
-                <div class="mt-3 flex items-center gap-3"
+                <div class="mt-3 flex flex-wrap items-center gap-3"
                      x-data="{ revealed: false }"
                 >
-                    <code class="px-3 py-1.5 bg-gray-100 dark:bg-gray-800 rounded font-mono text-sm break-all"
+                    <code class="min-w-0 flex-1 break-all rounded bg-gray-100 px-3 py-1.5 font-mono text-sm dark:bg-gray-800"
                           x-show="revealed"
                           x-cloak
                     >{{ $this->fullToken() }}</code>
-                    <code x-show="! revealed">{{ $this->maskedToken() }}</code>
-                    <x-filament::button
-                        color="gray"
-                        size="sm"
-                        x-on:click="revealed = ! revealed"
-                    >
-                        <span x-text="revealed ? 'Ocultar' : 'Revelar'">Revelar</span>
-                    </x-filament::button>
-                    <button
-                        type="button"
-                        class="fi-btn cursor-pointer"
-                        x-on:click="await navigator.clipboard.writeText({{ Js::from($this->fullToken()) }})"
-                    >
-                        Copiar token
-                    </button>
+                    <code class="min-w-0 flex-1 break-all rounded bg-gray-100 px-3 py-1.5 font-mono text-sm dark:bg-gray-800"
+                          x-show="! revealed">{{ $this->maskedToken() }}</code>
+                    <div class="flex shrink-0 items-center gap-2">
+                        <x-filament::button
+                            color="gray"
+                            size="sm"
+                            x-on:click="revealed = ! revealed"
+                        >
+                            <span x-text="revealed ? 'Ocultar' : 'Revelar'">Revelar</span>
+                        </x-filament::button>
+                        <x-filament::button
+                            color="gray"
+                            size="sm"
+                            x-on:click="await navigator.clipboard.writeText({{ Js::from($this->fullToken()) }})"
+                        >
+                            Copiar token
+                        </x-filament::button>
+                    </div>
                 </div>
             </x-filament::section>
 
