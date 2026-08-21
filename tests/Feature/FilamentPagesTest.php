@@ -3,8 +3,9 @@
 use App\Agents\JobExtractionAgent;
 use App\Agents\ResumeAdaptationAgent;
 use App\Enums\JobPostingStatus;
-use App\Filament\Pages\MarketComparisonPage;
 use App\Filament\Pages\MarketTrendsPage;
+use App\Filament\Pages\MarketComparisonPage;
+use App\Filament\Pages\CaptureSetupPage;
 use App\Filament\Pages\ResumePage;
 use App\Filament\Resources\JobPostings\Pages\ListJobPostings;
 use App\Filament\Resources\JobPostings\Pages\ResumeAdaptationPage;
@@ -332,10 +333,36 @@ it('redireciona para a listagem ao abrir a view de vaga já enviada para anális
 });
 
 it('mostra a ação ver somente em vagas pendentes', function () {
+
     $pending = JobPosting::factory()->create(['description' => longDescription()]);
     $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
 
     Livewire::test(ListJobPostings::class)
         ->assertTableActionVisible('view', $pending)
         ->assertTableActionHidden('view', $confirmed);
+});
+
+it('renderiza a página de onboarding da extensão com os quatro passos e o token', function () {
+    config(['capture.api_token' => 'token-secreto-1234']);
+
+    $page = Livewire::test(CaptureSetupPage::class)
+        ->assertSuccessful()
+        ->assertSee('Instale a extensão')
+        ->assertSee('Copie o token')
+        ->assertSee('Cole no popup da extensão')
+        ->assertSee('Valide e conecte');
+
+    // Token mascarado visível por padrão; valor integral só dentro do bloco
+    // x-show="revealed" (não exibido sem interação).
+    expect($page->html())->toContain('••••1234')
+        ->and(substr_count($page->html(), 'token-secreto-1234'))->toBe(1);
+});
+it('informa que a API não está configurada quando o token é vazio', function () {
+    config(['capture.api_token' => '']);
+
+    Livewire::test(CaptureSetupPage::class)
+        ->assertSuccessful()
+        ->assertSee('API não configurada')
+        ->assertSee('VAGAS_API_TOKEN')
+        ->assertDontSee('Copie o token');
 });
