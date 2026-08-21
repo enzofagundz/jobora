@@ -3,9 +3,9 @@
 use App\Agents\JobExtractionAgent;
 use App\Agents\ResumeAdaptationAgent;
 use App\Enums\JobPostingStatus;
-use App\Filament\Pages\MarketTrendsPage;
-use App\Filament\Pages\MarketComparisonPage;
 use App\Filament\Pages\CaptureSetupPage;
+use App\Filament\Pages\MarketComparisonPage;
+use App\Filament\Pages\MarketTrendsPage;
 use App\Filament\Pages\ResumePage;
 use App\Filament\Resources\JobPostings\Pages\ListJobPostings;
 use App\Filament\Resources\JobPostings\Pages\ResumeAdaptationPage;
@@ -352,10 +352,10 @@ it('renderiza a página de onboarding da extensão com os quatro passos e o toke
         ->assertSee('Cole no popup da extensão')
         ->assertSee('Valide e conecte');
 
-    // Token mascarado visível por padrão; valor integral só dentro do bloco
-    // x-show="revealed" (não exibido sem interação).
+    // Token mascarado visível por padrão; valor integral no bloco
+    // x-show="revealed" e no handler de cópia (Js::from).
     expect($page->html())->toContain('••••1234')
-        ->and(substr_count($page->html(), 'token-secreto-1234'))->toBe(1);
+        ->and(substr_count($page->html(), 'token-secreto-1234'))->toBe(2);
 });
 it('informa que a API não está configurada quando o token é vazio', function () {
     config(['capture.api_token' => '']);
