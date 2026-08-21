@@ -110,14 +110,53 @@ it('deduplica pela url normalizada ignorando query de tracking', function () {
     expect(JobCapture::query()->count())->toBe(1);
 });
 
-it('deduplica pela descrição quando não há external_id nem url', function () {
+it('deduplica pelo fingerprint composto quando não há external_id nem url', function () {
+    $payload = capturePayload(['external_id' => null, 'url' => null]);
+    $this->postJson('/api/job-captures', $payload, captureHeaders())->assertStatus(201);
+
+    // Mesmo post com whitespace/caixa diferentes e captured_at/search_url novos.
+    $this->postJson('/api/job-captures', capturePayload([
+        'external_id' => null,
+        'url' => null,
+        'description' => '  VAGA   para Desenvolvedor PHP com Laravel e PostgreSQL.  ',
+        'captured_at' => '2026-08-19T18:30:00Z',
+        'search_url' => 'https://www.linkedin.com/search/results/content/?keywords=outro',
+    ]), captureHeaders())
+        ->assertStatus(200)
+        ->assertJson(['duplicate' => true]);
+
+    expect(JobCapture::query()->count())->toBe(1)
+        ->and(JobCapture::query()->sole()->dedup_key)->toStartWith('fingerprint:');
+});
+
+it('nao deduplica por descricao isolada: campos estaveis diferentes criam duas linhas', function () {
     $payload = capturePayload(['external_id' => null, 'url' => null]);
     $this->postJson('/api/job-captures', $payload, captureHeaders())->assertStatus(201);
 
     $this->postJson('/api/job-captures', capturePayload([
         'external_id' => null,
         'url' => null,
-        'description' => 'Vaga para desenvolvedor PHP com Laravel e PostgreSQL. ',
+        'company' => 'Acme',
+    ]), captureHeaders())->assertStatus(201);
+
+    expect(JobCapture::query()->count())->toBe(2);
+});
+
+it('tres posts identicos produzem uma linha e respostas 201/200/200', function () {
+    foreach ([201, 200, 200] as $expectedStatus) {
+        $this->postJson('/api/job-captures', capturePayload(), captureHeaders())
+            ->assertStatus($expectedStatus);
+    }
+
+    expect(JobCapture::query()->count())->toBe(1);
+});
+
+it('mesmo external_id com descricao e url diferentes deixa uma linha', function () {
+    $this->postJson('/api/job-captures', capturePayload(), captureHeaders())->assertStatus(201);
+
+    $this->postJson('/api/job-captures', capturePayload([
+        'url' => 'https://www.linkedin.com/feed/update/outro',
+        'description' => 'Texto completamente diferente.',
     ]), captureHeaders())
         ->assertStatus(200)
         ->assertJson(['duplicate' => true]);
@@ -256,4 +295,211 @@ it('impede no banco dois registros com mesmo source e external_id', function () 
     ]))->toThrow(QueryException::class);
 
     expect(JobCapture::where('external_id', 'urn:li:activity:777')->count())->toBe(1);
+});
+it('deduplica POST idêntico: 201 depois 200 com mesmo id e uma linha', function () {
+    $payload = capturePayload(['external_id' => 'urn:li:activity:9001', 'url' => null]);
+
+    $first = $this->postJson('/api/job-captures', $payload, captureHeaders())
+        ->assertStatus(201)
+        ->assertJson(['duplicate' => false])
+        ->json('capture.id');
+
+    $second = $this->postJson('/api/job-captures', $payload, captureHeaders())
+        ->assertStatus(200)
+        ->assertJson(['duplicate' => true])
+        ->json('capture.id');
+
+    expect($second)->toBe($first)
+        ->and(JobCapture::query()->count())->toBe(1);
+});
+
+it('deduplica cinco envios sequenciais do mesmo payload (e dez)', function () {
+    $payload = capturePayload(['external_id' => null, 'url' => null, 'description' => 'Vaga para desenvolvedor PHP com Laravel — stress sequencial.']);
+
+    $ids = [];
+    $statuses = [];
+    $duplicates = [];
+
+    for ($i = 0; $i < 5; $i++) {
+        $response = $this->postJson('/api/job-captures', $payload, captureHeaders());
+        $ids[] = $response->json('capture.id');
+        $statuses[] = $response->status();
+        $duplicates[] = $response->json('duplicate');
+    }
+
+    expect($statuses[0])->toBe(201)
+        ->and($duplicates[0])->toBeFalse()
+        ->and(array_slice($statuses, 1))->each->toBe(200)
+        ->and(array_slice($duplicates, 1))->each->toBeTrue()
+        ->and(array_unique($ids))->toHaveCount(1)
+        ->and(JobCapture::query()->count())->toBe(1);
+
+    // dez envios do mesmo payload em outro cenário (ext) — prova que 10 também escala
+    $payloadExt = capturePayload(['external_id' => 'urn:li:activity:9002', 'url' => null]);
+    // reseta banco isolado por RefreshDatabase: este segundo lote começa do zero? Na verdade já temos 1 linha; usar payload distinto para dez
+    // Para provar dez, criamos novo payloadExt e enviamos 10 vezes esperando 1 criação
+    JobCapture::query()->delete();
+    $ids10 = [];
+    for ($i = 0; $i < 10; $i++) {
+        $ids10[] = $this->postJson('/api/job-captures', $payloadExt, captureHeaders())->json('capture.id');
+    }
+    expect(array_unique($ids10))->toHaveCount(1)
+        ->and(JobCapture::query()->count())->toBe(1);
+});
+
+it('não deduplica payloads com identidade fingerprint diferente', function () {
+    $a = capturePayload(['external_id' => null, 'url' => null, 'description' => 'Vaga A — desenvolvedor PHP Laravel Senior.']);
+    $b = capturePayload(['external_id' => null, 'url' => null, 'description' => 'Vaga B — desenvolvedor Python FastAPI Senior, stack totalmente distinta.']);
+
+    $idA = $this->postJson('/api/job-captures', $a, captureHeaders())->assertStatus(201)->json('capture.id');
+    $idB = $this->postJson('/api/job-captures', $b, captureHeaders())->assertStatus(201)->json('capture.id');
+
+    expect($idA)->not->toBe($idB)
+        ->and(JobCapture::query()->count())->toBe(2);
+});
+
+it('não colapsa quando author_profile_url difere mesmo com descrição igual', function () {
+    $base = ['external_id' => null, 'url' => null, 'description' => 'Vaga idêntica — só muda o autor.'];
+
+    $a = capturePayload(array_merge($base, ['author' => ['name' => null, 'profile_url' => 'https://www.linkedin.com/in/autor-a']]));
+    $b = capturePayload(array_merge($base, ['author' => ['name' => null, 'profile_url' => 'https://www.linkedin.com/in/autor-b']]));
+
+    $this->postJson('/api/job-captures', $a, captureHeaders())->assertStatus(201);
+    $this->postJson('/api/job-captures', $b, captureHeaders())->assertStatus(201);
+
+    expect(JobCapture::query()->count())->toBe(2);
+});
+
+it('deduplica captura linkedin sem identificadores ignorando author_name volátil e sufixo … mais (220/223)', function () {
+    $descricao = "🚨 Estamos contratando 🚨\n\n🚀Venha fazer parte do time da ANS4 CONSULTORIA!!!\n\n📌 Vaga: Desenvolvedor Full Stack Sênior\nModelo de contratação: PJ\nModalidade: Remoto\n\nRequisitos:\nExperiência sólida como Desenvolvedor(a) Full Stack Sênior;";
+    $perfil = 'https://www.linkedin.com/in/joana-luisa-ara%C3%BAjo-9338842a8/';
+
+    $primeiro = capturePayload([
+        'external_id' => null,
+        'url' => null,
+        'title' => null,
+        'company' => null,
+        'location' => null,
+        'description' => $descricao,
+        'author' => ['name' => null, 'profile_url' => $perfil],
+    ]);
+
+    $segundo = capturePayload([
+        'external_id' => null,
+        'url' => null,
+        'title' => null,
+        'company' => null,
+        'location' => null,
+        'description' => $descricao.'… mais',
+        'author' => ['name' => 'Ver perfil de Joana Luisa Araújo', 'profile_url' => $perfil],
+    ]);
+
+    $idPrimeiro = $this->postJson('/api/job-captures', $primeiro, captureHeaders())
+        ->assertStatus(201)
+        ->assertJson(['duplicate' => false])
+        ->json('capture.id');
+
+    $respostaSegundo = $this->postJson('/api/job-captures', $segundo, captureHeaders())
+        ->assertStatus(200)
+        ->assertJson(['duplicate' => true]);
+
+    expect($respostaSegundo->json('capture.id'))->toBe($idPrimeiro)
+        ->and(JobCapture::query()->count())->toBe(1)
+        ->and(JobCapture::query()->sole()->author_profile_url)->toBe($perfil);
+});
+
+it('deduplica fingerprint sufixo "... mais" ascii também', function () {
+    $payloadA = capturePayload(['external_id' => null, 'url' => null, 'description' => 'Vaga Python Sênior — stack idêntica']);
+    $payloadB = capturePayload(['external_id' => null, 'url' => null, 'description' => 'Vaga Python Sênior — stack idêntica... mais']);
+
+    $idA = $this->postJson('/api/job-captures', $payloadA, captureHeaders())->assertStatus(201)->json('capture.id');
+    $idB = $this->postJson('/api/job-captures', $payloadB, captureHeaders())->assertStatus(200)->json('capture.id');
+
+    expect($idB)->toBe($idA)
+        ->and(JobCapture::query()->count())->toBe(1);
+});
+
+it('compatibilidade histórica: reenvio reconhece linha content: legada sem criar nova', function () {
+    $descricao = 'Descrição histórica legada — vaga PHP Laravel com PostgreSQL.';
+    $canonica = mb_strtolower(preg_replace('/\s+/u', ' ', trim($descricao)) ?? $descricao);
+
+    $legada = JobCapture::create([
+        'source' => 'linkedin',
+        'external_id' => null,
+        'dedup_key' => 'content:'.hash('sha256', $canonica),
+        'url' => null,
+        'search_url' => null,
+        'title' => null,
+        'description' => $descricao,
+        'company' => null,
+        'location' => null,
+        'author_name' => null,
+        'author_profile_url' => null,
+        'captured_at' => now(),
+    ]);
+
+    $payload = capturePayload([
+        'external_id' => null,
+        'url' => null,
+        'title' => null,
+        'company' => null,
+        'location' => null,
+        'description' => $descricao,
+        'author' => ['name' => null, 'profile_url' => null],
+    ]);
+
+    $response = $this->postJson('/api/job-captures', $payload, captureHeaders())
+        ->assertStatus(200)
+        ->assertJson(['duplicate' => true]);
+
+    expect($response->json('capture.id'))->toBe($legada->id)
+        ->and(JobCapture::query()->count())->toBe(1);
+});
+
+it('prioriza linha promovida na compatibilidade histórica fingerprint', function () {
+    // Cria duas linhas históricas fingerprint: antigas com author_name no hash, sem dedup canônico atual
+    // Simulamos ao inserir manualmente com dedup_key fingerprint antigo (incluía author_name) mas com mesma identidade canônica nova
+    $descricao = 'Vaga promovida vs pendente — mesmo conteúdo.';
+    $perfil = 'https://www.linkedin.com/in/autor-promovido';
+
+    // Para forçar colisão canônica, inserimos duas linhas legadas com dedup fingerprint divergente do novo,
+    // mas que colidem quando normalizadas pelo novo algoritmo.
+    $antigaPendente = JobCapture::create([
+        'source' => 'linkedin',
+        'external_id' => null,
+        'dedup_key' => 'fingerprint:legado-pendente-'.uniqid(),
+        'url' => null,
+        'description' => $descricao,
+        'author_name' => 'Autor Pendente',
+        'author_profile_url' => $perfil,
+        'captured_at' => now(),
+    ]);
+
+    $posting = JobPosting::factory()->create();
+    $antigaPromovida = JobCapture::create([
+        'source' => 'linkedin',
+        'external_id' => null,
+        'dedup_key' => 'fingerprint:legado-promovido-'.uniqid(),
+        'url' => null,
+        'description' => $descricao,
+        'author_name' => null,
+        'author_profile_url' => $perfil,
+        'job_posting_id' => $posting->id,
+        'captured_at' => now(),
+    ]);
+
+    $payload = capturePayload([
+        'external_id' => null,
+        'url' => null,
+        'description' => $descricao,
+        'author' => ['name' => null, 'profile_url' => $perfil],
+    ]);
+
+    $response = $this->postJson('/api/job-captures', $payload, captureHeaders())
+        ->assertStatus(200)
+        ->assertJson(['duplicate' => true]);
+
+    // Deve retornar a promovida, não a pendente, e não criar nova
+    expect($response->json('capture.id'))->toBe($antigaPromovida->id)
+        ->and(JobCapture::query()->count())->toBe(2);
 });
