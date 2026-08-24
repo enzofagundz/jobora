@@ -1,0 +1,11 @@
+/* Painel fixo no canto inferior direito; px (rem não é isolado em Shadow Root). */
+.vagas-ui-host {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2147483647;
+}
+
+.vagas-panel {
+  pointer-events: auto;
+}
