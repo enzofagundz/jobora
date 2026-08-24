@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Fixture — Resultados de vagas Indeed (simulação)</title>
+</head>
+<body>
+  <ul class="jobsearch-ResultsList">
+
+    <!-- Card A: vjk casa, empresa/localização inline no painel -->
+    <a data-jk="abc111" href="/rc/clk?jk=abc111" class="jcs-JobTitle">
+      <h2><span title="Desenvolvedor PHP">Desenvolvedor PHP</span></h2>
+    </a>
+
+    <!-- Card B: título sem span[title] → fallback h2; empresa/local no card -->
+    <a data-jk="def222" href="/rc/clk?jk=def222" class="jcs-JobTitle">
+      <h2>QA Automático</h2>
+      <div data-testid="company-name">Empresa do Card</div>
+      <div data-testid="text-location">Remoto</div>
+    </a>
+
+    <!-- Card invisível: deve ser ignorado (getClientRects vazio) -->
+    <a data-jk="ghi333" href="/rc/clk?jk=ghi333" style="display:none">
+      <h2>Escondida</h2>
+    </a>
+
+    <!-- Card sem data-jk: erro, não envia -->
+    <a class="jcs-JobTitle"><h2>Sem jk</h2></a>
+  </ul>
+
+  <!-- Painel lateral da vaga clicada (card A) -->
+  <div id="jobsearch-ViewjobPaneWrapper">
+    <h1 data-testid="jobsearch-JobInfoHeader-title">Desenvolvedor PHP</h1>
+    <div data-testid="inlineHeader-companyName">Vaga Tech Ltda</div>
+    <div data-testid="inlineHeader-companyLocation">São Paulo, SP (híbrido)</div>
+    <div id="jobDescriptionText">
+      <p>Descrição completa da vaga de PHP.</p>
+      <br>
+      <ul>
+        <li>Laravel</li>
+        <li>PostgreSQL</li>
+      </ul>
+      <button type="button" aria-expanded="false" aria-label="Ver mais">…ver mais</button>
+      <span id="pane-extra" style="display:none"> Benefícios: VR, plano de saúde.</span>
+    </div>
+  </div>
+
+  <script>
+    // Expande o texto truncado do painel.
+    document.querySelectorAll('#jobDescriptionText button').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        document.getElementById('pane-extra').style.display = 'inline';
+        btn.setAttribute('aria-expanded', 'true');
+        btn.style.display = 'none';
+      });
+    });
+  </script>
+</body>
+</html>
