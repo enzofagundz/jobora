@@ -97,7 +97,7 @@ class JobPostingsTable
                     ->modalHeading('Analisar com IA')
                     ->modalDescription('A descrição da vaga será enviada ao modelo de linguagem para (re)estruturação. Custo de uma chamada de IA por execução.')
                     ->action(function (JobPosting $record): void {
-                        AnalyzeJobPosting::dispatch($record);
+                        AnalyzeJobPosting::dispatch($record, (int) auth()->id());
 
                         Notification::make()
                             ->info()

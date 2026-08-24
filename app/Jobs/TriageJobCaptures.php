@@ -6,6 +6,7 @@ use App\Enums\JobCaptureTriageStatus;
 use App\Models\JobCapture;
 use App\Models\User;
 use App\Services\JobTriageService;
+use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueueAfterCommit;
 use Illuminate\Foundation\Queue\Queueable;
@@ -44,16 +45,47 @@ class TriageJobCaptures implements ShouldBeUnique, ShouldQueueAfterCommit
 
     public function handle(JobTriageService $service): void
     {
-        // O service trata falhas internamente: falha total/parcial marca as
-        // capturas afetadas como failed (recuperáveis via re-envio) — sem retry aqui
-        // além do backoff definido no Job.
-        // Os critérios de triagem vêm do usuário que iniciou o lote; se ele não
-        // existir mais, a triagem segue com listas vazias (comportamento de
-        // usuário sem critérios).
+        $captures = JobCapture::query()->whereIn('id', $this->captureIds)->get();
+
         $service->triageBatch(
-            JobCapture::query()->whereIn('id', $this->captureIds)->get(),
+            $captures,
             User::find($this->userId),
         );
+
+        $fresh = JobCapture::query()->whereIn('id', $this->captureIds)->get();
+
+        if ($fresh->isEmpty()) {
+            return;
+        }
+
+        $completed = $fresh->where('triage_status', JobCaptureTriageStatus::Completed)->count();
+        $failed = $fresh->where('triage_status', JobCaptureTriageStatus::Failed)->count();
+
+        $recipient = User::find($this->userId);
+
+        if (! $recipient) {
+            return;
+        }
+
+        if ($failed === 0 && $completed > 0) {
+            Notification::make()
+                ->success()
+                ->title('Triagem concluída')
+                ->body("{$completed} captura(s) processada(s) com sucesso.")
+                ->sendToDatabase($recipient, isEventDispatched: true);
+        } elseif ($completed > 0 && $failed > 0) {
+            Notification::make()
+                ->warning()
+                ->title('Triagem concluída com erros')
+                ->body("{$completed} captura(s) processada(s); {$failed} falha(s).")
+                ->sendToDatabase($recipient, isEventDispatched: true);
+        } elseif ($completed === 0 && $failed > 0) {
+            Notification::make()
+                ->danger()
+                ->title('Falha na triagem')
+                ->body('Nenhuma captura foi processada com sucesso.')
+                ->sendToDatabase($recipient, isEventDispatched: true);
+        }
     }
 
     /**
@@ -69,5 +101,15 @@ class TriageJobCaptures implements ShouldBeUnique, ShouldQueueAfterCommit
                 'triage_status' => JobCaptureTriageStatus::Failed,
                 'triage_error' => $exception?->getMessage() ?? 'Job falhou (timeout)',
             ]);
+
+        $recipient = User::find($this->userId);
+
+        if ($recipient) {
+            Notification::make()
+                ->danger()
+                ->title('Falha na triagem')
+                ->body('Nenhuma captura foi processada com sucesso.')
+                ->sendToDatabase($recipient, isEventDispatched: true);
+        }
     }
 }

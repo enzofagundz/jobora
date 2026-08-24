@@ -16,7 +16,7 @@ use Illuminate\Support\Collection;
  */
 final class JobPromotionService
 {
-    public function promote(JobCapture $capture): JobPosting
+    public function promote(JobCapture $capture, int $userId): JobPosting
     {
         if (mb_strlen((string) $capture->description) < JobAnalysisService::MIN_DESCRIPTION_LENGTH) {
             throw new \LogicException('Descrição insuficiente para criar vaga (mínimo de '.JobAnalysisService::MIN_DESCRIPTION_LENGTH.' caracteres).');
@@ -29,7 +29,7 @@ final class JobPromotionService
             'status' => JobPostingStatus::Pending,
         ]);
 
-        AnalyzeJobPosting::dispatch($posting);
+        AnalyzeJobPosting::dispatch($posting, $userId);
 
         $capture->update(['job_posting_id' => $posting->id]);
 
@@ -42,7 +42,7 @@ final class JobPromotionService
      *
      * @param  Collection<int, JobCapture>  $captures
      */
-    public function promoteEligible(Collection $captures): int
+    public function promoteEligible(Collection $captures, int $userId): int
     {
         $eligible = $captures->filter(fn (JobCapture $c): bool => $c->job_posting_id === null
             && $c->triage_status === JobCaptureTriageStatus::Completed
@@ -52,7 +52,7 @@ final class JobPromotionService
         $promoted = 0;
 
         foreach ($eligible as $capture) {
-            $this->promote($capture);
+            $this->promote($capture, $userId);
             $promoted++;
         }
 

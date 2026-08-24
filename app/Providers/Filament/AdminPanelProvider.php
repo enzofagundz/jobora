@@ -64,6 +64,8 @@ class AdminPanelProvider extends PanelProvider
             ->authMiddleware([
                 Authenticate::class,
             ])
+            ->databaseNotifications()
+            ->databaseNotificationsPolling(null)
             // Download do PDF da versão adaptada (F6) — rota GET dedicada:
             // respostas de arquivo não podem ser retornadas de ações Livewire
             // (o valor retornado é serializado no snapshot JSON e bytes

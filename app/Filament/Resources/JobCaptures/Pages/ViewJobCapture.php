@@ -25,7 +25,7 @@ class ViewJobCapture extends ViewRecord
                 ->visible(fn (): bool => $this->record->job_posting_id === null)
                 ->action(function (): void {
                     try {
-                        $posting = app(JobPromotionService::class)->promote($this->record);
+                        $posting = app(JobPromotionService::class)->promote($this->record, (int) auth()->id());
                     } catch (LogicException $e) {
                         Notification::make()
                             ->danger()

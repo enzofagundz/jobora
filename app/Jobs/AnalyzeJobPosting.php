@@ -4,7 +4,9 @@ namespace App\Jobs;
 
 use App\Enums\JobPostingStatus;
 use App\Models\JobPosting;
+use App\Models\User;
 use App\Services\JobAnalysisService;
+use Filament\Notifications\Notification;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueueAfterCommit;
 use Illuminate\Foundation\Queue\Queueable;
@@ -32,7 +34,7 @@ class AnalyzeJobPosting implements ShouldBeUnique, ShouldQueueAfterCommit
      */
     public array $backoff = [10, 30, 60];
 
-    public function __construct(public JobPosting $posting) {}
+    public function __construct(public JobPosting $posting, public int $userId) {}
 
     /**
      * Unique lock key: one concurrent analysis per posting.
@@ -52,10 +54,38 @@ class AnalyzeJobPosting implements ShouldBeUnique, ShouldQueueAfterCommit
 
     public function handle(JobAnalysisService $service): void
     {
-        // O service trata falhas internamente: erro transitório do provedor
-        // mantém a vaga pendente; falha real marca failed — sem retry aqui
-        // além do backoff definido no Job.
         $service->analyze($this->posting);
+
+        $fresh = $this->posting->fresh();
+
+        if (! $fresh) {
+            return;
+        }
+
+        // Pending after transient error: state not yet terminal, do not notify.
+        if ($fresh->status === JobPostingStatus::Pending) {
+            return;
+        }
+
+        $recipient = User::find($this->userId);
+
+        if (! $recipient) {
+            return;
+        }
+
+        if ($fresh->status === JobPostingStatus::NeedsReview) {
+            Notification::make()
+                ->success()
+                ->title('Análise de vaga concluída')
+                ->body('A vaga foi analisada e está aguardando revisão.')
+                ->sendToDatabase($recipient, isEventDispatched: true);
+        } elseif ($fresh->status === JobPostingStatus::Failed) {
+            Notification::make()
+                ->danger()
+                ->title('Falha na análise da vaga')
+                ->body('A análise não foi concluída. Abra a vaga para tentar novamente.')
+                ->sendToDatabase($recipient, isEventDispatched: true);
+        }
     }
 
     /**
@@ -65,8 +95,6 @@ class AnalyzeJobPosting implements ShouldBeUnique, ShouldQueueAfterCommit
      */
     public function failed(?Throwable $exception): void
     {
-        // Only act if the posting is still pending (e.g., worker killed mid-analysis).
-        // If the service already transitioned it to needs_review/failed, keep it.
         $fresh = $this->posting->fresh();
 
         if ($fresh && $fresh->status->value === 'pending') {
@@ -74,6 +102,16 @@ class AnalyzeJobPosting implements ShouldBeUnique, ShouldQueueAfterCommit
                 'status' => JobPostingStatus::Failed,
                 'error_message' => 'Falha na análise com IA: '.($exception?->getMessage() ?? 'timeout'),
             ])->save();
+
+            $recipient = User::find($this->userId);
+
+            if ($recipient) {
+                Notification::make()
+                    ->danger()
+                    ->title('Falha na análise da vaga')
+                    ->body('A análise não foi concluída. Abra a vaga para tentar novamente.')
+                    ->sendToDatabase($recipient, isEventDispatched: true);
+            }
         }
     }
 }

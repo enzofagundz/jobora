@@ -21,7 +21,7 @@ class CreateJobPosting extends CreateRecord
 
     protected function afterCreate(): void
     {
-        AnalyzeJobPosting::dispatch($this->record);
+        AnalyzeJobPosting::dispatch($this->record, (int) auth()->id());
     }
 
     protected function getCreatedNotificationTitle(): ?string
