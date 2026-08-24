@@ -43,7 +43,7 @@ class JobCaptureController extends Controller
         [$capture, $duplicate] = $service->store($data);
 
         return response()->json([
-            'capture' => $capture->toArray(),
+            'capture' => $capture->makeHidden('deleted_at')->toArray(),
             'duplicate' => $duplicate,
         ], $duplicate ? 200 : 201);
     }

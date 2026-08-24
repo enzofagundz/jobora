@@ -98,7 +98,7 @@ class JobCaptureService
     private function findHistoricalCompatibility(array $data): ?JobCapture
     {
         // ponytail: busca linear limitada a registros do mesmo source sem external_id e sem URL válida; coluna canônica indexada só se houver tarefa de saneamento aprovada
-        $candidates = JobCapture::query()
+        $candidates = JobCapture::query()->withTrashed()
             ->where('source', $data['source'])
             ->whereNull('external_id')
             ->where(function ($query): void {
@@ -214,7 +214,7 @@ class JobCaptureService
 
         $data['dedup_key'] = $this->dedupKey($data);
 
-        $existing = JobCapture::query()
+        $existing = JobCapture::query()->withTrashed()
             ->where('source', $data['source'])
             ->where('dedup_key', $data['dedup_key'])
             ->first();
@@ -238,7 +238,7 @@ class JobCaptureService
                 throw $e;
             }
 
-            $capture = JobCapture::query()
+            $capture = JobCapture::query()->withTrashed()
                 ->where('source', $data['source'])
                 ->where('dedup_key', $data['dedup_key'])
                 ->first();
