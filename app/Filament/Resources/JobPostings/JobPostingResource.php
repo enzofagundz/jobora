@@ -24,6 +24,8 @@ class JobPostingResource extends Resource
 
     protected static ?string $navigationLabel = 'Vagas';
 
+    protected static ?int $navigationSort = 4;
+
     protected static ?string $modelLabel = 'vaga';
 
     protected static ?string $pluralModelLabel = 'vagas';

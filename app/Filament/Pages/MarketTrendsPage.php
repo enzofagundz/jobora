@@ -22,7 +22,7 @@ class MarketTrendsPage extends Page
 
     protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedArrowTrendingUp;
 
-    protected static ?int $navigationSort = 5;
+    protected static ?int $navigationSort = 8;
 
     #[Url]
     public ?string $category = null;

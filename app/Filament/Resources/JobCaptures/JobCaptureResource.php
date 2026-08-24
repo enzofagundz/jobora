@@ -21,6 +21,8 @@ class JobCaptureResource extends Resource
 
     protected static ?string $navigationLabel = 'Capturas';
 
+    protected static ?int $navigationSort = 3;
+
     protected static ?string $modelLabel = 'captura';
 
     protected static ?string $pluralModelLabel = 'capturas';

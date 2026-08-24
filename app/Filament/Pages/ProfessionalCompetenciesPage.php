@@ -39,7 +39,7 @@ class ProfessionalCompetenciesPage extends Page implements HasSchemas, HasTable
 
     protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedSparkles;
 
-    protected static ?int $navigationSort = 5;
+    protected static ?int $navigationSort = 9;
 
     public function table(Table $table): Table
     {

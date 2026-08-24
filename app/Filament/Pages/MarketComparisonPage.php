@@ -32,7 +32,7 @@ class MarketComparisonPage extends Page implements HasSchemas, HasTable
 
     protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedClipboardDocumentList;
 
-    protected static ?int $navigationSort = 4;
+    protected static ?int $navigationSort = 7;
 
     public function table(Table $table): Table
     {

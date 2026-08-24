@@ -22,7 +22,7 @@ class ScreeningPreferencesPage extends Page
 
     protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedFunnel;
 
-    protected static ?int $navigationSort = 3;
+    protected static ?int $navigationSort = 6;
 
     public ?array $data = [];
 

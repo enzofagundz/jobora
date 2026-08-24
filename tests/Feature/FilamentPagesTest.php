@@ -4,9 +4,14 @@ use App\Agents\JobExtractionAgent;
 use App\Agents\ResumeAdaptationAgent;
 use App\Enums\JobPostingStatus;
 use App\Filament\Pages\CaptureSetupPage;
+use App\Filament\Pages\JobSearchPage;
 use App\Filament\Pages\MarketComparisonPage;
 use App\Filament\Pages\MarketTrendsPage;
+use App\Filament\Pages\ProfessionalCompetenciesPage;
 use App\Filament\Pages\ResumePage;
+use App\Filament\Pages\ScreeningPreferencesPage;
+use App\Filament\Resources\JobCaptures\JobCaptureResource;
+use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Filament\Resources\JobPostings\Pages\ListJobPostings;
 use App\Filament\Resources\JobPostings\Pages\ResumeAdaptationPage;
 use App\Filament\Resources\JobPostings\Pages\ViewJobPosting;
@@ -20,6 +25,8 @@ use App\Models\ResumeAdaptation;
 use App\Models\User;
 use App\Services\JobAnalysisService;
 use App\Services\ResumeService;
+use Filament\Facades\Filament;
+use Filament\Pages\Dashboard;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
@@ -369,4 +376,29 @@ it('informa que a API não está configurada quando o token é vazio', function 
 });
 it('exibe a marca Jobora no painel', function () {
     $this->get('/')->assertSuccessful()->assertSee('Jobora');
+});
+
+it('ordena a navegação lateral conforme o fluxo do produto', function () {
+    $panel = Filament::getPanel('admin');
+
+    expect($panel)->not->toBeNull();
+
+    $keys = collect($panel->getNavigation())
+        ->flatMap(fn ($group) => $group->getItems())
+        ->map(fn ($item) => $item->getKey())
+        ->values()
+        ->all();
+
+    expect($keys)->toBe([
+        Dashboard::class,
+        JobSearchPage::class,
+        CaptureSetupPage::class,
+        JobCaptureResource::class,
+        JobPostingResource::class,
+        ResumePage::class,
+        ScreeningPreferencesPage::class,
+        MarketComparisonPage::class,
+        MarketTrendsPage::class,
+        ProfessionalCompetenciesPage::class,
+    ]);
 });

@@ -17,7 +17,7 @@ class CaptureSetupPage extends Page
 
     protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedArrowDownTray;
 
-    protected static ?int $navigationSort = 6;
+    protected static ?int $navigationSort = 2;
 
     public function tokenConfigured(): bool
     {
