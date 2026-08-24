@@ -350,7 +350,8 @@ it('renderiza a página de onboarding da extensão com os quatro passos e o toke
         ->assertSee('Instale a extensão')
         ->assertSee('Copie o token')
         ->assertSee('Cole no popup da extensão')
-        ->assertSee('Valide e conecte');
+        ->assertSee('Valide e conecte')
+        ->assertSee('Jobora Job Capture');
 
     // Token mascarado visível por padrão; valor integral no bloco
     // x-show="revealed" e no handler de cópia (Js::from).
@@ -365,4 +366,7 @@ it('informa que a API não está configurada quando o token é vazio', function 
         ->assertSee('API não configurada')
         ->assertSee('VAGAS_API_TOKEN')
         ->assertDontSee('Copie o token');
+});
+it('exibe a marca Jobora no painel', function () {
+    $this->get('/')->assertSuccessful()->assertSee('Jobora');
 });
