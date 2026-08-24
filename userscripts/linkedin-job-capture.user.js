@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Capturador de Vagas — LinkedIn → API
+// @name         Jobora Job Capture — LinkedIn → API
 // @namespace    vagas.local
 // @version      0.1.0
-// @description  Captura publicações de vagas da página de resultados de conteúdo do LinkedIn e envia à API do sistema (revisão manual no painel).
+// @description  Captura publicações de vagas da página de resultados de conteúdo do LinkedIn e envia à API do Jobora para revisão manual no painel.
 // @match        https://www.linkedin.com/search/results/content/*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -17,10 +17,9 @@
  * INSTALAÇÃO
  * 1. Violentmonkey → "Novo script" → apagar o conteúdo → colar este arquivo inteiro → salvar (Ctrl+S).
  * 2. Abrir qualquer página de busca de conteúdo do LinkedIn
- *    (ex.: https://www.linkedin.com/search/results/content/?keywords=vaga%20php).
  * 3. No menu do script (ícone do Violentmonkey), definir:
- *    - "Definir URL da API": http://localhost:8000 (padrão; o painel do Laravel rodando com `php artisan serve`)
- *    - "Definir token da API": o valor de VAGAS_API_TOKEN do .env do sistema
+ *    - "Definir URL da API": http://localhost:8000 (padrão; o painel Jobora rodando com `php artisan serve`)
+ *    - "Definir token da API": o valor de VAGAS_API_TOKEN do .env do Jobora
  *
  * AVISO: se a API estiver hospedada em outro host, adicione `// @connect <host>` no metadata
  * acima — o Violentmonkey bloqueia requisições cross-origin sem o @connect correspondente.
@@ -221,7 +220,7 @@
     function sendCapture(payload) {
         const url = CONFIG.apiBaseUrl.replace(/\/$/, '') + CONFIG.capturePath;
 
-        console.group('[VAGAS] Enviando captura');
+        console.group('[JOBORA] Enviando captura');
         console.log('URL:', url);
         console.log('Token configurado:', !!CONFIG.apiToken);
         console.log('Payload:', payload);
@@ -240,7 +239,7 @@
                     timeout: CONFIG.requestTimeoutMs,
 
                     onload: (res) => {
-                        console.group('[VAGAS] Resposta da API');
+                        console.group('[JOBORA] Resposta da API');
                         console.log('Status:', res.status);
                         console.log('Status text:', res.statusText);
                         console.log('Headers:', res.responseHeaders);
@@ -249,14 +248,14 @@
 
                         const result = statusToResult(res.status);
 
-                        console.log('[VAGAS] Resultado:', result);
+                        console.log('[JOBORA] Resultado:', result);
                         console.groupEnd();
 
                         resolve(result);
                     },
 
                     onerror: (err) => {
-                        console.error('[VAGAS] ERRO DE REDE:', err);
+                        console.error('[JOBORA] ERRO DE REDE:', err);
                         console.groupEnd();
 
                         resolve({
@@ -266,7 +265,7 @@
                     },
 
                     ontimeout: () => {
-                        console.error('[VAGAS] TIMEOUT');
+                        console.error('[JOBORA] TIMEOUT');
                         console.groupEnd();
 
                         resolve({
@@ -293,7 +292,7 @@
                 .then(async (res) => {
                     const body = await res.text();
 
-                    console.group('[VAGAS] Resposta da API');
+                    console.group('[JOBORA] Resposta da API');
                     console.log('Status:', res.status);
                     console.log('Headers:', [...res.headers.entries()]);
                     console.log('Body:', body);
@@ -302,7 +301,7 @@
                     resolve(statusToResult(res.status));
                 })
                 .catch((err) => {
-                    console.error('[VAGAS] ERRO:', err);
+                    console.error('[JOBORA] ERRO:', err);
                     console.groupEnd();
 
                     resolve({
@@ -352,7 +351,7 @@
         dot.setAttribute('aria-hidden', 'true');
 
         const title = document.createElement('span');
-        title.textContent = 'Capturador de vagas';
+        title.textContent = 'Jobora Job Capture';
 
         const status = document.createElement('span');
         status.textContent = 'ativo';
@@ -467,7 +466,7 @@
         });
 
         GM_registerMenuCommand('Definir token da API', () => {
-            const value = prompt('Token da API (VAGAS_API_TOKEN):', CONFIG.apiToken);
+            const value = prompt('Token da API do Jobora (VAGAS_API_TOKEN):', CONFIG.apiToken);
             if (value === null) return;
             CONFIG.apiToken = value.trim();
             storeSet('apiToken', CONFIG.apiToken);

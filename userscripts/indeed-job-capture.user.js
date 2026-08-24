@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         Capturador de Vagas — Indeed → API
+// @name         Jobora Job Capture — Indeed → API
 // @namespace    vagas.local
 // @version      0.1.0
-// @description  Captura vagas da página de resultados do Indeed e envia à API do sistema (revisão manual no painel).
+// @description  Captura vagas da página de resultados do Indeed e envia à API do Jobora para revisão manual no painel.
 // @match        https://*.indeed.com/jobs*
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -17,10 +17,9 @@
  * INSTALAÇÃO
  * 1. Violentmonkey → "Novo script" → apagar o conteúdo → colar este arquivo inteiro → salvar (Ctrl+S).
  * 2. Abrir qualquer página de busca de vagas do Indeed
- *    (ex.: https://br.indeed.com/jobs?q=php&l=Remoto).
  * 3. No menu do script (ícone do Violentmonkey), definir:
- *    - "Definir URL da API": http://localhost:8000 (padrão; o painel do Laravel rodando com `php artisan serve`)
- *    - "Definir token da API": o valor de VAGAS_API_TOKEN do .env do sistema
+ *    - "Definir URL da API": http://localhost:8000 (padrão; o painel Jobora rodando com `php artisan serve`)
+ *    - "Definir token da API": o valor de VAGAS_API_TOKEN do .env do Jobora
  *
  * AVISO: se a API estiver hospedada em outro host, adicione `// @connect <host>` no metadata
  * acima — o Violentmonkey bloqueia requisições cross-origin sem o @connect correspondente.
@@ -244,12 +243,11 @@
     function sendCapture(payload) {
         const url = CONFIG.apiBaseUrl.replace(/\/$/, '') + CONFIG.capturePath;
 
-        console.group('[VAGAS] Enviando captura');
+        console.group('[JOBORA] Enviando captura');
         console.log('URL:', url);
         console.log('Token configurado:', !!CONFIG.apiToken);
         console.log('Payload:', payload);
         console.log('JSON:', JSON.stringify(payload));
-
         return new Promise((resolve) => {
             if (typeof GM_xmlhttpRequest === 'function') {
                 GM_xmlhttpRequest({
@@ -263,7 +261,7 @@
                     timeout: CONFIG.requestTimeoutMs,
 
                     onload: (res) => {
-                        console.group('[VAGAS] Resposta da API');
+                        console.group('[JOBORA] Resposta da API');
                         console.log('Status:', res.status);
                         console.log('Status text:', res.statusText);
                         console.log('Headers:', res.responseHeaders);
@@ -272,14 +270,14 @@
 
                         const result = statusToResult(res.status);
 
-                        console.log('[VAGAS] Resultado:', result);
+                        console.log('[JOBORA] Resultado:', result);
                         console.groupEnd();
 
                         resolve(result);
                     },
 
                     onerror: (err) => {
-                        console.error('[VAGAS] ERRO DE REDE:', err);
+                        console.error('[JOBORA] ERRO DE REDE:', err);
                         console.groupEnd();
 
                         resolve({
@@ -289,7 +287,7 @@
                     },
 
                     ontimeout: () => {
-                        console.error('[VAGAS] TIMEOUT');
+                        console.error('[JOBORA] TIMEOUT');
                         console.groupEnd();
 
                         resolve({
@@ -316,7 +314,7 @@
                 .then(async (res) => {
                     const body = await res.text();
 
-                    console.group('[VAGAS] Resposta da API');
+                    console.group('[JOBORA] Resposta da API');
                     console.log('Status:', res.status);
                     console.log('Headers:', [...res.headers.entries()]);
                     console.log('Body:', body);
@@ -325,7 +323,7 @@
                     resolve(statusToResult(res.status));
                 })
                 .catch((err) => {
-                    console.error('[VAGAS] ERRO:', err);
+                    console.error('[JOBORA] ERRO:', err);
                     console.groupEnd();
 
                     resolve({
@@ -375,7 +373,7 @@
         dot.setAttribute('aria-hidden', 'true');
 
         const title = document.createElement('span');
-        title.textContent = 'Indeed Job Capture';
+        title.textContent = 'Jobora Job Capture';
 
         const status = document.createElement('span');
         status.textContent = 'ativo';
@@ -445,7 +443,7 @@
 
         if (!paneOk) {
             counters.errors++;
-            console.error(`[VAGAS] erro ao abrir vaga ${jk}: painel não carregou`);
+            console.error(`[JOBORA] erro ao abrir vaga ${jk}: painel não carregou`);
             updatePanel();
             return;
         }
@@ -456,7 +454,7 @@
         // rejeita abaixo de MIN_DESCRIPTION_LENGTH) — nunca enviar parcial.
         if (!raw || !raw.description) {
             counters.errors++;
-            console.error(`[VAGAS] erro ao extrair vaga ${jk}: descrição vazia`);
+            console.error(`[JOBORA] erro ao extrair vaga ${jk}: descrição vazia`);
             updatePanel();
             return;
         }
@@ -531,7 +529,7 @@
         });
 
         GM_registerMenuCommand('Definir token da API', () => {
-            const value = prompt('Token da API (VAGAS_API_TOKEN):', CONFIG.apiToken);
+            const value = prompt('Token da API do Jobora (VAGAS_API_TOKEN):', CONFIG.apiToken);
             if (value === null) return;
             CONFIG.apiToken = value.trim();
             storeSet('apiToken', CONFIG.apiToken);

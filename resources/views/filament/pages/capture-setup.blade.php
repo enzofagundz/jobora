@@ -20,7 +20,7 @@
                     1. Instale a extensão
                 </x-slot:heading>
                 <p class="text-sm">
-                    Instale a extensão <strong>Vagas Job Capture</strong> no Chrome ou Firefox
+                    Instale a extensão <strong>Jobora Job Capture</strong> no Chrome ou Firefox
                     carregando o build de produção do repositório <code>vagas-extension</code>.
                 </p>
             </x-filament::section>

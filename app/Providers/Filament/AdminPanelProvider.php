@@ -34,6 +34,7 @@ class AdminPanelProvider extends PanelProvider
             ->default()
             ->id('admin')
             ->path('')
+            ->brandName('Jobora')
             ->viteTheme('resources/css/filament/admin/theme.css')
             ->login()
             ->colors([
