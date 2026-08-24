@@ -49,7 +49,7 @@ Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAn
 
 **Objetivo:** ambiente local configurado e espelhado em `.env.example`, sem hardcode.
 
-**Contexto:** TP §16 etapa 2 + §7 (variáveis de IA). Estado: **implementado — verificar/aceitar**. `.env` contém `APP_NAME=Vagas`, `APP_LOCALE=pt_BR`, `DB_CONNECTION=sqlite`, `AI_URL=https://opencode.ai/zen/go/v1`, `AI_API_KEY`, `AI_MODEL=deepseek-v4-flash`; `database/database.sqlite` existe; `.env.example` espelha as chaves (AI_API_KEY vazia); `.gitignore` não ignora `.env.example`.
+**Contexto:** TP §16 etapa 2 + §7 (variáveis de IA). Estado: **implementado — verificar/aceitar**. `.env` contém `APP_NAME=Jobora`, `APP_LOCALE=pt_BR`, `DB_CONNECTION=sqlite`, `AI_URL=https://opencode.ai/zen/go/v1`, `AI_API_KEY`, `AI_MODEL=deepseek-v4-flash`; `database/database.sqlite` existe; `.env.example` espelha as chaves (AI_API_KEY vazia); `.gitignore` não ignora `.env.example`.
 
 **Implementação:**
 - Conferir `.env` e `.env.example` lado a lado: todas as chaves de IA (`AI_URL`, `AI_API_KEY`, `AI_MODEL`) e de banco (`DB_CONNECTION=sqlite`) presentes em ambos; `.env` com valor real da key, `.env.example` com placeholder.
