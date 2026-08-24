@@ -56,7 +56,7 @@ it('cria vaga pela página e já despacha a análise de IA em segundo plano', fu
 
     expect($posting->status)->toBe(JobPostingStatus::Pending);
 
-    Queue::assertPushed(AnalyzeJobPosting::class, fn (AnalyzeJobPosting $job) => $job->posting->is($posting));
+    Queue::assertPushed(AnalyzeJobPosting::class, fn (AnalyzeJobPosting $job) => $job->posting->is($posting) && $job->userId === auth()->id());
 });
 
 it('analisa e confirma a vaga pela página de revisão', function () {

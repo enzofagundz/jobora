@@ -188,20 +188,21 @@ it('falha no registro de métricas não impede o processamento principal', funct
 
 it('AnalyzeJobPosting é único por posting', function () {
     $posting = JobPosting::factory()->create();
-    $job1 = new AnalyzeJobPosting($posting);
-    $job2 = new AnalyzeJobPosting($posting);
+    $userId = User::factory()->create()->id;
+    $job1 = new AnalyzeJobPosting($posting, $userId);
+    $job2 = new AnalyzeJobPosting($posting, $userId);
 
     expect($job1->uniqueId())->toBe($job2->uniqueId())
         ->and($job1->uniqueId())->toBe('analyze-job-posting:'.$posting->id)
         ->and($job1->timeout)->toBe(130)
         ->and($job1->tries)->toBe(3);
 });
-
 it('AnalyzeJobPosting tem uniqueIds diferentes para postings diferentes', function () {
     $p1 = JobPosting::factory()->create();
     $p2 = JobPosting::factory()->create();
+    $userId = User::factory()->create()->id;
 
-    expect((new AnalyzeJobPosting($p1))->uniqueId())->not->toBe((new AnalyzeJobPosting($p2))->uniqueId());
+    expect((new AnalyzeJobPosting($p1, $userId))->uniqueId())->not->toBe((new AnalyzeJobPosting($p2, $userId))->uniqueId());
 });
 
 it('TriageJobCaptures é único por user + ids ordenados', function () {

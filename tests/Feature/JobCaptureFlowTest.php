@@ -204,7 +204,7 @@ it('promove a captura a vaga e despacha a análise de IA', function () {
         ->and($posting->source_url)->toBe($capture->url)
         ->and($posting->collected_at->equalTo($capture->captured_at))->toBeTrue();
 
-    Queue::assertPushed(AnalyzeJobPosting::class, fn (AnalyzeJobPosting $job) => $job->posting->is($posting));
+    Queue::assertPushed(AnalyzeJobPosting::class, fn (AnalyzeJobPosting $job) => $job->posting->is($posting) && $job->userId === auth()->id());
 
     expect($capture->refresh()->job_posting_id)->toBe($posting->id);
 });

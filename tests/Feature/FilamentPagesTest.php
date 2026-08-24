@@ -170,13 +170,13 @@ it('ações da listagem mudam o estado da vaga', function () {
     Livewire::test(ListJobPostings::class)
         ->callTableAction('analyze', $posting);
 
-    Queue::assertPushed(AnalyzeJobPosting::class, fn (AnalyzeJobPosting $job) => $job->posting->is($posting));
+    Queue::assertPushed(AnalyzeJobPosting::class, fn (AnalyzeJobPosting $job) => $job->posting->is($posting) && $job->userId === auth()->id());
 
     // A análise roda em segundo plano; o estado só muda quando o job executa.
     $posting->refresh();
     expect($posting->status)->toBe(JobPostingStatus::Pending);
 
-    (new AnalyzeJobPosting($posting))->handle(app(JobAnalysisService::class));
+    (new AnalyzeJobPosting($posting, auth()->id()))->handle(app(JobAnalysisService::class));
 
     $posting->refresh();
 
