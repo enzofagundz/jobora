@@ -21,6 +21,8 @@ use App\Services\ResumeService;
 use App\Services\StrategicCompetencyService;
 use App\Support\Staleness;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\Http;
 use Laravel\Ai\Contracts\HasStructuredOutput;
 
 uses(RefreshDatabase::class);
@@ -310,8 +312,8 @@ it('queue retry_after é maior que o timeout do agente', function () {
 
 it('agents resolve provider/model from the active config, not hardcoded', function () {
     config([
-        'ai.default' => 'openrouter',
-        'ai.providers.openrouter.models.text.default' => 'test/model-from-config',
+        'ai.default' => 'opencode_zen',
+        'ai.providers.opencode_zen.models.text.default' => 'test/model-from-config',
     ]);
 
     $agents = [
@@ -322,9 +324,55 @@ it('agents resolve provider/model from the active config, not hardcoded', functi
     ];
 
     foreach ($agents as $agent) {
-        expect($agent->provider())->toBe('openrouter')
+        expect($agent->provider())->toBe('opencode_zen')
             ->and($agent->model())->toBe('test/model-from-config')
             ->and($agent->timeout())->toBe(120)
             ->and($agent)->not->toBeInstanceOf(HasStructuredOutput::class);
     }
+});
+
+it('sends extraction requests to the OpenCode Zen OpenAI-compatible endpoint', function () {
+    config([
+        'ai.default' => 'opencode_zen',
+        'ai.providers.opencode_zen.key' => 'test-zen-key',
+    ]);
+
+    Http::fake([
+        '*' => Http::response([
+            'choices' => [
+                [
+                    'message' => [
+                        'content' => json_encode([
+                            'role' => 'Desenvolvedor PHP',
+                            'company' => null,
+                            'skills' => ['Laravel'],
+                            'tools' => [],
+                            'methodologies' => [],
+                            'requirements' => [],
+                            'application_methods' => [],
+                            'experience' => [],
+                        ]),
+                    ],
+                ],
+            ],
+        ]),
+    ]);
+
+    $posting = JobPosting::factory()->create([
+        'description' => 'Vaga PHP com Laravel.',
+        'status' => JobPostingStatus::Pending,
+    ]);
+
+    app(JobAnalysisService::class)->analyze($posting);
+
+    Http::assertSent(function (Request $request) {
+        return (string) $request->url() === 'https://opencode.ai/zen/v1/chat/completions'
+            && $request->method() === 'POST'
+            && $request->hasHeader('Authorization', 'Bearer test-zen-key')
+            && $request->data()['model'] === 'mimo-v2.5-free';
+    });
+
+    $posting->refresh();
+
+    expect($posting->status)->toBe(JobPostingStatus::NeedsReview);
 });

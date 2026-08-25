@@ -107,7 +107,7 @@ it('keeps the posting pending on a transient provider error', function () {
         ->and($posting->suggested_data)->toBeNull();
 });
 
-it('keeps the posting pending on an OpenRouter AiException (rate limit)', function () {
+it('keeps the posting pending on a provider rate-limit AiException', function () {
     JobExtractionAgent::fake(fn () => throw new AiException('Rate limit exceeded for the free model.'));
 
     $posting = postingWithDescription();
