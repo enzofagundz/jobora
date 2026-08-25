@@ -13,7 +13,7 @@ return [
     |
     */
 
-    'default' => 'openrouter',
+    'default' => env('AI_PROVIDER', 'opencode_zen'),
     'default_for_images' => 'gemini',
     'default_for_audio' => 'openai',
     'default_for_transcription' => 'openai',
@@ -132,12 +132,13 @@ return [
             'store' => env('OPENAI_STORE', true),
         ],
 
-        'openrouter' => [
-            'driver' => 'openrouter',
-            'key' => env('OPENROUTER_API_KEY'),
+        'opencode_zen' => [
+            'driver' => 'openai-compatible',
+            'key' => env('OPENCODE_ZEN_API_KEY'),
+            'url' => env('OPENCODE_ZEN_BASE_URL', 'https://opencode.ai/zen/v1'),
             'models' => [
                 'text' => [
-                    'default' => env('OPENROUTER_MODEL', 'nvidia/nemotron-3-ultra-550b-a55b:free'),
+                    'default' => env('OPENCODE_ZEN_MODEL', 'mimo-v2.5-free'),
                 ],
             ],
         ],
