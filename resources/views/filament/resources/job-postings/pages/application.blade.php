@@ -178,6 +178,93 @@
             </div>
         @endif
 
+        {{-- Acompanhamento da candidatura: estado atual, pipeline e histórico --}}
+        @php
+            $application = $this->application();
+            $events = $this->applicationEvents();
+            $reached = $this->reachedStages();
+            $current = $application?->status;
+            $next = $this->suggestedNextStage();
+            $lastEvent = $events->first();
+        @endphp
+
+        <x-filament::section divided icon="heroicon-o-map" heading="Acompanhamento da candidatura">
+            @if ($application === null)
+                <div class="rounded-xl border border-dashed border-gray-300 p-10 text-center dark:border-white/10">
+                    <div class="mx-auto mb-4 flex size-12 items-center justify-center rounded-full bg-info-50 text-info-600 dark:bg-info-400/10 dark:text-info-400">
+                        <x-filament::icon icon="heroicon-o-paper-airplane" class="size-6" />
+                    </div>
+                    <h2 class="text-sm font-semibold text-gray-950 dark:text-white">Nenhum acompanhamento iniciado</h2>
+                    <p class="mx-auto mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">
+                        Métodos e currículo adaptado não significam candidatura enviada. Use
+                        “Iniciar acompanhamento” no topo da página para criar a candidatura.
+                    </p>
+                </div>
+            @else
+                <div class="space-y-6">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="text-sm font-medium text-gray-700 dark:text-gray-200">Status atual:</span>
+                        <x-filament::badge :color="$this->statusColor($current)">
+                            {{ $current->getLabel() }}
+                        </x-filament::badge>
+                    </div>
+
+                    @if ($lastEvent)
+                        <div class="rounded-xl border border-gray-200 p-4 dark:border-white/10">
+                            <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Última movimentação</p>
+                            <p class="mt-1 text-sm font-semibold text-gray-950 dark:text-white">{{ $lastEvent->title }}</p>
+                            <p class="text-sm text-gray-600 dark:text-gray-300">
+                                {{ $lastEvent->occurred_at->format('d/m/Y H:i') }}
+                                @if ($lastEvent->contact)
+                                    · {{ $lastEvent->contact }}
+                                @endif
+                            </p>
+                            @if ($lastEvent->notes)
+                                <p class="mt-1 text-sm text-gray-600 dark:text-gray-300">{{ $lastEvent->notes }}</p>
+                            @endif
+                        </div>
+                    @endif
+
+                    <div>
+                        <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Pipeline</p>
+                        <div class="flex flex-wrap gap-2">
+                            @foreach (\App\Enums\ApplicationStatus::pipelineStages() as $stage)
+                                <x-filament::badge
+                                    :color="in_array($stage, $reached, true) ? $this->statusColor($stage) : 'gray'"
+                                >
+                                    {{ $stage->getLabel() }}
+                                    @if ($stage === $current)
+                                        <x-filament::icon icon="heroicon-o-arrow-right-circle" class="ms-1 size-3" />
+                                    @endif
+                                </x-filament::badge>
+                            @endforeach
+
+                            @if ($current === \App\Enums\ApplicationStatus::Rejected || $current === \App\Enums\ApplicationStatus::Withdrawn)
+                                <x-filament::badge :color="$this->statusColor($current)">
+                                    {{ $current->getLabel() }}
+                                </x-filament::badge>
+                            @endif
+                        </div>
+                    </div>
+
+                    <div>
+                        <p class="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Próxima etapa sugerida</p>
+                        <p class="mt-1 text-sm text-gray-700 dark:text-gray-200">
+                            @if ($next)
+                                {{ $next->getLabel() }}
+                            @else
+                                Não definida
+                            @endif
+                        </p>
+                    </div>
+
+                    <div>
+                        <p class="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">Histórico</p>
+                        {{ $this->table }}
+                    </div>
+                </div>
+            @endif
+        </x-filament::section>
         {{-- Como se candidatar: métodos persistidos, com origem e ação segura --}}
         <x-filament::section divided icon="heroicon-o-paper-airplane" heading="Como se candidatar">
             <div class="space-y-4">
@@ -237,4 +324,5 @@
             </div>
         </x-filament::section>
     </div>
+    <x-filament-actions::modals />
 </x-filament-panels::page>

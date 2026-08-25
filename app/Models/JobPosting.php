@@ -46,4 +46,9 @@ class JobPosting extends Model
     {
         return $this->hasOne(ResumeAdaptation::class);
     }
+
+    public function application(): HasOne
+    {
+        return $this->hasOne(Application::class);
+    }
 }
