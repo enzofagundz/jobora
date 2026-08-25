@@ -19,6 +19,8 @@ final class JobAnalysisResult
 
     public const MAX_NAME_LENGTH = 100;
 
+    public const MAX_APPLICATION_METHODS = 20;
+
     /**
      * @param  array<string, list<string>>  $items  category value => normalized names
      */
@@ -26,6 +28,7 @@ final class JobAnalysisResult
         public readonly ?string $role,
         public readonly ?string $company,
         public readonly array $items,
+        public readonly array $applicationMethods = [],
     ) {}
 
     /**
@@ -86,13 +89,37 @@ final class JobAnalysisResult
             $total += count($items[$category->value]);
         }
 
-        return new self($role, $company, $items);
+        $methods = [];
+        $seen = [];
+        $rawMethods = $data['application_methods'] ?? [];
+        if ($rawMethods === null) {
+            $rawMethods = [];
+        }
+        if (! is_array($rawMethods) || ! array_is_list($rawMethods)) {
+            throw new InvalidArgumentException('Campo "application_methods" deve ser uma lista de objetos.');
+        }
+        foreach ($rawMethods as $entry) {
+            if (! is_array($entry)) {
+                throw new InvalidArgumentException('Campo "application_methods" deve conter apenas objetos.');
+            }
+            $method = ApplicationMethodData::fromArray($entry);
+            if ($method === null || isset($seen[$method->dedupKey()])) {
+                continue;
+            }
+            $seen[$method->dedupKey()] = true;
+            if (count($methods) >= self::MAX_APPLICATION_METHODS) {
+                break;
+            }
+            $methods[] = $method;
+        }
+
+        return new self($role, $company, $items, $methods);
     }
 
     /**
      * Array shape stored in job_postings.suggested_data for the review page.
      *
-     * @return array{role: string|null, company: string|null, items: array<int, array{category: string, name: string}>}
+     * @return array{role: string|null, company: string|null, items: array<int, array{category: string, name: string}>, application_methods: list<array<string, string|null>>}
      */
     public function toSuggestedData(): array
     {
@@ -108,6 +135,7 @@ final class JobAnalysisResult
             'role' => $this->role,
             'company' => $this->company,
             'items' => $items,
+            'application_methods' => array_map(fn (ApplicationMethodData $m) => $m->toArray(), $this->applicationMethods),
         ];
     }
 

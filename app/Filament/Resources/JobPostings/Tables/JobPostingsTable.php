@@ -5,10 +5,10 @@ namespace App\Filament\Resources\JobPostings\Tables;
 use App\Enums\ConceptCategory;
 use App\Enums\ItemSource;
 use App\Enums\JobPostingStatus;
-use App\Filament\Resources\JobPostings\Pages\ResumeAdaptationPage;
+use App\Filament\Resources\JobPostings\Pages\ApplicationPage;
+use App\Filament\Resources\JobPostings\Schemas\ApplicationMethodForm;
 use App\Jobs\AnalyzeJobPosting;
 use App\Models\JobPosting;
-use App\Models\Resume;
 use App\Services\JobReviewService;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
@@ -22,6 +22,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Support\Enums\Width;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
@@ -89,7 +90,7 @@ class JobPostingsTable
             ->recordActions([
                 Action::make('analyze')
                     ->label('Analisar com IA')
-                    ->icon('heroicon-o-sparkles')
+                    ->icon(Heroicon::OutlinedSparkles)
                     ->color('primary')
                     ->authorize('update')
                     ->visible(fn (JobPosting $record): bool => in_array($record->status, [JobPostingStatus::Pending, JobPostingStatus::Failed], true))
@@ -110,7 +111,7 @@ class JobPostingsTable
                     ->visible(fn (JobPosting $record): bool => $record->status === JobPostingStatus::Pending),
                 Action::make('review')
                     ->label('Revisar')
-                    ->icon('heroicon-o-clipboard-document-check')
+                    ->icon(Heroicon::OutlinedClipboardDocumentCheck)
                     ->color('warning')
                     ->authorize('update')
                     ->visible(fn (JobPosting $record): bool => $record->status === JobPostingStatus::NeedsReview)
@@ -146,6 +147,12 @@ class JobPostingsTable
                             ])
                             ->columns(3)
                             ->columnSpanFull(),
+                        Repeater::make('application_methods')
+                            ->label('Formas de candidatura')
+                            ->helperText('Sugestões da IA extraídas da descrição. A vaga só guarda a versão confirmada aqui.')
+                            ->schema(ApplicationMethodForm::schema())
+                            ->columns(3)
+                            ->columnSpanFull(),
                     ])
                     ->fillForm(fn (JobPosting $record): array => [
                         'description' => $record->description,
@@ -154,13 +161,14 @@ class JobPostingsTable
                         'items' => collect($record->suggested_data['items'] ?? [])
                             ->map(fn (array $item): array => $item + ['source' => ItemSource::Ai->value])
                             ->all(),
+                        'application_methods' => $record->suggested_data['application_methods'] ?? [],
                     ])
                     ->modalSubmitActionLabel('Confirmar')
                     ->modalSubmitAction(fn (Action $action) => $action->color('success'))
                     ->extraModalFooterActions([
                         Action::make('discard')
                             ->label('Descartar sugestão')
-                            ->icon('heroicon-o-x-circle')
+                            ->icon(Heroicon::OutlinedXCircle)
                             ->color('danger')
                             ->requiresConfirmation()
                             ->modalHeading('Descartar sugestão')
@@ -177,7 +185,13 @@ class JobPostingsTable
                             }),
                     ])
                     ->action(function (array $data, JobPosting $record): void {
-                        app(JobReviewService::class)->confirm($record, $data['items'], $data['role'] ?? null, $data['company'] ?? null);
+                        app(JobReviewService::class)->confirm(
+                            $record,
+                            $data['items'],
+                            $data['application_methods'] ?? [],
+                            $data['role'] ?? null,
+                            $data['company'] ?? null,
+                        );
 
                         Notification::make()
                             ->success()
@@ -185,14 +199,13 @@ class JobPostingsTable
                             ->body('Os itens confirmados agora compõem as análises.')
                             ->send();
                     }),
-                Action::make('adaptResume')
-                    ->label('Adequar currículo')
-                    ->icon('heroicon-o-document-arrow-up')
+                Action::make('application')
+                    ->label('Candidatura')
+                    ->icon(Heroicon::OutlinedPaperAirplane)
                     ->color('info')
                     ->authorize('view')
-                    ->visible(fn (JobPosting $record): bool => $record->status === JobPostingStatus::Confirmed
-                        && once(fn (): bool => Resume::query()->exists()))
-                    ->url(fn (JobPosting $record): string => ResumeAdaptationPage::getUrl(['record' => $record])),
+                    ->visible(fn (JobPosting $record): bool => $record->status === JobPostingStatus::Confirmed)
+                    ->url(fn (JobPosting $record): string => ApplicationPage::getUrl(['record' => $record])),
                 DeleteAction::make(),
             ])
             ->toolbarActions([

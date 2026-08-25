@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\DTO\ApplicationMethodData;
 use App\Enums\ConceptCategory;
 use App\Enums\ItemSource;
 use App\Enums\JobPostingStatus;
@@ -22,14 +23,20 @@ final class JobReviewService
      * editados/adicionados.
      *
      * @param  array<int, array{category: string, name: string}>  $items
+     * @param  array<int, array<string, mixed>>  $applicationMethods
      */
-    public function confirm(JobPosting $posting, array $items, ?string $role, ?string $company): void
+    public function confirm(JobPosting $posting, array $items, array $applicationMethods, ?string $role, ?string $company): void
     {
         $suggestedPairs = collect($posting->suggested_data['items'] ?? [])
             ->map(fn (array $item): string => $item['category'].'|'.$item['name'])
             ->all();
 
-        DB::transaction(function () use ($posting, $items, $role, $company, $suggestedPairs): void {
+        $suggestedMethodKeys = collect($posting->suggested_data['application_methods'] ?? [])
+            ->map(fn (array $method): ?string => ApplicationMethodData::fromArray($method)?->dedupKey())
+            ->filter()
+            ->all();
+
+        DB::transaction(function () use ($posting, $items, $applicationMethods, $role, $company, $suggestedPairs, $suggestedMethodKeys): void {
             $posting->items()->delete();
 
             foreach ($items as $item) {
@@ -49,6 +56,8 @@ final class JobReviewService
                 ]);
             }
 
+            $this->syncApplicationMethods($posting, $applicationMethods, $suggestedMethodKeys);
+
             $posting->forceFill([
                 'role' => blank($role) ? null : $role,
                 'company' => blank($company) ? null : $company,
@@ -61,6 +70,8 @@ final class JobReviewService
 
     public function discard(JobPosting $posting): void
     {
+        $posting->applicationMethods()->delete();
+
         $posting->forceFill([
             'status' => JobPostingStatus::Pending,
             'suggested_data' => null,
@@ -68,5 +79,50 @@ final class JobReviewService
             'company' => null,
             'error_message' => null,
         ])->save();
+    }
+
+    /**
+     * Substitui os métodos de candidatura da vaga por uma entrada manual.
+     * Não consulta suggested_data: tudo é gravado como User. Usado pela
+     * página ApplicationPage ao "Gerenciar métodos".
+     *
+     * @param  array<int, array<string, mixed>>  $methods
+     */
+    public function replaceApplicationMethods(JobPosting $posting, array $methods): void
+    {
+        DB::transaction(function () use ($posting, $methods): void {
+            $this->syncApplicationMethods($posting, $methods, []);
+        });
+    }
+
+    /**
+     * Substitui os métodos de candidatura da vaga pelos revisados.
+     *
+     * @param  array<int, array<string, mixed>>  $methods
+     * @param  array<int, string>  $suggestedKeys  dedup_keys vindos da sugestão; ausentes aqui viram User
+     */
+    private function syncApplicationMethods(JobPosting $posting, array $methods, array $suggestedKeys = []): void
+    {
+        $posting->applicationMethods()->delete();
+
+        $seen = [];
+
+        foreach ($methods as $method) {
+            $data = $method instanceof ApplicationMethodData ? $method : ApplicationMethodData::fromArray($method);
+
+            if ($data === null || isset($seen[$data->dedupKey()])) {
+                continue;
+            }
+
+            $seen[$data->dedupKey()] = true;
+
+            $posting->applicationMethods()->create([
+                ...$data->toArray(),
+                'source' => in_array($data->dedupKey(), $suggestedKeys, true)
+                    ? ItemSource::Ai
+                    : ItemSource::User,
+                'dedup_key' => $data->dedupKey(),
+            ]);
+        }
     }
 }

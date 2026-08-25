@@ -14,7 +14,7 @@ class ViewJobPosting extends ViewRecord
     {
         parent::mount($record);
 
-        if ($this->record->status !== JobPostingStatus::Pending) {
+        if (! in_array($this->record->status, [JobPostingStatus::Pending, JobPostingStatus::Confirmed], true)) {
             $this->redirect(ListJobPostings::getUrl());
         }
     }

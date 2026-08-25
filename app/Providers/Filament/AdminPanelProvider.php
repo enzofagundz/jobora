@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
 use App\Services\ResumePdfService;
@@ -93,7 +94,7 @@ class AdminPanelProvider extends PanelProvider
                             ->body($e->getMessage())
                             ->send();
 
-                        return redirect()->to(url('/job-postings/'.$posting->id.'/adapt'));
+                        return redirect()->to(JobPostingResource::getUrl('application', ['record' => $posting]));
                     }
                 })->name('resume-pdf.download');
             });

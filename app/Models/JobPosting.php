@@ -6,6 +6,7 @@ use App\Enums\JobPostingStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class JobPosting extends Model
 {
@@ -34,5 +35,15 @@ class JobPosting extends Model
     public function items(): HasMany
     {
         return $this->hasMany(JobPostingItem::class);
+    }
+
+    public function applicationMethods(): HasMany
+    {
+        return $this->hasMany(ApplicationMethod::class);
+    }
+
+    public function resumeAdaptation(): HasOne
+    {
+        return $this->hasOne(ResumeAdaptation::class);
     }
 }
