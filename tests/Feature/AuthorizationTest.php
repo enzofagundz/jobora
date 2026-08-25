@@ -2,6 +2,7 @@
 
 use App\Filament\Resources\JobCaptures\JobCaptureResource;
 use App\Filament\Resources\JobPostings\JobPostingResource;
+use App\Filament\Resources\JobPostings\Pages\ApplicationPage;
 use App\Models\JobCapture;
 use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
@@ -75,6 +76,10 @@ it('nega acesso quando a policy nega (prova do wiring de autorização)', functi
         ->and(JobPostingResource::canView($posting))->toBeFalse()
         ->and(JobPostingResource::canEdit($posting))->toBeFalse()
         ->and(JobPostingResource::canDelete($posting))->toBeFalse();
+
+    // A ApplicationPage (candidatura) é protegida pela mesma fronteira de view.
+    $this->get(JobPostingResource::getUrl('application', ['record' => $posting]))
+        ->assertForbidden();
 
     // A rota de download do PDF é protegida pela mesma fronteira.
     $this->get(route('filament.admin.resume-pdf.download', $posting))

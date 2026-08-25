@@ -92,5 +92,51 @@ it('serializes suggested data for the review page', function () {
             ['category' => 'skill', 'name' => 'Laravel'],
             ['category' => 'skill', 'name' => 'PHP'],
         ],
+        'application_methods' => [],
     ]);
 });
+
+it('parses application methods from structured output', function () {
+    $result = resultFrom([
+        'application_methods' => [
+            ['type' => 'email', 'email' => 'Recrutamento@Empresa.com'],
+            ['type' => 'external_url', 'url' => 'https://empresa.gupy.io/jobs/123/', 'platform' => 'Gupy'],
+            ['type' => 'linkedin_apply'],
+        ],
+    ]);
+
+    expect($result->applicationMethods)->toHaveCount(3)
+        ->and($result->applicationMethods[0]->email)->toBe('recrutamento@empresa.com')
+        ->and($result->applicationMethods[1]->url)->toBe('https://empresa.gupy.io/jobs/123/')
+        ->and($result->applicationMethods[2]->url)->toBeNull();
+});
+
+it('converts mailto urls into emails and drops empty method objects', function () {
+    $result = resultFrom([
+        'application_methods' => [
+            ['type' => 'external_url', 'url' => 'mailto:vagas@empresa.com'],
+            ['type' => 'email'],
+        ],
+    ]);
+
+    expect($result->applicationMethods)->toHaveCount(1)
+        ->and($result->applicationMethods[0]->email)->toBe('vagas@empresa.com')
+        ->and($result->applicationMethods[0]->url)->toBeNull();
+});
+it('deduplicates identical application methods keeping the first', function (array $a, array $b) {
+    $result = resultFrom(['application_methods' => [$a, $b]]);
+
+    expect($result->applicationMethods)->toHaveCount(1);
+})->with([
+    fn () => [['type' => 'email', 'email' => 'vagas@empresa.com'], ['type' => 'email', 'email' => 'VAGAS@empresa.com']],
+    fn () => [['type' => 'external_url', 'url' => 'https://empresa.gupy.io/jobs/1', 'platform' => 'Gupy'], ['type' => 'external_url', 'url' => 'https://empresa.gupy.io/jobs/1/', 'platform' => 'gupy']],
+]);
+
+it('rejects structurally invalid application methods', function (array $data) {
+    resultFrom(['application_methods' => [$data]]);
+})->throws(InvalidArgumentException::class)->with([
+    fn () => [['type' => 'telepathy', 'instructions' => 'x']],
+    fn () => [['type' => 'external_url', 'url' => 'javascript:alert(1)']],
+    fn () => [['type' => 'email', 'email' => 'not-an-email']],
+    fn () => [['not-an-object']],
+]);

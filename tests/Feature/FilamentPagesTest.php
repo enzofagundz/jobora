@@ -12,8 +12,8 @@ use App\Filament\Pages\ResumePage;
 use App\Filament\Pages\ScreeningPreferencesPage;
 use App\Filament\Resources\JobCaptures\JobCaptureResource;
 use App\Filament\Resources\JobPostings\JobPostingResource;
+use App\Filament\Resources\JobPostings\Pages\ApplicationPage;
 use App\Filament\Resources\JobPostings\Pages\ListJobPostings;
-use App\Filament\Resources\JobPostings\Pages\ResumeAdaptationPage;
 use App\Filament\Resources\JobPostings\Pages\ViewJobPosting;
 use App\Filament\Widgets\ComparisonSummaryWidget;
 use App\Filament\Widgets\StatsOverviewWidget;
@@ -239,7 +239,7 @@ it('renderiza a página de adequação e gera a adaptação pela ação', functi
     ]);
     app(ResumeService::class)->save('Currículo com Python.');
 
-    Livewire::test(ResumeAdaptationPage::class, ['record' => $posting->id])
+    Livewire::test(ApplicationPage::class, ['record' => $posting->id])
         ->assertSuccessful()
         ->assertSee('Currículo original')
         ->callAction('adapt')
@@ -261,7 +261,7 @@ it('renderiza o currículo adaptado como texto na adequação', function () {
         'alerts' => [],
     ]);
 
-    Livewire::test(ResumeAdaptationPage::class, ['record' => $posting->id])
+    Livewire::test(ApplicationPage::class, ['record' => $posting->id])
         ->assertSuccessful()
         ->assertSet('data.adapted_resume', "Currículo adaptado.\nDestaque para Python.");
 });
@@ -270,7 +270,7 @@ it('renderiza o currículo original como texto na adequação', function () {
     $posting = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
     app(ResumeService::class)->save('<p><strong>Currículo</strong> com <em>Laravel</em>.</p>');
 
-    Livewire::test(ResumeAdaptationPage::class, ['record' => $posting->id])
+    Livewire::test(ApplicationPage::class, ['record' => $posting->id])
         ->assertSuccessful()
         ->assertSet('data.original_resume', 'Currículo com Laravel.');
 });
@@ -286,7 +286,7 @@ it('expõe o link de download do PDF na página', function () {
         'alerts' => [],
     ]);
 
-    Livewire::test(ResumeAdaptationPage::class, ['record' => $posting->id])
+    Livewire::test(ApplicationPage::class, ['record' => $posting->id])
         ->assertSuccessful()
         ->assertActionHasUrl('downloadPdf', route('filament.admin.resume-pdf.download', $posting));
 });
@@ -311,11 +311,11 @@ it('baixa o PDF da adaptação pela rota dedicada', function () {
     Pdf::assertRespondedWithPdf(fn (PdfBuilder $pdf) => $pdf->viewName === 'pdf.adapted-resume');
 });
 
-it('redireciona para a listagem ao abrir a adequação de vaga não confirmada', function () {
-    $posting = JobPosting::factory()->create(['description' => longDescription()]);
+it('existe e está registrado em /job-postings/{record}/application', function () {
+    $posting = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
 
-    Livewire::test(ResumeAdaptationPage::class, ['record' => $posting->id])
-        ->assertRedirect(ListJobPostings::getUrl());
+    Livewire::test(ApplicationPage::class, ['record' => $posting->id])
+        ->assertSuccessful();
 });
 
 it('renderiza a página de view com a descrição rica', function () {
@@ -328,25 +328,233 @@ it('renderiza a página de view com a descrição rica', function () {
         ->assertSeeHtml('<strong>Vaga</strong>');
 });
 
-it('redireciona para a listagem ao abrir a view de vaga já enviada para análise', function () {
+it('a ação de Candidatura aparece na listagem para vagas confirmadas e esconde fora desse status', function () {
     $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
-    $failed = JobPosting::factory()->failed()->create(['description' => longDescription()]);
+    $pending = JobPosting::factory()->create(['description' => longDescription()]);
+    $needsReview = JobPosting::factory()->needsReview()->create(['description' => longDescription()]);
+
+    Livewire::test(ListJobPostings::class)
+        ->assertTableActionVisible('application', $confirmed)
+        ->assertTableActionHidden('application', $pending)
+        ->assertTableActionHidden('application', $needsReview)
+        ->assertSeeHtml('href="'.ApplicationPage::getUrl(['record' => $confirmed]).'"');
+});
+
+it('ApplicationPage redireciona para a listagem em vaga não confirmada', function () {
+    $posting = JobPosting::factory()->create(['description' => longDescription()]);
+
+    Livewire::test(ApplicationPage::class, ['record' => $posting->id])
+        ->assertRedirect(ListJobPostings::getUrl());
+});
+
+it('ApplicationPage renderiza os métodos confirmados com origem, plataforma, URL e e-mail', function () {
+    $confirmed = JobPosting::factory()->confirmed()->create([
+        'description' => longDescription(),
+        'source_url' => 'https://www.linkedin.com/jobs/view/999',
+    ]);
+    $confirmed->applicationMethods()->createMany([
+        ['type' => 'email', 'email' => 'vagas@empresa.com', 'source' => 'ai', 'dedup_key' => str_repeat('a', 64)],
+        ['type' => 'external_url', 'url' => 'https://empresa.gupy.io/jobs/123', 'platform' => 'Gupy', 'source' => 'user', 'dedup_key' => str_repeat('b', 64)],
+    ]);
+
+    Livewire::test(ApplicationPage::class, ['record' => $confirmed->id])
+        ->assertSuccessful()
+        ->assertSee('Como se candidatar')
+        ->assertSee('E-mail')
+        ->assertSee('vagas@empresa.com')
+        ->assertSee('Gupy')
+        ->assertSee('https://empresa.gupy.io/jobs/123')
+        // Link da vaga original na seção "Vaga".
+        ->assertSeeHtml('href="https://www.linkedin.com/jobs/view/999"');
+});
+
+it('ApplicationPage mostra mensagem de ausência quando não há métodos', function () {
+    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+
+    Livewire::test(ApplicationPage::class, ['record' => $confirmed->id])
+        ->assertSuccessful()
+        ->assertSee('Forma de candidatura não identificada.');
+});
+
+it('ViewJobPosting não exibe mais a seção de candidatura', function () {
+    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $confirmed->applicationMethods()->create([
+        'type' => 'email',
+        'email' => 'vagas@empresa.com',
+        'source' => 'ai',
+        'dedup_key' => str_repeat('c', 64),
+    ]);
 
     Livewire::test(ViewJobPosting::class, ['record' => $confirmed->id])
+        ->assertSuccessful()
+        ->assertSee('Descrição da vaga')
+        ->assertDontSee('Como se candidatar')
+        ->assertDontSee('vagas@empresa.com');
+});
+
+it('ApplicationPage sem currículo cadastrado mostra empty state e continua abrindo', function () {
+    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+
+    Livewire::test(ApplicationPage::class, ['record' => $confirmed->id])
+        ->assertSuccessful()
+        ->assertSee('Nenhum currículo cadastrado');
+});
+
+it('ApplicationPage sem adaptação mostra empty state de adequação', function () {
+    app(ResumeService::class)->save('Currículo base.');
+    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+
+    Livewire::test(ApplicationPage::class, ['record' => $confirmed->id])
+        ->assertSuccessful()
+        ->assertSee('Nenhuma adequação gerada');
+});
+
+it('manageApplicationMethods cria métodos manuais com source user e dedup_key', function () {
+    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+
+    Livewire::test(ApplicationPage::class, ['record' => $confirmed->id])
+        ->callAction('manageApplicationMethods', [
+            'application_methods' => [
+                ['type' => 'email', 'email' => 'recrutamento@empresa.com', 'platform' => null, 'url' => null, 'phone' => null, 'instructions' => null],
+                ['type' => 'external_url', 'platform' => 'Gupy', 'url' => 'https://empresa.gupy.io/jobs/42', 'email' => null, 'phone' => null, 'instructions' => 'Anexar portfólio'],
+            ],
+        ])
+        ->assertHasNoActionErrors();
+
+    $methods = $confirmed->refresh()->applicationMethods;
+
+    expect($methods)->toHaveCount(2)
+        ->and($methods->where('source', 'user'))->toHaveCount(2)
+        ->and($methods->where('type', 'email')->first()->email)->toBe('recrutamento@empresa.com')
+        ->and($methods->where('type', 'external_url')->first()->platform)->toBe('Gupy')
+        ->and($methods->where('type', 'external_url')->first()->dedup_key)->not->toBeEmpty();
+
+    // suggested_data deve permanecer intocado (não foi passado na operação manual).
+    expect($confirmed->suggested_data)->toBeNull();
+});
+
+it('manageApplicationMethods edita métodos existentes preservando os não tocados', function () {
+    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $email = $confirmed->applicationMethods()->create([
+        'type' => 'email',
+        'email' => 'old@empresa.com',
+        'source' => 'ai',
+        'dedup_key' => str_repeat('a', 64),
+    ]);
+    $external = $confirmed->applicationMethods()->create([
+        'type' => 'external_url',
+        'url' => 'https://empresa.gupy.io/jobs/1',
+        'platform' => 'Gupy',
+        'source' => 'user',
+        'dedup_key' => str_repeat('b', 64),
+    ]);
+
+    Livewire::test(ApplicationPage::class, ['record' => $confirmed->id])
+        ->callAction('manageApplicationMethods', [
+            'application_methods' => [
+                ['type' => 'email', 'email' => 'new@empresa.com', 'platform' => null, 'url' => null, 'phone' => null, 'instructions' => 'Atualizado'],
+                ['type' => 'external_url', 'platform' => 'Gupy', 'url' => 'https://empresa.gupy.io/jobs/1', 'email' => null, 'phone' => null, 'instructions' => null],
+            ],
+        ])
+        ->assertHasNoActionErrors();
+
+    $methods = $confirmed->refresh()->applicationMethods;
+
+    expect($methods)->toHaveCount(2)
+        ->and($methods->where('type', 'email')->first()->email)->toBe('new@empresa.com')
+        ->and($methods->where('type', 'email')->first()->instructions)->toBe('Atualizado')
+        ->and($methods->where('type', 'external_url')->first()->url)->toBe('https://empresa.gupy.io/jobs/1');
+});
+it('manageApplicationMethods com lista vazia remove apenas os métodos da vaga', function () {
+    $a = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $b = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $a->applicationMethods()->create([
+        'type' => 'email', 'email' => 'a@empresa.com', 'source' => 'ai', 'dedup_key' => str_repeat('a', 64),
+    ]);
+    $b->applicationMethods()->create([
+        'type' => 'email', 'email' => 'b@empresa.com', 'source' => 'ai', 'dedup_key' => str_repeat('b', 64),
+    ]);
+    $adaptation = ResumeAdaptation::create([
+        'job_posting_id' => $a->id,
+        'adapted_content' => 'Texto adaptado preservado.',
+    ]);
+
+    Livewire::test(ApplicationPage::class, ['record' => $a->id])
+        ->callAction('manageApplicationMethods', [
+            'application_methods' => [],
+        ])
+        ->assertHasNoActionErrors();
+
+    expect($a->refresh()->applicationMethods)->toHaveCount(0)
+        ->and($b->refresh()->applicationMethods)->toHaveCount(1)
+        ->and(ResumeAdaptation::find($adaptation->id))->not->toBeNull()
+        ->and(ResumeAdaptation::find($adaptation->id)->adapted_content)->toBe('Texto adaptado preservado.');
+});
+
+it('manageApplicationMethods rejeita URL sem esquema http(s) e não grava', function () {
+    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+
+    Livewire::test(ApplicationPage::class, ['record' => $confirmed->id])
+        ->callAction('manageApplicationMethods', [
+            'application_methods' => [
+                ['type' => 'external_url', 'platform' => 'Gupy', 'url' => 'empresa.gupy.io/jobs/1', 'email' => null, 'phone' => null, 'instructions' => null],
+            ],
+        ])
+        ->assertHasFormErrors(['application_methods.0.url']);
+
+    expect($confirmed->refresh()->applicationMethods)->toHaveCount(0);
+});
+
+it('manageApplicationMethods rejeita e-mail inválido e não grava', function () {
+    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+
+    Livewire::test(ApplicationPage::class, ['record' => $confirmed->id])
+        ->callAction('manageApplicationMethods', [
+            'application_methods' => [
+                ['type' => 'email', 'email' => 'nao-eh-email', 'platform' => null, 'url' => null, 'phone' => null, 'instructions' => null],
+            ],
+        ])
+        ->assertHasFormErrors(['application_methods.0.email']);
+
+    expect($confirmed->refresh()->applicationMethods)->toHaveCount(0);
+});
+
+it('ApplicationPage abre uma vaga confirmada sem afetar currículo ou métodos existentes ao entrar', function () {
+    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $confirmed->applicationMethods()->createMany([
+        ['type' => 'email', 'email' => 'a@empresa.com', 'source' => 'user', 'dedup_key' => str_repeat('a', 64)],
+    ]);
+    ResumeAdaptation::create([
+        'job_posting_id' => $confirmed->id,
+        'adapted_content' => 'Versão adaptada preservada.',
+        'changes' => ['Resumo reescrito'],
+    ]);
+
+    Livewire::test(ApplicationPage::class, ['record' => $confirmed->id])
+        ->assertSuccessful();
+
+    $confirmed->refresh();
+    expect($confirmed->applicationMethods)->toHaveCount(1)
+        ->and($confirmed->resumeAdaptation?->adapted_content)->toBe('Versão adaptada preservada.');
+});
+
+it('redireciona para a listagem ao abrir a view de vaga não visualizável', function () {
+    $needsReview = JobPosting::factory()->needsReview()->create(['description' => longDescription()]);
+    $failed = JobPosting::factory()->failed()->create(['description' => longDescription()]);
+
+    Livewire::test(ViewJobPosting::class, ['record' => $needsReview->id])
         ->assertRedirect(ListJobPostings::getUrl());
 
     Livewire::test(ViewJobPosting::class, ['record' => $failed->id])
         ->assertRedirect(ListJobPostings::getUrl());
 });
 
-it('mostra a ação ver somente em vagas pendentes', function () {
-
+it('permite visualizar vagas pendentes e confirmadas', function () {
     $pending = JobPosting::factory()->create(['description' => longDescription()]);
     $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
 
-    Livewire::test(ListJobPostings::class)
-        ->assertTableActionVisible('view', $pending)
-        ->assertTableActionHidden('view', $confirmed);
+    Livewire::test(ViewJobPosting::class, ['record' => $pending->id])->assertSuccessful();
+    Livewire::test(ViewJobPosting::class, ['record' => $confirmed->id])->assertSuccessful();
 });
 
 it('renderiza a página de onboarding da extensão com os quatro passos e o token', function () {

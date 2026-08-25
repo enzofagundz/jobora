@@ -8,6 +8,7 @@ use GuzzleHttp\Psr7\Response as PsrResponse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\RequestException;
 use Illuminate\Http\Client\Response;
+use Laravel\Ai\Exceptions\AiException;
 
 uses(RefreshDatabase::class);
 
@@ -40,6 +41,39 @@ it('moves a pending posting to needs_review with the suggestion stored', functio
         ->and($posting->suggested_data['items'])->toContain(['category' => 'skill', 'name' => 'PHP']);
 });
 
+it('stores suggested application methods and keeps the prompt contract', function () {
+    JobExtractionAgent::fake([[
+        'role' => 'Dev',
+        'application_methods' => [
+            ['type' => 'email', 'email' => 'recrutamento@empresa.com'],
+            ['type' => 'external_url', 'url' => 'https://empresa.gupy.io/jobs/123', 'platform' => 'Gupy'],
+        ],
+    ]]);
+
+    $posting = postingWithDescription();
+
+    app(JobAnalysisService::class)->analyze($posting);
+
+    $posting->refresh();
+
+    expect($posting->suggested_data['application_methods'])->toBe([
+        ['type' => 'email', 'platform' => null, 'url' => null, 'email' => 'recrutamento@empresa.com', 'phone' => null, 'instructions' => null],
+        ['type' => 'external_url', 'platform' => 'Gupy', 'url' => 'https://empresa.gupy.io/jobs/123', 'email' => null, 'phone' => null, 'instructions' => null],
+    ]);
+});
+
+it('keeps old fakes without application methods as an empty list', function () {
+    JobExtractionAgent::fake([['role' => 'Dev', 'skills' => ['Laravel']]]);
+
+    $posting = postingWithDescription();
+
+    app(JobAnalysisService::class)->analyze($posting);
+
+    $posting->refresh();
+
+    expect($posting->suggested_data['application_methods'])->toBe([]);
+});
+
 it('marks the posting failed when the agent throws', function () {
     JobExtractionAgent::fake(fn () => throw new RuntimeException('Provider indisponível'));
 
@@ -61,6 +95,20 @@ it('keeps the posting pending on a transient provider error', function () {
     ])));
 
     JobExtractionAgent::fake(fn () => throw new RequestException($response));
+
+    $posting = postingWithDescription();
+
+    app(JobAnalysisService::class)->analyze($posting);
+
+    $posting->refresh();
+
+    expect($posting->status)->toBe(JobPostingStatus::Pending)
+        ->and($posting->error_message)->toBeNull()
+        ->and($posting->suggested_data)->toBeNull();
+});
+
+it('keeps the posting pending on an OpenRouter AiException (rate limit)', function () {
+    JobExtractionAgent::fake(fn () => throw new AiException('Rate limit exceeded for the free model.'));
 
     $posting = postingWithDescription();
 

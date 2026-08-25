@@ -1,5 +1,6 @@
 <?php
 
+use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
 use App\Models\User;
@@ -78,8 +79,8 @@ it('redireciona com notificação quando a geração do PDF falha', function () 
     $posting = $adaptation->jobPosting;
 
     $this->actingAs(User::factory()->create())
-        ->from(url('/job-postings/'.$posting->id.'/adapt'))
+        ->from(JobPostingResource::getUrl('application', ['record' => $posting]))
         ->get(route('filament.admin.resume-pdf.download', $posting))
-        ->assertRedirect(url('/job-postings/'.$posting->id.'/adapt'))
+        ->assertRedirect(JobPostingResource::getUrl('application', ['record' => $posting]))
         ->assertSessionHas('filament.notifications');
 });

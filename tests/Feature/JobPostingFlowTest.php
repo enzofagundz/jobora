@@ -9,6 +9,7 @@ use App\Jobs\AnalyzeJobPosting;
 use App\Models\JobPosting;
 use App\Models\User;
 use App\Services\JobAnalysisService;
+use App\Services\JobReviewService;
 use App\Services\MarketAnalysisService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -123,6 +124,77 @@ it('persiste correção manual após recarregar e marca origem como user', funct
     expect($item->category->value)->toBe('tool')
         ->and($item->name)->toBe('PostgreSQL')
         ->and($item->source)->toBe(ItemSource::User);
+});
+
+it('confirma formas de candidatura com origem ai/user, idempotência e reanálise substitutiva', function () {
+    JobExtractionAgent::fake([
+        [
+            'role' => 'Dev',
+            'application_methods' => [
+                ['type' => 'email', 'email' => 'recrutamento@empresa.com'],
+            ],
+        ],
+        [
+            'role' => 'Dev',
+            'application_methods' => [
+                ['type' => 'external_url', 'url' => 'https://empresa.gupy.io/jobs/123', 'platform' => 'Gupy'],
+            ],
+        ],
+    ]);
+
+    $posting = JobPosting::factory()->create(['description' => flowDescription(), 'source_url' => 'https://www.linkedin.com/jobs/view/999']);
+
+    app(JobAnalysisService::class)->analyze($posting);
+    $posting->refresh();
+
+    // Mantém o método da IA e adiciona um novo via revisão.
+    Livewire::test(ListJobPostings::class)->callTableAction('review', $posting, data: [
+        'items' => [['category' => 'skill', 'name' => 'PHP']],
+        'application_methods' => [
+            ['type' => 'email', 'email' => 'recrutamento@empresa.com'],
+            ['type' => 'phone', 'phone' => '(11) 3000-0000'],
+        ],
+    ]);
+
+    $posting->refresh();
+
+    expect($posting->status)->toBe(JobPostingStatus::Confirmed)
+        ->and($posting->suggested_data)->toBeNull()
+        ->and($posting->source_url)->toBe('https://www.linkedin.com/jobs/view/999')
+        ->and($posting->applicationMethods()->count())->toBe(2);
+
+    $methods = $posting->applicationMethods()->get()->keyBy(fn ($m) => $m->type->value);
+
+    expect($methods['email']->email)->toBe('recrutamento@empresa.com')
+        ->and($methods['email']->source)->toBe(ItemSource::Ai)
+        ->and($methods['phone']->source)->toBe(ItemSource::User);
+
+    $keys = $posting->applicationMethods()->pluck('dedup_key')->all();
+
+    // Confirmação repetida não duplica.
+    app(JobReviewService::class)->confirm($posting, [], [
+        ['type' => 'email', 'email' => 'recrutamento@empresa.com'],
+        ['type' => 'phone', 'phone' => '(11) 3000-0000'],
+    ], null, null);
+
+    expect($posting->refresh()->applicationMethods()->count())->toBe(2)
+        ->and($posting->applicationMethods()->pluck('dedup_key')->sort()->values()->all())
+        ->toBe(collect($keys)->sort()->values()->all());
+
+    // Descarte zera tudo e volta a pending.
+    app(JobReviewService::class)->discard($posting);
+
+    expect($posting->refresh()->status)->toBe(JobPostingStatus::Pending)
+        ->and($posting->suggested_data)->toBeNull()
+        ->and($posting->applicationMethods()->count())->toBe(0);
+
+    // Reanálise substitui o array sugerido inteiro (e-mail → URL).
+    app(JobAnalysisService::class)->analyze($posting);
+    $posting->refresh();
+
+    expect($posting->suggested_data['application_methods'])->toHaveCount(1)
+        ->and($posting->suggested_data['application_methods'][0]['type'])->toBe('external_url')
+        ->and($posting->suggested_data['application_methods'][0]['platform'])->toBe('Gupy');
 });
 
 it('descarta a sugestão e volta para pending', function () {
