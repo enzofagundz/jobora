@@ -21,6 +21,7 @@ use App\Services\ResumeService;
 use App\Services\StrategicCompetencyService;
 use App\Support\Staleness;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Ai\Contracts\HasStructuredOutput;
 
 uses(RefreshDatabase::class);
 
@@ -305,4 +306,25 @@ it('queue retry_after é maior que o timeout do agente', function () {
 
     expect($retryAfter)->toBeGreaterThan($agentTimeout)
         ->and($retryAfter)->toBe(180);
+});
+
+it('agents resolve provider/model from the active config, not hardcoded', function () {
+    config([
+        'ai.default' => 'openrouter',
+        'ai.providers.openrouter.models.text.default' => 'test/model-from-config',
+    ]);
+
+    $agents = [
+        new JobExtractionAgent,
+        new JobTriageAgent,
+        new ResumeAdaptationAgent,
+        new StrategicCompetencyAgent,
+    ];
+
+    foreach ($agents as $agent) {
+        expect($agent->provider())->toBe('openrouter')
+            ->and($agent->model())->toBe('test/model-from-config')
+            ->and($agent->timeout())->toBe(120)
+            ->and($agent)->not->toBeInstanceOf(HasStructuredOutput::class);
+    }
 });
