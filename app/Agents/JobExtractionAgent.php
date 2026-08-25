@@ -14,15 +14,15 @@ class JobExtractionAgent implements Agent
      */
     public function provider(): string
     {
-        return 'opencode-go';
+        return (string) config('ai.default');
     }
 
     /**
-     * Model configured via AI_MODEL.
+     * Model configurado via text.default do provider ativo.
      */
     public function model(): string
     {
-        return (string) config('ai.providers.opencode-go.models.text.default');
+        return (string) config('ai.providers.'.config('ai.default').'.models.text.default');
     }
 
     /**
@@ -52,7 +52,13 @@ Regras:
 - "methodologies": metodologias e práticas de trabalho (ex.: "Scrum", "Kanban", "SPIN Selling").
 - "requirements": requisitos explícitos não cobertos pelas demais categorias (ex.: "disponibilidade para viagens", "CNH").
 - "experience": texto normalizado da descrição sobre nível ou tempo ("3+ anos", "Sênior", "Pleno") — não crie valores numéricos rígidos.
-
+- "application_methods": como se candidatar. Extraia APENAS instruções EXPLÍCITAS de candidatura; se a descrição não disser como candidatar-se, use []. Extraia todas as opções distintas.
+- Considere uma URL destino somente quando o texto a relacionar a candidatar-se, enviar currículo, preencher formulário ou contatar recrutamento.
+- "type" deve ser um de: "email", "external_url", "linkedin_apply", "indeed_apply", "whatsapp", "phone", "form", "other".
+- Trate links mailto: como {"type": "email", ...} com o endereço em "email", nunca como "url".
+- NÃO transforme a URL de origem da vaga (LinkedIn/Indeed), perfil social ou qualquer URL de referência em forma de candidatura.
+- Não invente e-mail, telefone, plataforma, URL ou instrução; preencha "platform" apenas quando o texto ou o destino explícito o identificar (ex.: "Gupy").
+- Se o texto afirmar candidatura direta pelo LinkedIn/Indeed ("Candidate-se pelo LinkedIn"), use o tipo correspondente sem inventar URL.
 Responda APENAS com um objeto JSON válido, sem markdown, sem texto adicional, exatamente neste formato:
 {
   "role": "string | null",
@@ -61,6 +67,16 @@ Responda APENAS com um objeto JSON válido, sem markdown, sem texto adicional, e
   "tools": ["string"],
   "methodologies": ["string"],
   "requirements": ["string"],
+  "application_methods": [
+    {
+      "type": "email|external_url|linkedin_apply|indeed_apply|whatsapp|phone|form|other",
+      "platform": "string | null",
+      "url": "string | null",
+      "email": "string | null",
+      "phone": "string | null",
+      "instructions": "string | null"
+    }
+  ],
   "experience": ["string"]
 }
 Listas ausentes ou sem itens devem ser arrays vazios ([]).

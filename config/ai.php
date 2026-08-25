@@ -13,7 +13,7 @@ return [
     |
     */
 
-    'default' => 'opencode-go',
+    'default' => 'openrouter',
     'default_for_images' => 'gemini',
     'default_for_audio' => 'openai',
     'default_for_transcription' => 'openai',
@@ -132,20 +132,14 @@ return [
             'store' => env('OPENAI_STORE', true),
         ],
 
-        'opencode-go' => [
-            'driver' => 'openai-compatible',
-            'url' => env('AI_URL', 'https://opencode.ai/zen/go/v1'),
-            'key' => env('AI_API_KEY'),
-            'models' => [
-                'text' => [
-                    'default' => env('AI_MODEL', 'deepseek-v4-flash'),
-                ],
-            ],
-        ],
-
         'openrouter' => [
             'driver' => 'openrouter',
             'key' => env('OPENROUTER_API_KEY'),
+            'models' => [
+                'text' => [
+                    'default' => env('OPENROUTER_MODEL', 'nvidia/nemotron-3-ultra-550b-a55b:free'),
+                ],
+            ],
         ],
 
         'voyageai' => [

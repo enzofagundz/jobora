@@ -14,15 +14,15 @@ class ResumeAdaptationAgent implements Agent
      */
     public function provider(): string
     {
-        return 'opencode-go';
+        return (string) config('ai.default');
     }
 
     /**
-     * Model configured via AI_MODEL.
+     * Model configurado via text.default do provider ativo.
      */
     public function model(): string
     {
-        return (string) config('ai.providers.opencode-go.models.text.default');
+        return (string) config('ai.providers.'.config('ai.default').'.models.text.default');
     }
 
     /**
