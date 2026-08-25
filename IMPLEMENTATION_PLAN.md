@@ -2,13 +2,13 @@
 
 > Documento de execução derivado de `TECHNICAL_PLAN.md` (fonte técnica) e `PRD.md` (fonte de produto).
 > O repositório já contém a maior parte do MVP implementada (verificado em 2026-08-13). Cada tarefa indica o estado atual: **verificar/aceitar** (validar o que existe contra critérios objetivos) ou **implementar** (criar o que falta). Não refazer trabalho existente. Ordem de execução segue o TECHNICAL_PLAN §16.
-> Restrições fixas: Laravel 13 + Filament 5 + Laravel AI SDK (provider `openrouter`, modelo `nvidia/nemotron-3-ultra-550b-a55b:free`); SQLite; single-user; vagas como fonte de dados (não gerenciador de vagas/candidaturas); sem scraping; sem Redis/filas/Elasticsearch; comparação agregada mercado × currículo; sem Ollama; sem chamadas HTTP próprias ao OpenRouter (toda comunicação via Laravel AI SDK). F6 (adequação de currículo): IA via mesmo provider `openrouter`/`nvidia/nemotron-3-ultra-550b-a55b:free` — **Cloudflare não é provedor de IA**, atua apenas como driver de PDF (`spatie/laravel-pdf`); persistência da última versão adaptada por vaga (sem histórico); currículo original nunca substituído; PDF não persistido (derivado sob demanda); sem DOCX no MVP; sem CRUD para a adaptação.
+> Restrições fixas: Laravel 13 + Filament 5 + Laravel AI SDK (provider `opencode_zen`, modelo `mimo-v2.5-free`); SQLite; single-user; vagas como fonte de dados (não gerenciador de vagas/candidaturas); sem scraping; sem Redis/filas/Elasticsearch; comparação agregada mercado × currículo; sem Ollama; sem chamadas HTTP próprias ao OpenCode Zen (toda comunicação via Laravel AI SDK). F6 (adequação de currículo): IA via mesmo provider `opencode_zen`/`mimo-v2.5-free` — **Cloudflare não é provedor de IA**, atua apenas como driver de PDF (`spatie/laravel-pdf`); persistência da última versão adaptada por vaga (sem histórico); currículo original nunca substituído; PDF não persistido (derivado sob demanda); sem DOCX no MVP; sem CRUD para a adaptação.
 
 ## 1. Estratégia de implementação
 
 Construir o MVP em 11 fases seguindo a ordem de dependências do TECHNICAL_PLAN §16 (etapa 5 antes de 6–11; 7 antes de 8; 9 antes de 11; 10 antes de 11–13; 12/13 dependem de 10; 14 por último). Cada fase termina com seus testes verdes antes de avançar.
 
-- **Fase A — Bootstrap (T001–T004):** projeto Laravel rodando, ambiente configurado, Filament instalado, Laravel AI SDK + provider OpenRouter funcionando com smoke real.
+- **Fase A — Bootstrap (T001–T004):** projeto Laravel rodando, ambiente configurado, Filament instalado, Laravel AI SDK + provider OpenCode Zen funcionando com smoke real.
 - **Fase B — Banco e domínio (T005–T007):** migrations, Models, Enums, factories e seeder conforme modelagem do TP §4–5.
 - **Fase C — Cadastro de vagas (T008):** Resource Filament List/Create com validação do TP §6.1.
 - **Fase D — IA (T009–T013):** Agent, schema estruturado (contrato JSON no prompt), DTO validado, Service com tratamento de erros, ação "Analisar com IA", testes com fakes.
@@ -21,7 +21,7 @@ Construir o MVP em 11 fases seguindo a ordem de dependências do TECHNICAL_PLAN 
 - **Fase K — Testes e refinamentos (T021–T022):** suite completa verde + smoke manual ponta-a-ponta com chave real + Definition of Done.
 - **Fase L — Adequação de currículo para ATS — F6 (T023–T032):** persistência, DTO, agent, validação de integridade, service, testes de domínio, PDF (`spatie/laravel-pdf` + driver `cloudflare`), página Filament não-CRUD, testes de integração e refinamentos — após o MVP existente (T001–T022), podendo rodar em paralelo com Fases I–J. T033 (entrada PDF/DOCX) fica **bloqueada** pela decisão de extração de texto (TP §17).
 
-Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAnalysisResult`) + Services (lógica de negócio) + 1 Agent (`JobExtractionAgent`, único contato com o SDK) + Filament (1 Resource, 4 páginas custom, 4 widgets). Sem repository pattern, sem Actions classes, sem Jobs no MVP (fluxo síncrono). Nenhuma métrica materializada — tudo calculado sob demanda sobre vagas `confirmed`. Com a F6: +1 Model (`ResumeAdaptation`), +1 DTO (`ResumeAdaptationResult`), +1 Agent (`ResumeAdaptationAgent`, mesmo provider `openrouter`), +2 Services (`ResumeAdaptationService`, `ResumePdfService`), +1 página custom (`ResumeAdaptationPage`) e +1 pacote (`spatie/laravel-pdf` com driver `cloudflare`).
+Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAnalysisResult`) + Services (lógica de negócio) + 1 Agent (`JobExtractionAgent`, único contato com o SDK) + Filament (1 Resource, 4 páginas custom, 4 widgets). Sem repository pattern, sem Actions classes, sem Jobs no MVP (fluxo síncrono). Nenhuma métrica materializada — tudo calculado sob demanda sobre vagas `confirmed`. Com a F6: +1 Model (`ResumeAdaptation`), +1 DTO (`ResumeAdaptationResult`), +1 Agent (`ResumeAdaptationAgent`, mesmo provider `opencode_zen`), +2 Services (`ResumeAdaptationService`, `ResumePdfService`), +1 página custom (`ResumeAdaptationPage`) e +1 pacote (`spatie/laravel-pdf` com driver `cloudflare`).
 
 ## 2. Tarefas
 
@@ -49,10 +49,10 @@ Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAn
 
 **Objetivo:** ambiente local configurado e espelhado em `.env.example`, sem hardcode.
 
-**Contexto:** TP §16 etapa 2 + §7 (variáveis de IA). Estado: **implementado — verificar/aceitar**. `.env` contém `APP_NAME=Jobora`, `APP_LOCALE=pt_BR`, `DB_CONNECTION=sqlite`, `OPENROUTER_API_KEY`, `OPENROUTER_MODEL=nvidia/nemotron-3-ultra-550b-a55b:free`; `database/database.sqlite` existe; `.env.example` espelha as chaves (OPENROUTER_API_KEY vazia); `.gitignore` não ignora `.env.example`.
+**Contexto:** TP §16 etapa 2 + §7 (variáveis de IA). Estado: **implementado — verificar/aceitar**. `.env` contém `APP_NAME=Jobora`, `APP_LOCALE=pt_BR`, `DB_CONNECTION=sqlite`, `OPENCODE_ZEN_API_KEY`, `OPENCODE_ZEN_MODEL=mimo-v2.5-free`; `database/database.sqlite` existe; `.env.example` espelha as chaves (OPENCODE_ZEN_API_KEY vazia); `.gitignore` não ignora `.env.example`.
 
 **Implementação:**
-- Conferir `.env` e `.env.example` lado a lado: todas as chaves de IA (`OPENROUTER_API_KEY`, `OPENROUTER_MODEL`) e de banco (`DB_CONNECTION=sqlite`) presentes em ambos; `.env` com valor real da key, `.env.example` com placeholder.
+- Conferir `.env` e `.env.example` lado a lado: todas as chaves de IA (`OPENCODE_ZEN_API_KEY`, `OPENCODE_ZEN_MODEL`) e de banco (`DB_CONNECTION=sqlite`) presentes em ambos; `.env` com valor real da key, `.env.example` com placeholder.
 - Confirmar que `database/database.sqlite` existe e que `config/database.php` default usa sqlite (default do Laravel 13).
 - Sem hardcode: as URLs/keys devem ser lidas via `env(...)` (já é o caso em `config/ai.php`).
 
@@ -79,16 +79,16 @@ Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAn
 
 **Testes:** verificação manual via navegador; testes Filament (T021) cobrem renderização das páginas autenticadas.
 
-#### T004 — Instalação e configuração do Laravel AI SDK + provider OpenRouter
+#### T004 — Instalação e configuração do Laravel AI SDK + provider OpenCode Zen
 
 **Objetivo:** chamada ao modelo via SDK funcionando (smoke com chave real), sem HTTP direto da aplicação.
 
-**Contexto:** TP §16 etapa 4 + §7. Estado: **implementado — verificar/aceitar, com smoke a executar**. `laravel/ai ^0.10.3` em `require`; `config/ai.php` define default `openrouter` e provider `openrouter` (driver `openrouter`, `key` = env `OPENROUTER_API_KEY`, `models.text.default` = env `OPENROUTER_MODEL` default `nvidia/nemotron-3-ultra-550b-a55b:free`). O SDK usa o endpoint padrão do provider `openrouter` (`https://openrouter.ai/api/v1`); nenhuma URL customizada é necessária.
+**Contexto:** TP §16 etapa 4 + §7. Estado: **implementado — verificar/aceitar, com smoke a executar**. `laravel/ai ^0.10.3` em `require`; `config/ai.php` define default `opencode_zen` e provider `opencode_zen` (driver `openai-compatible`, `key` = env `OPENCODE_ZEN_API_KEY`, `models.text.default` = env `OPENCODE_ZEN_MODEL` default `mimo-v2.5-free`). O SDK usa o driver `openai-compatible` com a base `https://opencode.ai/zen/v1` (configurada via `OPENCODE_ZEN_BASE_URL`; o SDK acrescenta `/chat/completions`).
 
 **Implementação:**
-- Verificar `config/ai.php`: provider `openrouter` presente e correto; default `openrouter`.
+- Verificar `config/ai.php`: provider `opencode_zen` presente e correto; default `opencode_zen`.
 - **Executar smoke manual** (parte que falta): com a chave real do `.env`, fazer um prompt simples via `Laravel\Ai\Facades\Ai::text(...)` (ou agente descartável) no `php artisan tinker`; conferir resposta não-vazia e latência razoável; registrar resultado (sucesso/erro) em `storage/logs/ai.log`.
-- Confirmar que **nenhum** código da aplicação faz chamada HTTP ao OpenRouter (única integração é o SDK, via agent — verificado em T009).
+- Confirmar que **nenhum** código da aplicação faz chamada HTTP ao OpenCode Zen (única integração é o SDK, via agent — verificado em T009).
 - Não usar o provider `ollama` (existe no config padrão do SDK, mas está inativo e fora do escopo).
 
 **Dependências:** T001, T002.
@@ -174,17 +174,17 @@ Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAn
 
 #### T009 — Agent de extração (JobExtractionAgent)
 
-**Objetivo:** único ponto de contato com o Laravel AI SDK: provider `openrouter`, modelo `nvidia/nemotron-3-ultra-550b-a55b:free`, timeout 120s, instruções pt-BR com contrato JSON no prompt (TP §7–8).
+**Objetivo:** único ponto de contato com o Laravel AI SDK: provider `opencode_zen`, modelo `mimo-v2.5-free`, timeout 120s, instruções pt-BR com contrato JSON no prompt (TP §7–8).
 
-**Contexto:** TP §16 etapa 7. Estado: **implementado — verificar/aceitar**. `App\Agents\JobExtractionAgent` implementa `Laravel\Ai\Contracts\Agent` com trait `Promptable`: `provider()` → `openrouter`; `model()` → lê da config (`config('ai.providers.openrouter.models.text.default')`); `timeout()` → 120; `instructions()` descreve a extração em pt-BR, exige JSON cru sem markdown, pede nomes canônicos, proíbe categoria "other", e embute o schema JSON (role, company, technologies, languages, frameworks, databases, tools, cloud, methodologies, skills, requirements, experience — arrays opcionais, strings curtas, sem duplicatas).
+**Contexto:** TP §16 etapa 7. Estado: **implementado — verificar/aceitar**. `App\Agents\JobExtractionAgent` implementa `Laravel\Ai\Contracts\Agent` com trait `Promptable`: `provider()` → `opencode_zen`; `model()` → lê da config (`config('ai.providers.opencode_zen.models.text.default')`); `timeout()` → 120; `instructions()` descreve a extração em pt-BR, exige JSON cru sem markdown, pede nomes canônicos, proíbe categoria "other", e embute o schema JSON (role, company, technologies, languages, frameworks, databases, tools, cloud, methodologies, skills, requirements, experience — arrays opcionais, strings curtas, sem duplicatas).
 
 **Implementação:**
-- Conferir: provider/model/timeout corretos; **não** implementa `HasStructuredOutput` (a variante free do OpenRouter não suporta `response_format: json_schema` nativamente — TP §7); contrato JSON embutido nas instruções; sem HTTP próprio.
+- Conferir: provider/model/timeout corretos; **não** implementa `HasStructuredOutput` (o contrato JSON é embutido nas instruções e a resposta é validada na aplicação pelos DTOs, sem `response_format: json_schema` nativo — TP §7); contrato JSON embutido nas instruções; sem HTTP próprio.
 - Conferir que as instruções seguem o TP §8 (nomes canônicos estáveis, apenas o explícito na descrição, "responda APENAS com JSON válido").
 
 **Dependências:** T004, T005, T006.
 
-**Critérios de conclusão:** `provider()` retorna `openrouter`; `model()` retorna o valor de `OPENROUTER_MODEL`; `timeout()` = 120; instructions contêm o contrato JSON e as regras do TP §8; classe não implementa `HasStructuredOutput`.
+**Critérios de conclusão:** `provider()` retorna `opencode_zen`; `model()` retorna o valor de `OPENCODE_ZEN_MODEL`; `timeout()` = 120; instructions contêm o contrato JSON e as regras do TP §8; classe não implementa `HasStructuredOutput`.
 
 **Testes:** uso via fakes do SDK nos testes de serviço (T013); nenhuma chamada real em CI.
 
@@ -410,7 +410,7 @@ Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAn
 
 #### T022 — Smoke manual ponta-a-ponta com chave real + Definition of Done
 
-**Objetivo:** validar o fluxo real com o modelo `nvidia/nemotron-3-ultra-550b-a55b:free` (OpenRouter) e conferir os critérios do MVP (TP §16 etapa 14; PRD §8).
+**Objetivo:** validar o fluxo real com o modelo `mimo-v2.5-free` (OpenCode Zen) e conferir os critérios do MVP (TP §16 etapa 14; PRD §8).
 
 **Contexto:** TP §16 etapa 14 — única etapa com chamada real ao provedor. Estado: **a executar**.
 
@@ -431,7 +431,7 @@ Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAn
 
 ### Fase L — Adequação de currículo para ATS (F6)
 
-**Objetivo da fase:** implementar a F6 ponta a ponta conforme TP etapas 15–17: persistência da última versão adaptada por vaga, agente de adequação (mesmo provider `openrouter`/`nvidia/nemotron-3-ultra-550b-a55b:free`), validação de integridade em 2 camadas, página de resultado não-CRUD e exportação PDF via `spatie/laravel-pdf` com driver `cloudflare` (Cloudflare Browser Run). Cloudflare **não** é provedor de IA. Nenhum teste depende de chamadas reais (fakes do Agent e `Pdf::fake()`).
+**Objetivo da fase:** implementar a F6 ponta a ponta conforme TP etapas 15–17: persistência da última versão adaptada por vaga, agente de adequação (mesmo provider `opencode_zen`/`mimo-v2.5-free`), validação de integridade em 2 camadas, página de resultado não-CRUD e exportação PDF via `spatie/laravel-pdf` com driver `cloudflare` (Cloudflare Browser Run). Cloudflare **não** é provedor de IA. Nenhum teste depende de chamadas reais (fakes do Agent e `Pdf::fake()`).
 
 **Decisões de implementação registradas:** o download do PDF é uma **rota GET autenticada do painel** (`filament.admin.resume-pdf.download`), não uma ação Livewire — retornos de arquivo de ações são serializados no snapshot JSON e bytes binários quebram o encode (erro "Malformed UTF-8"). A autorização do Resource/ações/páginas/rota é explícita via `App\Policies\JobPostingPolicy` (single-user: todos os métodos permitem; a fronteira fica testável). `AnalyzeJobPosting` implementa `ShouldQueueAfterCommit` (o job só é disparado após o commit da transação). A análise em segundo plano exige worker ativo (`php artisan dev` ou `queue:work`).
 
@@ -474,14 +474,14 @@ Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAn
 
 #### T025 — Agent `ResumeAdaptationAgent`
 
-**Objetivo:** único ponto de contato com o Laravel AI SDK para a adequação: provider `openrouter`, modelo `nvidia/nemotron-3-ultra-550b-a55b:free`, timeout 120s, instruções pt-BR com o contrato JSON da F6 e a regra de integridade (TP §7–8).
+**Objetivo:** único ponto de contato com o Laravel AI SDK para a adequação: provider `opencode_zen`, modelo `mimo-v2.5-free`, timeout 120s, instruções pt-BR com o contrato JSON da F6 e a regra de integridade (TP §7–8).
 
 **Contexto:** TP §3 (Agents), §7 (integração), §8 (schema F6), §16 etapa 15. Estado: **implementado — verificar/aceitar**.
 
 **Implementação:**
-- `App\Agents\ResumeAdaptationAgent` implementa `Laravel\Ai\Contracts\Agent` com trait `Promptable`: `provider()` → `openrouter`; `model()` → `config('ai.providers.openrouter.models.text.default')` (`OPENROUTER_MODEL`); `timeout()` → 120.
+- `App\Agents\ResumeAdaptationAgent` implementa `Laravel\Ai\Contracts\Agent` com trait `Promptable`: `provider()` → `opencode_zen`; `model()` → `config('ai.providers.opencode_zen.models.text.default')` (`OPENCODE_ZEN_MODEL`); `timeout()` → 120.
 - `instructions()` em pt-BR: analisar a vaga em relação ao currículo (terminologia, palavras-chave, organização, destaque de experiências relevantes, priorização de competências); **reformular/organizar/reordenar apenas informações existentes — nunca inventar** (experiências, tecnologias, cargos, certificações, resultados, projetos, responsabilidades, formação); requisitos ausentes vão para `missing_requirements`; alertas quando uma adaptação exigiria inventar; embute o contrato JSON da F6 (TP §8); exige JSON cru, sem markdown e **sem HTML**.
-- **Não** implementa `HasStructuredOutput` (a variante free do OpenRouter não suporta `json_schema` nativamente — TP §7).
+- **Não** implementa `HasStructuredOutput` (contrato JSON embutido nas instruções e validado na aplicação pelos DTOs, sem `response_format: json_schema` nativo — TP §7).
 - Sem chamadas HTTP próprias; nenhuma referência à Cloudflare na parte de IA.
 
 **Dependências:** T004 (SDK + provider), T024 (contrato).
@@ -605,7 +605,7 @@ Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAn
 - `tests/Feature/ResumePdfTest` com `Pdf::fake()`: `ResumePdfService` gera o PDF a partir do Blade com o conteúdo correto; sem chamadas ao Cloudflare.
 - `tests/Feature/FilamentPagesTest` (F6): página de resultado renderiza com dados do fake; ação "Adequar currículo" na listagem leva à página; "Adequar novamente" atualiza; "Baixar PDF" responde com PDF fake; "Copiar" disponível.
 - Fluxo completo: vaga confirmed + currículo → adaptação persistida → página exibe os 5 resultados → PDF gerado.
-- Nenhuma chamada real a OpenRouter ou Cloudflare.
+- Nenhuma chamada real a OpenCode Zen ou Cloudflare.
 
 **Dependências:** T028, T029, T030.
 
@@ -622,7 +622,7 @@ Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAn
 **Implementação:**
 - Rodar a suite completa (`php artisan test`) — F1–F6 verdes.
 - Polimento pt-BR da página e mensagens; revisão de limites/erros (falha de IA → mensagem legível + nova tentativa).
-- Smoke manual: vaga confirmed real + currículo → adequar (chave real do OpenRouter (`OPENROUTER_API_KEY`)) → conferir os 5 resultados → "Baixar PDF" (credencial Cloudflare Browser Run) → conferir PDF legível/ATS. Requer worker ativo (`php artisan dev` ou `queue:work`) para a análise em segundo plano.
+- Smoke manual: vaga confirmed real + currículo → adequar (chave real do OpenCode Zen (`OPENCODE_ZEN_API_KEY`)) → conferir os 5 resultados → "Baixar PDF" (credencial Cloudflare Browser Run) → conferir PDF legível/ATS. Requer worker ativo (`php artisan dev` ou `queue:work`) para a análise em segundo plano.
 - Registrar resultados em `storage/logs/ai.log`.
 
 **Dependências:** T031.
@@ -653,7 +653,7 @@ Condições objetivas (derivadas do PRD §7–8) — todas devem ser verdadeiras
 
 1. **Aplicação funcionando:** Laravel 13 roda localmente; painel Filament `/admin` acessível com login (1 usuário seed).
 2. **Cadastro de vaga:** descrição obrigatória (20–100.000 chars) + link opcional; vaga sem link salva normalmente; `collected_at` = data do dia; status `pending`; descrição preservada integralmente e imutável após o cadastro (correção = excluir e recadastrar).
-3. **Estruturação por IA:** ação "Analisar com IA" (síncrona) envia a descrição via Laravel AI SDK → provider `openrouter` → `nvidia/nemotron-3-ultra-550b-a55b:free`; resposta validada pela aplicação (contrato JSON + DTO); sugestão gravada em `suggested_data`; status `needs_review`. Nenhuma chamada HTTP direta ao provedor.
+3. **Estruturação por IA:** ação "Analisar com IA" (síncrona) envia a descrição via Laravel AI SDK → provider `opencode_zen` → `mimo-v2.5-free`; resposta validada pela aplicação (contrato JSON + DTO); sugestão gravada em `suggested_data`; status `needs_review`. Nenhuma chamada HTTP direta ao provedor.
 4. **Revisão humana:** página de revisão mostra descrição original (read-only) + role/company/itens editáveis com origem ai/user; correção manual persiste após recarregar; Confirmar persiste os dados confirmados (itens com `ItemSource` correto, `suggested_data` apagado, status `confirmed`); Descartar volta a `pending`.
 5. **Persistência dos dados confirmados:** apenas a versão revisada pelo usuário é armazenada como base; a sugestão do modelo não é mantida após a revisão.
 6. **Vaga não confirmada fora das análises:** apenas vagas `confirmed` compõem frequências/combinações/tendências.
@@ -732,12 +732,12 @@ T032 Refinamentos F6
 | T001 | Bootstrap do projeto Laravel 13 | A — Bootstrap | — | Laravel 13 rodando, suite default verde |
 | T002 | Configuração do ambiente (.env, SQLite, pt_BR) | A — Bootstrap | T001 | Chaves de IA/banco no .env e .env.example, sem hardcode |
 | T003 | Instalação do Filament 5 e painel admin | A — Bootstrap | T001, T002 | Painel /admin com login funcional |
-| T004 | Laravel AI SDK + provider OpenRouter + smoke | A — Bootstrap | T001, T002 | Chamada real ao nvidia/nemotron-3-ultra-550b-a55b:free via SDK funcionando |
+| T004 | Laravel AI SDK + provider OpenCode Zen + smoke | A — Bootstrap | T001, T002 | Chamada real ao mimo-v2.5-free via SDK funcionando |
 | T005 | Migrations de domínio (job_postings, items, resumes) | B — Banco e domínio | T001, T002 | Schema com índices/constraints; migrate:fresh --seed ok |
 | T006 | Models e Enums do domínio | B — Banco e domínio | T005 | Eloquent + enums com casts e relações corretos |
 | T007 | Factories e Seeder de desenvolvimento | B — Banco e domínio | T005, T006 | Factories úteis + usuário admin seed |
 | T008 | Resource Filament de vagas (List/Create) | C — Cadastro | T003, T005, T006 | Cadastrar/listar/excluir vagas (pending, collected_at=now) |
-| T009 | Agent de extração (JobExtractionAgent) | D — IA | T004, T005, T006 | Agent provider openrouter, modelo, timeout 120s, contrato JSON |
+| T009 | Agent de extração (JobExtractionAgent) | D — IA | T004, T005, T006 | Agent provider opencode_zen, modelo, timeout 120s, contrato JSON |
 | T010 | DTO e validação estrutural (JobAnalysisResult) | D — IA | T006, T016 | Resposta validada/normalizada com limites do TP §8 |
 | T011 | Serviço de análise (JobAnalysisService) | D — IA | T009, T010, T005, T006 | Transições pending→needs_review/failed + log ai |
 | T012 | Ação "Analisar com IA" na listagem | D — IA | T008, T011 | Extração disparável pela UI com feedback |
@@ -753,7 +753,7 @@ T032 Refinamentos F6
 | T022 | Smoke real ponta-a-ponta + Definition of Done | K — Testes | T021 | Fluxo real validado; DoD do MVP 100% |
 | T023 | Persistência da adequação (migration + Model `ResumeAdaptation`) | L — F6 | T005, T006 | Tabela 1:1 por vaga (UNIQUE), sem histórico; `resumes` intocada |
 | T024 | DTO `ResumeAdaptationResult` | L — F6 | — (paralelo a T023) | Resposta da IA validada estruturalmente (5 campos, limites, sem HTML) |
-| T025 | Agent `ResumeAdaptationAgent` | L — F6 | T004, T024 | Agent openrouter/nvidia/nemotron-3-ultra-550b-a55b:free com regra de integridade; sem Cloudflare/HTML |
+| T025 | Agent `ResumeAdaptationAgent` | L — F6 | T004, T024 | Agent opencode_zen/mimo-v2.5-free com regra de integridade; sem Cloudflare/HTML |
 | T026 | Validação de integridade (2 camadas) | L — F6 | T016, T018, T024 | Conceitos do adaptado ⊆ original; keywords/ausentes consistentes |
 | T027 | Service `ResumeAdaptationService` | L — F6 | T023, T024, T025, T026, T015, T018, T014 | Fluxo completo com UPSERT por vaga; falha não persiste nada |
 | T028 | Testes do domínio F6 (DTO, integridade, UPSERT, original intocado) | L — F6 | T023, T024, T026, T027 | Cenários verdes com fakes, sem rede |
