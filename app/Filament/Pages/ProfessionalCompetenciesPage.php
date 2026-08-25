@@ -18,6 +18,7 @@ use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
 use Throwable;
+use UnitEnum;
 
 /**
  * Classificação estratégica das competências do perfil (papel core,
@@ -38,6 +39,8 @@ class ProfessionalCompetenciesPage extends Page implements HasSchemas, HasTable
     protected static ?string $title = 'Competências estratégicas';
 
     protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedSparkles;
+
+    protected static string|UnitEnum|null $navigationGroup = 'Perfil';
 
     protected static ?int $navigationSort = 9;
 

@@ -9,6 +9,7 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
+use UnitEnum;
 
 class ScreeningPreferencesPage extends Page
 {
@@ -21,6 +22,8 @@ class ScreeningPreferencesPage extends Page
     protected static ?string $title = 'Critérios de triagem';
 
     protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedFunnel;
+
+    protected static string|UnitEnum|null $navigationGroup = 'Perfil';
 
     protected static ?int $navigationSort = 6;
 

@@ -16,6 +16,7 @@ use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use UnitEnum;
 
 class MarketComparisonPage extends Page implements HasSchemas, HasTable
 {
@@ -31,6 +32,8 @@ class MarketComparisonPage extends Page implements HasSchemas, HasTable
     protected static ?string $title = 'Mercado × Currículo';
 
     protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedClipboardDocumentList;
+
+    protected static string|UnitEnum|null $navigationGroup = 'Mercado';
 
     protected static ?int $navigationSort = 7;
 

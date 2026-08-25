@@ -9,6 +9,7 @@ use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Livewire\Attributes\Url;
+use UnitEnum;
 
 class MarketTrendsPage extends Page
 {
@@ -21,6 +22,8 @@ class MarketTrendsPage extends Page
     protected static ?string $title = 'Tendências do mercado';
 
     protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedArrowTrendingUp;
+
+    protected static string|UnitEnum|null $navigationGroup = 'Mercado';
 
     protected static ?int $navigationSort = 8;
 

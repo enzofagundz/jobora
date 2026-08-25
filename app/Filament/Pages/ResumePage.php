@@ -8,6 +8,7 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
+use UnitEnum;
 
 class ResumePage extends Page
 {
@@ -20,6 +21,8 @@ class ResumePage extends Page
     protected static ?string $title = 'Currículo';
 
     protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedDocumentText;
+
+    protected static string|UnitEnum|null $navigationGroup = 'Perfil';
 
     protected static ?int $navigationSort = 5;
 

@@ -12,6 +12,7 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use UnitEnum;
 
 class JobCaptureResource extends Resource
 {
@@ -20,6 +21,8 @@ class JobCaptureResource extends Resource
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedInboxArrowDown;
 
     protected static ?string $navigationLabel = 'Capturas';
+
+    protected static string|UnitEnum|null $navigationGroup = 'Vagas';
 
     protected static ?int $navigationSort = 3;
 

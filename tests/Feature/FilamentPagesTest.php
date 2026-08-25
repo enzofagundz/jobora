@@ -605,8 +605,8 @@ it('ordena a navegação lateral conforme o fluxo do produto', function () {
         JobPostingResource::class,
         ResumePage::class,
         ScreeningPreferencesPage::class,
+        ProfessionalCompetenciesPage::class,
         MarketComparisonPage::class,
         MarketTrendsPage::class,
-        ProfessionalCompetenciesPage::class,
     ]);
 });

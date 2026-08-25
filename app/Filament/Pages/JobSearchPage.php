@@ -25,6 +25,7 @@ use Filament\Schemas\Components\View;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use InvalidArgumentException;
+use UnitEnum;
 
 /**
  * Busca de vagas: o usuário configura critérios semânticos e o Jobora
@@ -43,6 +44,8 @@ class JobSearchPage extends Page
     protected static ?string $title = 'Busca de vagas';
 
     protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedMagnifyingGlass;
+
+    protected static string|UnitEnum|null $navigationGroup = 'Vagas';
 
     protected static ?int $navigationSort = 1;
 

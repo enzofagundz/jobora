@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
+use UnitEnum;
 
 class CaptureSetupPage extends Page
 {
@@ -16,6 +17,8 @@ class CaptureSetupPage extends Page
     protected static ?string $title = 'Capturar vagas';
 
     protected static string|\BackedEnum|null $navigationIcon = Heroicon::OutlinedArrowDownTray;
+
+    protected static string|UnitEnum|null $navigationGroup = 'Vagas';
 
     protected static ?int $navigationSort = 2;
 
