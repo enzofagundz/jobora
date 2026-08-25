@@ -5,19 +5,19 @@
 
 ## 1. Visão técnica
 
-Aplicação Laravel 13 single-user com painel Filament. O usuário cadastra descrições de vagas (texto + link opcional de referência). As vagas são **fontes de dados**: um agente do Laravel AI SDK (provider OpenAI-compatible apontando para OpenCode Go, modelo `deepseek-v4-flash`) extrai dados estruturados da descrição; a sugestão passa por revisão humana; somente a versão confirmada é persistida como itens normalizados e passa a alimentar as análises agregadas — frequências por categoria, combinações recorrentes, evolução temporal e o posicionamento do currículo diante dessas tendências (aderências e lacunas).
+Aplicação Laravel 13 single-user com painel Filament. O usuário cadastra descrições de vagas (texto + link opcional de referência). As vagas são **fontes de dados**: um agente do Laravel AI SDK (provider openrouter, modelo `nvidia/nemotron-3-ultra-550b-a55b:free`) extrai dados estruturados da descrição; a sugestão passa por revisão humana; somente a versão confirmada é persistida como itens normalizados e passa a alimentar as análises agregadas — frequências por categoria, combinações recorrentes, evolução temporal e o posicionamento do currículo diante dessas tendências (aderências e lacunas).
 
-O produto **não** é um gerenciador de vagas nem de candidaturas: a vaga é a unidade de observação que alimenta a base de mercado; a comparação com o currículo é uma visão derivada, não a finalidade principal. Como aplicação complementar da mesma análise, o produto gera uma versão do currículo adequada a uma vaga específica (F6 — Adequação de currículo para ATS): a IA adapta o texto do currículo com base na descrição e nos dados estruturados da vaga, e a versão adaptada pode ser exportada em PDF — renderizado via `spatie/laravel-pdf` com o driver Cloudflare (Cloudflare Browser Run API). A Cloudflare atua exclusivamente como driver de renderização de PDF; a IA da adequação usa o mesmo provedor OpenCode Go (modelo `deepseek-v4-flash`).
+O produto **não** é um gerenciador de vagas nem de candidaturas: a vaga é a unidade de observação que alimenta a base de mercado; a comparação com o currículo é uma visão derivada, não a finalidade principal. Como aplicação complementar da mesma análise, o produto gera uma versão do currículo adequada a uma vaga específica (F6 — Adequação de currículo para ATS): a IA adapta o texto do currículo com base na descrição e nos dados estruturados da vaga, e a versão adaptada pode ser exportada em PDF — renderizado via `spatie/laravel-pdf` com o driver Cloudflare (Cloudflare Browser Run API). A Cloudflare atua exclusivamente como driver de renderização de PDF; a IA da adequação usa o mesmo provedor OpenRouter (modelo `nvidia/nemotron-3-ultra-550b-a55b:free`).
 
-Fluxo de dados: Filament (UI) → Services (análise, normalização, comparação, adequação) → Models (`JobPosting`, `JobPostingItem`, `Resume`, `ResumeAdaptation`) → SQLite. IA: `JobAnalysisService` → `JobExtractionAgent` (laravel/ai) → provider `opencode-go` → OpenCode Go; adequação (F6): `ResumeAdaptationService` → `ResumeAdaptationAgent` (laravel/ai) → mesmo provider `opencode-go`. PDF (F6): `ResumePdfService` → `spatie/laravel-pdf` (driver `cloudflare`) → Cloudflare Browser Run. A aplicação nunca fala HTTP com o provedor de IA diretamente; a única integração com a Cloudflare é o driver de PDF.
+Fluxo de dados: Filament (UI) → Services (análise, normalização, comparação, adequação) → Models (`JobPosting`, `JobPostingItem`, `Resume`, `ResumeAdaptation`) → SQLite. IA: `JobAnalysisService` → `JobExtractionAgent` (laravel/ai) → provider `openrouter` → OpenRouter; adequação (F6): `ResumeAdaptationService` → `ResumeAdaptationAgent` (laravel/ai) → mesmo provider `openrouter`. PDF (F6): `ResumePdfService` → `spatie/laravel-pdf` (driver `cloudflare`) → Cloudflare Browser Run. A aplicação nunca fala HTTP com o provedor de IA diretamente; a única integração com a Cloudflare é o driver de PDF.
 
 ## 2. Stack
 
 - **Laravel 13** (requer PHP ≥ 8.3; ambiente local: PHP 8.5.8, Composer 2.10.0).
 - **Filament 5** (`filament/filament ^5.0`) — painel admin.
 - **Laravel AI SDK** (`laravel/ai ^0.x`) — camada de integração com modelos de linguagem.
-- **OpenCode Go** — provedor (endpoint OpenAI-compatible).
-- **Modelo**: `deepseek-v4-flash`.
+- **OpenRouter** — provedor (via Laravel AI SDK).
+- **Modelo**: `nvidia/nemotron-3-ultra-550b-a55b:free`.
 - **Banco**: SQLite (`database/database.sqlite`, default do Laravel 13) — decisão do usuário.
 - **Testes**: Pest (default do Laravel 13).
 - **`spatie/laravel-pdf`** — geração do PDF do currículo adaptado (F6), com driver `cloudflare` (Cloudflare Browser Run API); sem Chromium/Puppeteer local.
@@ -33,7 +33,7 @@ Camadas: Models (Eloquent) / Enums / DTO / Services (lógica de negócio) / Agen
   - `ConceptCategory`: `technology` | `language` | `framework` | `database` | `tool` | `cloud` | `methodology` | `skill` | `requirement` | `experience`.
   - `ItemSource`: `ai` | `user`.
 - **DTO**: `JobAnalysisResult` — resultado estruturado e validado da extração (role, company, arrays por categoria); `ResumeAdaptationResult` — resultado validado da adequação (F6): currículo adaptado + alterações + contemplados + ausentes + alertas (§8). Sem DTOs adicionais no MVP.
-- **Agent**: `JobExtractionAgent` (laravel/ai: implementa `Laravel\Ai\Contracts\Agent`, trait `Promptable`) — extração (F2). `ResumeAdaptationAgent` — adequação (F6), mesmo contrato, mesmo provider `opencode-go` e modelo `deepseek-v4-flash`. Agents são o único ponto de contato com o SDK.
+- **Agent**: `JobExtractionAgent` (laravel/ai: implementa `Laravel\Ai\Contracts\Agent`, trait `Promptable`) — extração (F2). `ResumeAdaptationAgent` — adequação (F6), mesmo contrato, mesmo provider `openrouter` e modelo `nvidia/nemotron-3-ultra-550b-a55b:free`. Agents são o único ponto de contato com o SDK.
 - **Services**:
   - `JobAnalysisService` — orquestra a extração: chama o agent, valida, normaliza, grava `suggested_data` e transiciona status.
   - `ConceptNormalizer` — normalização de nomes de conceitos (alias map, §9).
@@ -146,27 +146,26 @@ Migrations:
 
 ## 7. Integração com IA
 
-- **Provider** (`config/ai.php`), entrada nomeada `opencode-go`:
+- **Provider** (`config/ai.php`), entrada nomeada `openrouter`:
   ```php
-  'opencode-go' => [
-      'driver' => 'openai-compatible',
-      'url' => env('AI_URL', 'https://opencode.ai/zen/go/v1'),
-      'key' => env('AI_API_KEY'),
+  'openrouter' => [
+      'driver' => 'openrouter',
+      'key' => env('OPENROUTER_API_KEY'),
       'models' => [
-          'text' => ['default' => env('AI_MODEL', 'deepseek-v4-flash')],
+          'text' => ['default' => env('OPENROUTER_MODEL', 'nvidia/nemotron-3-ultra-550b-a55b:free')],
       ],
   ],
   ```
-  O SDK anexa `/chat/completions` à base; endpoint efetivo: `https://opencode.ai/zen/go/v1/chat/completions`.
-- **.env** (sem hardcode): `AI_URL`, `AI_API_KEY`, `AI_MODEL`. `.env.example` espelha as chaves.
-- **Agent**: `JobExtractionAgent` (implementa `Laravel\Ai\Contracts\Agent`, trait `Promptable`): `provider()` → `opencode-go`; `model()` → lê `AI_MODEL` da config; `timeout()` → 120s; `instructions()` descreve a extração em pt-BR e exige resposta JSON crua (§8).
-- **Structured output — restrição conhecida do provedor**: o OpenCode Go **rejeita** `response_format: json_schema` (HTTP 400, "This response_format type is unavailable now"). Portanto o agent **não** implementa `HasStructuredOutput`; o contrato JSON é embutido nas instruções e a resposta é validada na aplicação. Se o provedor passar a suportar json_schema, a migração é localizada: implementar `HasStructuredOutput` (o SDK valida) sem tocar no restante.
+  O SDK usa o endpoint padrão do provider `openrouter` (`https://openrouter.ai/api/v1`); nenhuma URL customizada é necessária.
+- **.env** (sem hardcode): `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`. `.env.example` espelha as chaves.
+- **Agent**: `JobExtractionAgent` (implementa `Laravel\Ai\Contracts\Agent`, trait `Promptable`): `provider()` → `openrouter`; `model()` → lê `OPENROUTER_MODEL` da config; `timeout()` → 120s; `instructions()` descreve a extração em pt-BR e exige resposta JSON crua (§8).
+- **Structured output — restrição conhecida do provedor**: a variante free do OpenRouter (`nvidia/nemotron-3-ultra-550b-a55b:free`) não suporta `response_format: json_schema` nativamente. Portanto o agent **não** implementa `HasStructuredOutput`; o contrato JSON é embutido nas instruções e a resposta é validada na aplicação. Se o modelo configurado deixar de ter a limitação da variante free e passar a suportar `json_schema`, a migração é localizada: implementar `HasStructuredOutput` (o SDK valida) sem tocar no restante.
 - **Chamada**: `$agent->prompt($posting->description)` → `AgentResponse` → `json_decode($response->text, true)`. Nenhum HTTP direto da aplicação; toda comunicação via SDK.
 - **Validação em 2 camadas**: (a) decodificação JSON + regras estruturais no `JobAnalysisResult::fromStructured` (tipos, limites, duplicados pós-normalização); (b) `JobAnalysisService` valida regras de negócio (category ∈ enum; name não vazio e ≤ 100 chars; ≤ 100 itens por vaga; description dentro dos limites) antes de gravar.
 - **Erros/timeout**: `try/catch` em `JobAnalysisService` — qualquer `Throwable` (SDK, HTTP, JSON inválido) → `status=failed` + `error_message` legível + `Log::channel('ai')` (job_posting_id, modelo, sucesso/falha, latência; nunca API key). Timeout de request 120s no agent.
-- **Desacoplamento**: trocar modelo = mudar `AI_MODEL`; trocar provedor = nova entrada em `config/ai.php` + apontar o agent (ajustar prompt/schema se necessário). Lógica de negócio intocada.
+- **Desacoplamento**: trocar modelo = mudar `OPENROUTER_MODEL`; trocar provedor = nova entrada em `config/ai.php` + apontar o agent (ajustar prompt/schema se necessário). Lógica de negócio intocada.
 - **Testes/mocks**: fakes do SDK (`JobExtractionAgent::fake(...)` com respostas fixas: válida, JSON inválido, fora do schema, exceção) — sem chamadas reais em CI; smoke manual com chave real na etapa 7.
-- **Adequação (F6)**: `ResumeAdaptationAgent` — mesmo provider `opencode-go`, mesmo modelo (`AI_MODEL`, `deepseek-v4-flash`), timeout 120s, instruções pt-BR com o contrato JSON da F6 (§8) e a regra de integridade (reformular, nunca inventar). Também **não** implementa `HasStructuredOutput` (mesma restrição do provedor). Erros: `try/catch` no `ResumeAdaptationService` → erro legível + `Log::channel('ai')`; sem persistência parcial. **A Cloudflare não é provedor de IA desta funcionalidade**: nenhuma chamada de modelo vai para Workers AI/AI Gateway — a Cloudflare participa apenas da renderização do PDF (§16 etapa 16).
+- **Adequação (F6)**: `ResumeAdaptationAgent` — mesmo provider `openrouter`, mesmo modelo (`OPENROUTER_MODEL`, `nvidia/nemotron-3-ultra-550b-a55b:free`), timeout 120s, instruções pt-BR com o contrato JSON da F6 (§8) e a regra de integridade (reformular, nunca inventar). Também **não** implementa `HasStructuredOutput` (mesma restrição do provedor). Erros: `try/catch` no `ResumeAdaptationService` → erro legível + `Log::channel('ai')`; sem persistência parcial. **A Cloudflare não é provedor de IA desta funcionalidade**: nenhuma chamada de modelo vai para Workers AI/AI Gateway — a Cloudflare participa apenas da renderização do PDF (§16 etapa 16).
 
 ## 8. Structured Output (schema)
 
@@ -333,9 +332,9 @@ Contrato JSON retornado pelo agente de adequação (conteúdo separado da aprese
 Cada etapa termina com seus testes verdes antes de avançar. Dependências: etapa 5 antes de 6–11; 7 antes de 8; 9 antes de 11; 10 antes de 11–13; 12/13 dependem de 10; etapas 15–17 (F6) dependem de 7–11 (9 e 11 em especial) e podem rodar em paralelo com 12–13; 14 e 17 por último.
 
 1. **Criação do Laravel** — `composer create-project laravel/laravel` (repo root contém PRD.md/TECHNICAL_PLAN.md → criar em diretório temporário e mover os arquivos para a raiz, preservando os .md); `.env` (`APP_*`, `DB_CONNECTION=sqlite`, `touch database/database.sqlite`); `php artisan migrate`; seed de 1 usuário. *Objetivo*: app Laravel 13 rodando (`php artisan serve` + página inicial). *Testes*: suite default verde.
-2. **Configuração do ambiente** — `.env` com `AI_URL`/`AI_API_KEY`/`AI_MODEL`; `.env.example` espelhado; gitignore ok. *Resultado*: variáveis de IA lidas sem hardcode.
+2. **Configuração do ambiente** — `.env` com `OPENROUTER_API_KEY`/`OPENROUTER_MODEL`; `.env.example` espelhado; gitignore ok. *Resultado*: variáveis de IA lidas sem hardcode.
 3. **Instalação do Filament** — `composer require filament/filament:"^5.0"` + `php artisan filament:install --panels`; `make:filament-panel admin`; login com o usuário seed. *Resultado*: painel admin acessível.
-4. **Instalação/configuração do Laravel AI SDK** — `composer require laravel/ai`; `config/ai.php` com provider `opencode-go`; smoke manual (prompt simples com chave real). *Resultado*: chamada ao modelo via SDK funcionando.
+4. **Instalação/configuração do Laravel AI SDK** — `composer require laravel/ai`; `config/ai.php` com provider `openrouter`; smoke manual (prompt simples com chave real). *Resultado*: chamada ao modelo via SDK funcionando.
 5. **Banco/modelo de domínio** — migrations (users, job_postings, job_posting_items, resumes) + Models + Enums + factories. *Resultado*: `php artisan migrate` ok; `migrate:fresh --seed` reproduzível.
 6. **Cadastro de vagas** — `JobPostingResource` List/Create (validação: description obrigatória 20–100.000 chars; url opcional). *Resultado*: criar/listar/excluir vagas com status pending.
 7. **Integração com IA** — `JobExtractionAgent` + contrato JSON + `JobAnalysisResult` + `JobAnalysisService` + validações + tratamento de erros/timeout + `Log::channel('ai')`; ação "Analisar com IA" síncrona. *Resultado*: pending → needs_review/failed com sugestão gravada. *Testes*: fakes do SDK. *Contingência* (somente se o provedor se mostrar instável em uso real): mover a extração para fila `database` do Laravel — decisão não antecipada.
@@ -352,9 +351,9 @@ Cada etapa termina com seus testes verdes antes de avançar. Dependências: etap
 
 ## 17. Decisões pendentes
 
-**Já decidido (definitivas)**: Laravel 13; Filament; Laravel AI SDK; OpenCode Go; endpoint `https://opencode.ai/zen/go/v1/chat/completions`; modelo `deepseek-v4-flash`; banco relacional SQLite; single-user; vagas como fonte de dados (não gerenciador de vagas/candidaturas); link opcional e não identificador (sem deduplicação por link); sem scraping; comparação agregada (não vaga-a-vaga binária); currículo atualizável (substituição); sem infra adicional (Redis, filas, Elasticsearch, microserviços). F6: adequação no MVP; IA da adequação = mesmo provedor OpenCode Go + `deepseek-v4-flash` (Cloudflare **não** é provedor de IA); persistência da última versão adaptada por vaga (sem histórico; original nunca substituído); exportação em PDF no MVP via `spatie/laravel-pdf` + driver `cloudflare` (Cloudflare Browser Run); DOCX fora do MVP; nome do produto definido no projeto (não é mais pendência).
+**Já decidido (definitivas)**: Laravel 13; Filament; Laravel AI SDK; OpenRouter; provider `openrouter`; modelo `nvidia/nemotron-3-ultra-550b-a55b:free`; banco relacional SQLite; single-user; vagas como fonte de dados (não gerenciador de vagas/candidaturas); link opcional e não identificador (sem deduplicação por link); sem scraping; comparação agregada (não vaga-a-vaga binária); currículo atualizável (substituição); sem infra adicional (Redis, filas, Elasticsearch, microserviços). F6: adequação no MVP; IA da adequação = mesmo provedor OpenRouter + `nvidia/nemotron-3-ultra-550b-a55b:free` (Cloudflare **não** é provedor de IA); persistência da última versão adaptada por vaga (sem histórico; original nunca substituído); exportação em PDF no MVP via `spatie/laravel-pdf` + driver `cloudflare` (Cloudflare Browser Run); DOCX fora do MVP; nome do produto definido no projeto (não é mais pendência).
 
-**Recomendações técnicas (implementar sem perguntar)**: extração síncrona no MVP (contingência: fila `database` do Laravel se instável — sem Redis); normalização via `config/concepts.php`; `ItemSource` por item; UI pt-BR / código em inglês; sem materialização de métricas; limites de validação (description 20–100k chars, ≤ 100 itens/vaga, ≤ 100 chars/nome); aviso de dados insuficientes &lt; 2 meses; comparação de períodos 3×3 meses com threshold ±20%; structured output via contrato JSON nas instruções + validação no app (provedor rejeita `json_schema`). F6: adequação síncrona (mesmo padrão da extração); UPSERT em `resume_adaptations`; checagem de integridade por conceitos (mesmo normalizador); PDF testado com `Pdf::fake()`.
+**Recomendações técnicas (implementar sem perguntar)**: extração síncrona no MVP (contingência: fila `database` do Laravel se instável — sem Redis); normalização via `config/concepts.php`; `ItemSource` por item; UI pt-BR / código em inglês; sem materialização de métricas; limites de validação (description 20–100k chars, ≤ 100 itens/vaga, ≤ 100 chars/nome); aviso de dados insuficientes &lt; 2 meses; comparação de períodos 3×3 meses com threshold ±20%; structured output via contrato JSON nas instruções + validação no app (a variante free do OpenRouter não suporta `json_schema` nativamente). F6: adequação síncrona (mesmo padrão da extração); UPSERT em `resume_adaptations`; checagem de integridade por conceitos (mesmo normalizador); PDF testado com `Pdf::fake()`.
 
 **Pendências reais (decisão do usuário — nenhuma bloqueia o MVP de F6)**:
 
