@@ -136,3 +136,28 @@ WXT instalado: `wxt ^0.21.3` (resolvido 0.21.4), `@wxt-dev/module-vue ^1.0.3`, V
 | github.com/wxt-dev/examples/examples/vue-overlay | padrão `onMount: () => { const app = createApp(Component); app.mount(ui.container); return app; }` |
 
 Assinaturas copiadas (não inventadas): listadas acima; verificação de build confirma cada uma.
+
+## 8. Transição multiusuário — vínculo do token global (2026-08-26)
+
+Durante esta transição o token Bearer existente (`VAGAS_API_TOKEN`) permanece single-account no backend: `EnsureCaptureApiToken` valida `Authorization: Bearer` via `hash_equals` e resolve o proprietário pelo `config('capture.owner_user_id')` que lê `env('VAGAS_API_USER_ID', 1)`. O cliente (WXT background + `utils/storage.ts`) continua enviando apenas o Bearer; não envia `user_id` no payload e não autenticará sessão web.
+
+- `VAGAS_API_USER_ID` deve apontar para o `users.id` do owner inicial (na base auditada o menor `users.id` é o Admin semeado). Sem esse id ou com owner inexistente, `EnsureCaptureApiToken` responde `503` sem criar captura.
+- `JobCaptureController::store` obtém o owner do atributo garantido pelo middleware (`capture_user`) e delega a `JobCaptureService::store($data, $owner)`. Deduplicação é por usuário (`UNIQUE(user_id, source, dedup_key)` / `external_id`); a resposta continua sem `user_id`/`deleted_at` (ocultos por `Hidden`).
+- `ExtensionAuthController::validate` continua retornando `{valid: true}` apenas; ainda não fornece identidade ao cliente. O popup continua exibindo “identidade não fornecida pela API”.
+- `CaptureSetupPage::canAccess()` restringe a exibição do token integral ao `owner_user_id`; demais usuários recebem `403` e não veem o token.
+
+Pontos futuros para autenticação por usuário (fora desta tarefa):
+`EnsureCaptureApiToken`, `ExtensionAuthController::validate`, `JobCaptureController`, `extension/utils/storage.ts` e `extension/entrypoints/background.ts`. Não foi criada autenticação paralela da extensão nem alterada a superfície `extension/api` ou content scripts nesta etapa.
+
+## 9. Autenticação por usuário — credencial individual (2026-08-27)
+
+Migração concluída para identidade por usuário:
+
+- `users.capture_token_hash` (SHA-256, `UNIQUE`) + `capture_token_last_four` + `disabled_at` substituem `VAGAS_API_TOKEN`/`VAGAS_API_USER_ID`. O segredo em texto puro nunca é persistido; apenas o hash é armazenado e o `last_four` serve para máscara.
+- `CaptureTokenService::issueToken()` gera `bin2hex(random_bytes(32))`, grava hash+last4 via `forceFill` e retorna o segredo uma única vez para exibição transitória. `revokeToken()` limpa ambos. `findUserByToken()` localiza o usuário por hash e rejeita `disabled_at` não nulo.
+- `CaptureSetupPage` agora permite qualquer usuário autenticado (`canAccess()` checa `auth()->check()` e `disabled_at`). Ações de cabeçalho `generateToken`/`regenerateToken`/`revokeToken` (`Filament\Actions\Action`) operam exclusivamente sobre `auth()->user()`, com confirmação e `Notification` sobre invalidação. O Blade mostra `plainToken` apenas quando presente, caso contrário máscara (`••••`+last4) ou empty state "Você ainda não possui credencial".
+- `EnsureCaptureApiToken` valida o Bearer por hash (`findUserByToken`), retorna 401 genérico para ausente/inválido/revogado/desativado/excluído, define o usuário na request (`setUserResolver`) e não consulta mais `config('capture.*')`. `JobCaptureController::store` consome `$request->user()` e mantém `user_id` fora do payload e da resposta (`Hidden`). `ExtensionAuthController::validate` confirma apenas a validade da credencial.
+- `routes/api.php` protege `POST /api/job-captures` (`throttle:60,1`) e `GET /api/extension/auth/validate` (`throttle:30,1`) antes da autenticação, por IP, sem logar o token.
+- Extensão WXT: `api/captures.ts` adiciona `VALIDATE_PATH` e `validateCaptureToken()` (GET com Bearer, timeout, classificação `200/401/http/timeout/network` sem logar token). `entrypoints/popup/App.vue` importa `validateCaptureToken`, muda o label para "Token (credencial da conta)" e, após salvar URL+token, valida e exibe "Conectado — credencial válida." ou erros específicos. `Desconectar` limpa storage e desliga captura localmente.
+- Migração `2026_08_26_160000` cria `capture_token_hash`/`capture_token_last_four`/`disabled_at`; `2026_08_26_160001` converte o `VAGAS_API_TOKEN` legado no hash do owner se `VAGAS_API_USER_ID` ainda estiver configurado, falhando explicitamente se o owner não existir ou já possuir hash divergente. `config/capture.php` mantém as chaves legadas apenas para esse backfill; `.env.example` documenta a geração via `/capture-setup`.
+- Compatibilidade: `User::canAccessPanel()` e `CaptureTokenService` bloqueiam `disabled_at`; `cascadeOnDelete` remove capturas ao excluir o usuário; logout web não revoga o token da extensão; um único token por usuário invalida todos os dispositivos ao regenerar (tokens por instalação ficam para evolução futura).
