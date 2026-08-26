@@ -23,6 +23,7 @@ use App\Jobs\AnalyzeJobPosting;
 use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
 use App\Models\User;
+use App\Services\CaptureTokenService;
 use App\Services\JobAnalysisService;
 use App\Services\ResumeService;
 use Filament\Facades\Filament;
@@ -47,7 +48,7 @@ function longDescription(): string
 }
 
 it('renderiza a listagem de vagas', function () {
-    JobPosting::factory()->create(['description' => longDescription()]);
+    JobPosting::factory()->for(auth()->user(), 'user')->create(['description' => longDescription()]);
 
     Livewire::test(ListJobPostings::class)
         ->assertSuccessful()
@@ -60,8 +61,8 @@ it('abre o modal de revisão com a sugestão', function () {
         'skills' => ['React', 'Python'],
     ]]);
 
-    $posting = JobPosting::factory()->create(['description' => longDescription()]);
-    app(JobAnalysisService::class)->analyze($posting);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->create(['description' => longDescription()]);
+    app(JobAnalysisService::class)->analyze(auth()->user(), $posting);
 
     Livewire::test(ListJobPostings::class)
         ->mountTableAction('review', $posting)
@@ -75,10 +76,10 @@ it('renderiza a descrição original como conteúdo rico na revisão', function 
         'skills' => ['React', 'Python'],
     ]]);
 
-    $posting = JobPosting::factory()->create([
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->create([
         'description' => '<p><strong>Vaga</strong> para dev com <em>Laravel</em>.</p>',
     ]);
-    app(JobAnalysisService::class)->analyze($posting);
+    app(JobAnalysisService::class)->analyze(auth()->user(), $posting);
 
     Livewire::test(ListJobPostings::class)
         ->mountTableAction('review', $posting)
@@ -96,19 +97,19 @@ it('renderiza a página do currículo e salva o texto', function () {
         ->assertHasNoFormErrors()
         ->assertSet('data.content', fn (mixed $value): bool => is_string($value));
 
-    expect(app(ResumeService::class)->content())->toBe('Currículo com Python e Docker.');
+    expect(app(ResumeService::class)->content(auth()->user()))->toBe('Currículo com Python e Docker.');
 });
 
 it('renderiza a comparação mercado × currículo com dados do PRD', function () {
-    $p1 = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $p1 = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
     $p1->items()->createMany([
         ['category' => 'skill', 'name' => 'Python', 'source' => 'ai'],
         ['category' => 'skill', 'name' => 'React', 'source' => 'ai'],
     ]);
-    $p2 = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $p2 = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
     $p2->items()->create(['category' => 'skill', 'name' => 'Python', 'source' => 'ai']);
 
-    app(ResumeService::class)->save('Currículo com Python.');
+    app(ResumeService::class)->save(auth()->user(), 'Currículo com Python.');
 
     $component = Livewire::test(MarketComparisonPage::class);
 
@@ -124,13 +125,13 @@ it('renderiza a comparação mercado × currículo com dados do PRD', function (
 });
 
 it('renderiza as tendências com série mensal', function () {
-    $posting = JobPosting::factory()->confirmed()->create([
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create([
         'description' => longDescription(),
         'collected_at' => now()->subMonths(2),
     ]);
     $posting->items()->create(['category' => 'skill', 'name' => 'Python', 'source' => 'ai']);
 
-    $posting2 = JobPosting::factory()->confirmed()->create([
+    $posting2 = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create([
         'description' => longDescription(),
         'collected_at' => now()->subMonth(),
     ]);
@@ -142,9 +143,9 @@ it('renderiza as tendências com série mensal', function () {
 });
 
 it('widgets exibem dados corretos', function () {
-    $posting = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
     $posting->items()->create(['category' => 'skill', 'name' => 'Python', 'source' => 'ai']);
-    JobPosting::factory()->needsReview()->create(['description' => longDescription()]);
+    JobPosting::factory()->for(auth()->user(), 'user')->needsReview()->create(['description' => longDescription()]);
 
     Livewire::test(StatsOverviewWidget::class)
         ->assertSee('2')
@@ -153,7 +154,7 @@ it('widgets exibem dados corretos', function () {
     Livewire::test(TopConceptsWidget::class)
         ->assertSee('Python');
 
-    app(ResumeService::class)->save('Currículo sem menção a nenhuma tecnologia.');
+    app(ResumeService::class)->save(auth()->user(), 'Currículo sem menção a nenhuma tecnologia.');
 
     Livewire::test(ComparisonSummaryWidget::class)
         ->assertSee('Python');
@@ -172,7 +173,7 @@ it('ações da listagem mudam o estado da vaga', function () {
         'skills' => ['Python'],
     ]]);
 
-    $posting = JobPosting::factory()->create(['description' => longDescription()]);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->create(['description' => longDescription()]);
 
     Livewire::test(ListJobPostings::class)
         ->callTableAction('analyze', $posting);
@@ -192,10 +193,10 @@ it('ações da listagem mudam o estado da vaga', function () {
 });
 
 it('mostra a análise com IA somente em vagas pendentes ou com falha', function () {
-    $pending = JobPosting::factory()->create(['description' => longDescription()]);
-    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
-    $needsReview = JobPosting::factory()->needsReview()->create(['description' => longDescription()]);
-    $failed = JobPosting::factory()->failed()->create(['description' => longDescription()]);
+    $pending = JobPosting::factory()->for(auth()->user(), 'user')->create(['description' => longDescription()]);
+    $confirmed = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
+    $needsReview = JobPosting::factory()->for(auth()->user(), 'user')->needsReview()->create(['description' => longDescription()]);
+    $failed = JobPosting::factory()->for(auth()->user(), 'user')->failed()->create(['description' => longDescription()]);
 
     Livewire::test(ListJobPostings::class)
         ->assertTableActionVisible('analyze', $pending)
@@ -213,9 +214,9 @@ it('widget de tendências lida com base vazia', function () {
 });
 
 it('esconde a ação revisar fora de vagas aguardando revisão', function () {
-    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
-    $pending = JobPosting::factory()->create(['description' => longDescription()]);
-    $needsReview = JobPosting::factory()->needsReview()->create(['description' => longDescription()]);
+    $confirmed = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
+    $pending = JobPosting::factory()->for(auth()->user(), 'user')->create(['description' => longDescription()]);
+    $needsReview = JobPosting::factory()->for(auth()->user(), 'user')->needsReview()->create(['description' => longDescription()]);
 
     Livewire::test(ListJobPostings::class)
         ->assertTableActionHidden('review', $confirmed)
@@ -232,12 +233,12 @@ it('renderiza a página de adequação e gera a adaptação pela ação', functi
         'alerts' => [],
     ]]);
 
-    $posting = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
     $posting->items()->createMany([
         ['category' => 'skill', 'name' => 'Python', 'source' => 'ai'],
         ['category' => 'skill', 'name' => 'React', 'source' => 'ai'],
     ]);
-    app(ResumeService::class)->save('Currículo com Python.');
+    app(ResumeService::class)->save(auth()->user(), 'Currículo com Python.');
 
     Livewire::test(ApplicationPage::class, ['record' => $posting->id])
         ->assertSuccessful()
@@ -251,7 +252,7 @@ it('renderiza a página de adequação e gera a adaptação pela ação', functi
 });
 
 it('renderiza o currículo adaptado como texto na adequação', function () {
-    $posting = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
     ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
         'adapted_content' => "Currículo adaptado.\nDestaque para Python.",
@@ -267,8 +268,8 @@ it('renderiza o currículo adaptado como texto na adequação', function () {
 });
 
 it('renderiza o currículo original como texto na adequação', function () {
-    $posting = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
-    app(ResumeService::class)->save('<p><strong>Currículo</strong> com <em>Laravel</em>.</p>');
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
+    app(ResumeService::class)->save(auth()->user(), '<p><strong>Currículo</strong> com <em>Laravel</em>.</p>');
 
     Livewire::test(ApplicationPage::class, ['record' => $posting->id])
         ->assertSuccessful()
@@ -276,7 +277,7 @@ it('renderiza o currículo original como texto na adequação', function () {
 });
 
 it('expõe o link de download do PDF na página', function () {
-    $posting = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
     ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
         'adapted_content' => 'Currículo adaptado para a vaga.',
@@ -294,7 +295,7 @@ it('expõe o link de download do PDF na página', function () {
 it('baixa o PDF da adaptação pela rota dedicada', function () {
     Pdf::fake();
 
-    $posting = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
     ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
         'adapted_content' => 'Currículo adaptado para a vaga.',
@@ -304,22 +305,21 @@ it('baixa o PDF da adaptação pela rota dedicada', function () {
         'alerts' => [],
     ]);
 
-    $this->actingAs(User::factory()->create())
-        ->get(route('filament.admin.resume-pdf.download', $posting))
+    $this->get(route('filament.admin.resume-pdf.download', $posting))
         ->assertOk();
 
     Pdf::assertRespondedWithPdf(fn (PdfBuilder $pdf) => $pdf->viewName === 'pdf.adapted-resume');
 });
 
 it('existe e está registrado em /job-postings/{record}/application', function () {
-    $posting = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
 
     Livewire::test(ApplicationPage::class, ['record' => $posting->id])
         ->assertSuccessful();
 });
 
 it('renderiza a página de view com a descrição rica', function () {
-    $posting = JobPosting::factory()->create([
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->create([
         'description' => '<p><strong>Vaga</strong> para dev com <em>Laravel</em>.</p>',
     ]);
 
@@ -329,9 +329,9 @@ it('renderiza a página de view com a descrição rica', function () {
 });
 
 it('a ação de Candidatura aparece na listagem para vagas confirmadas e esconde fora desse status', function () {
-    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
-    $pending = JobPosting::factory()->create(['description' => longDescription()]);
-    $needsReview = JobPosting::factory()->needsReview()->create(['description' => longDescription()]);
+    $confirmed = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
+    $pending = JobPosting::factory()->for(auth()->user(), 'user')->create(['description' => longDescription()]);
+    $needsReview = JobPosting::factory()->for(auth()->user(), 'user')->needsReview()->create(['description' => longDescription()]);
 
     Livewire::test(ListJobPostings::class)
         ->assertTableActionVisible('application', $confirmed)
@@ -341,14 +341,14 @@ it('a ação de Candidatura aparece na listagem para vagas confirmadas e esconde
 });
 
 it('ApplicationPage redireciona para a listagem em vaga não confirmada', function () {
-    $posting = JobPosting::factory()->create(['description' => longDescription()]);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->create(['description' => longDescription()]);
 
     Livewire::test(ApplicationPage::class, ['record' => $posting->id])
         ->assertRedirect(ListJobPostings::getUrl());
 });
 
 it('ApplicationPage renderiza os métodos confirmados com origem, plataforma, URL e e-mail', function () {
-    $confirmed = JobPosting::factory()->confirmed()->create([
+    $confirmed = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create([
         'description' => longDescription(),
         'source_url' => 'https://www.linkedin.com/jobs/view/999',
     ]);
@@ -369,7 +369,7 @@ it('ApplicationPage renderiza os métodos confirmados com origem, plataforma, UR
 });
 
 it('ApplicationPage mostra mensagem de ausência quando não há métodos', function () {
-    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $confirmed = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
 
     Livewire::test(ApplicationPage::class, ['record' => $confirmed->id])
         ->assertSuccessful()
@@ -377,7 +377,7 @@ it('ApplicationPage mostra mensagem de ausência quando não há métodos', func
 });
 
 it('ViewJobPosting não exibe mais a seção de candidatura', function () {
-    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $confirmed = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
     $confirmed->applicationMethods()->create([
         'type' => 'email',
         'email' => 'vagas@empresa.com',
@@ -393,7 +393,7 @@ it('ViewJobPosting não exibe mais a seção de candidatura', function () {
 });
 
 it('ApplicationPage sem currículo cadastrado mostra empty state e continua abrindo', function () {
-    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $confirmed = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
 
     Livewire::test(ApplicationPage::class, ['record' => $confirmed->id])
         ->assertSuccessful()
@@ -401,8 +401,8 @@ it('ApplicationPage sem currículo cadastrado mostra empty state e continua abri
 });
 
 it('ApplicationPage sem adaptação mostra empty state de adequação', function () {
-    app(ResumeService::class)->save('Currículo base.');
-    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    app(ResumeService::class)->save(auth()->user(), 'Currículo base.');
+    $confirmed = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
 
     Livewire::test(ApplicationPage::class, ['record' => $confirmed->id])
         ->assertSuccessful()
@@ -410,7 +410,7 @@ it('ApplicationPage sem adaptação mostra empty state de adequação', function
 });
 
 it('manageApplicationMethods cria métodos manuais com source user e dedup_key', function () {
-    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $confirmed = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
 
     Livewire::test(ApplicationPage::class, ['record' => $confirmed->id])
         ->callAction('manageApplicationMethods', [
@@ -434,7 +434,7 @@ it('manageApplicationMethods cria métodos manuais com source user e dedup_key',
 });
 
 it('manageApplicationMethods edita métodos existentes preservando os não tocados', function () {
-    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $confirmed = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
     $email = $confirmed->applicationMethods()->create([
         'type' => 'email',
         'email' => 'old@empresa.com',
@@ -466,8 +466,8 @@ it('manageApplicationMethods edita métodos existentes preservando os não tocad
         ->and($methods->where('type', 'external_url')->first()->url)->toBe('https://empresa.gupy.io/jobs/1');
 });
 it('manageApplicationMethods com lista vazia remove apenas os métodos da vaga', function () {
-    $a = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
-    $b = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $a = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
+    $b = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
     $a->applicationMethods()->create([
         'type' => 'email', 'email' => 'a@empresa.com', 'source' => 'ai', 'dedup_key' => str_repeat('a', 64),
     ]);
@@ -492,7 +492,7 @@ it('manageApplicationMethods com lista vazia remove apenas os métodos da vaga',
 });
 
 it('manageApplicationMethods rejeita URL sem esquema http(s) e não grava', function () {
-    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $confirmed = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
 
     Livewire::test(ApplicationPage::class, ['record' => $confirmed->id])
         ->callAction('manageApplicationMethods', [
@@ -506,7 +506,7 @@ it('manageApplicationMethods rejeita URL sem esquema http(s) e não grava', func
 });
 
 it('manageApplicationMethods rejeita e-mail inválido e não grava', function () {
-    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $confirmed = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
 
     Livewire::test(ApplicationPage::class, ['record' => $confirmed->id])
         ->callAction('manageApplicationMethods', [
@@ -520,7 +520,7 @@ it('manageApplicationMethods rejeita e-mail inválido e não grava', function ()
 });
 
 it('ApplicationPage abre uma vaga confirmada sem afetar currículo ou métodos existentes ao entrar', function () {
-    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $confirmed = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
     $confirmed->applicationMethods()->createMany([
         ['type' => 'email', 'email' => 'a@empresa.com', 'source' => 'user', 'dedup_key' => str_repeat('a', 64)],
     ]);
@@ -539,8 +539,8 @@ it('ApplicationPage abre uma vaga confirmada sem afetar currículo ou métodos e
 });
 
 it('redireciona para a listagem ao abrir a view de vaga não visualizável', function () {
-    $needsReview = JobPosting::factory()->needsReview()->create(['description' => longDescription()]);
-    $failed = JobPosting::factory()->failed()->create(['description' => longDescription()]);
+    $needsReview = JobPosting::factory()->for(auth()->user(), 'user')->needsReview()->create(['description' => longDescription()]);
+    $failed = JobPosting::factory()->for(auth()->user(), 'user')->failed()->create(['description' => longDescription()]);
 
     Livewire::test(ViewJobPosting::class, ['record' => $needsReview->id])
         ->assertRedirect(ListJobPostings::getUrl());
@@ -550,37 +550,37 @@ it('redireciona para a listagem ao abrir a view de vaga não visualizável', fun
 });
 
 it('permite visualizar vagas pendentes e confirmadas', function () {
-    $pending = JobPosting::factory()->create(['description' => longDescription()]);
-    $confirmed = JobPosting::factory()->confirmed()->create(['description' => longDescription()]);
+    $pending = JobPosting::factory()->for(auth()->user(), 'user')->create(['description' => longDescription()]);
+    $confirmed = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
 
     Livewire::test(ViewJobPosting::class, ['record' => $pending->id])->assertSuccessful();
     Livewire::test(ViewJobPosting::class, ['record' => $confirmed->id])->assertSuccessful();
 });
 
-it('renderiza a página de onboarding da extensão com os quatro passos e o token', function () {
-    config(['capture.api_token' => 'token-secreto-1234']);
+it('renderiza a página de onboarding da extensão com os quatro passos e máscara quando há token', function () {
+    $service = app(CaptureTokenService::class);
+    $service->issueToken(auth()->user());
 
     $page = Livewire::test(CaptureSetupPage::class)
         ->assertSuccessful()
         ->assertSee('Instale a extensão')
-        ->assertSee('Copie o token')
+        ->assertSee('Sua credencial')
         ->assertSee('Cole no popup da extensão')
-        ->assertSee('Valide e conecte')
-        ->assertSee('Jobora Job Capture');
+        ->assertSee('Valide e conecte');
 
-    // Token mascarado visível por padrão; valor integral no bloco
-    // x-show="revealed" e no handler de cópia (Js::from).
-    expect($page->html())->toContain('••••1234')
-        ->and(substr_count($page->html(), 'token-secreto-1234'))->toBe(2);
+    // Máscara deve aparecer; token completo só após geração, não na carga inicial.
+    expect($page->html())->toContain('•')
+        ->and($page->html())->not->toContain('VAGAS_API_TOKEN');
 });
-it('informa que a API não está configurada quando o token é vazio', function () {
-    config(['capture.api_token' => '']);
+
+it('mostra estado sem credencial quando usuário não tem token', function () {
+    // Garante sem token
+    auth()->user()->forceFill(['capture_token_hash' => null, 'capture_token_last_four' => null])->save();
 
     Livewire::test(CaptureSetupPage::class)
         ->assertSuccessful()
-        ->assertSee('API não configurada')
-        ->assertSee('VAGAS_API_TOKEN')
-        ->assertDontSee('Copie o token');
+        ->assertSee('Você ainda não possui credencial')
+        ->assertSee('Gerar credencial');
 });
 it('exibe a marca Jobora no painel', function () {
     $this->get('/')->assertSuccessful()->assertSee('Jobora');

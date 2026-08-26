@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\CaptureTokenService;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -10,17 +11,20 @@ class EnsureCaptureApiToken
 {
     public function handle(Request $request, Closure $next): Response
     {
-        $expected = config('capture.api_token');
+        $provided = trim((string) $request->bearerToken());
 
-        if ($expected === '') {
-            return response()->json(['message' => 'API de captura não configurada (VAGAS_API_TOKEN).'], 503);
-        }
-
-        $provided = (string) $request->bearerToken();
-
-        if (! hash_equals($expected, $provided)) {
+        if ($provided === '') {
             return response()->json(['message' => 'Token inválido.'], 401);
         }
+
+        $user = app(CaptureTokenService::class)->findUserByToken($provided);
+
+        if (! $user) {
+            return response()->json(['message' => 'Token inválido.'], 401);
+        }
+
+        $request->setUserResolver(fn (): mixed => $user);
+        $request->attributes->set('capture_user', $user);
 
         return $next($request);
     }

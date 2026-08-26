@@ -9,6 +9,7 @@ use App\Jobs\AnalyzeJobPosting;
 use App\Models\JobCapture;
 use App\Models\JobPosting;
 use App\Models\User;
+use App\Services\CaptureTokenService;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -16,16 +17,29 @@ use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
 
-// As páginas do painel exigem usuário autenticado; a API exige o token.
+// As páginas do painel exigem usuário autenticado; a API exige o token por usuário.
 beforeEach(function (): void {
-    $this->actingAs(User::factory()->create());
-    config(['capture.api_token' => 'test-token']);
+    $user = User::factory()->create();
+    $this->actingAs($user);
+    $token = app(CaptureTokenService::class)->issueToken($user);
+    $GLOBALS['captureToken'] = $token;
 });
 
 function captureHeaders(): array
 {
+    $token = $GLOBALS['captureToken'] ?? '';
+
     return [
-        'Authorization' => 'Bearer test-token',
+        'Authorization' => 'Bearer '.$token,
+        'Accept' => 'application/json',
+        'Content-Type' => 'application/json',
+    ];
+}
+
+function captureHeadersWithToken(string $token): array
+{
+    return [
+        'Authorization' => 'Bearer '.$token,
         'Accept' => 'application/json',
         'Content-Type' => 'application/json',
     ];
@@ -56,12 +70,15 @@ it('rejeita sem token e com token errado', function () {
     ])->assertStatus(401);
 });
 
-it('responde 503 quando o token não está configurado', function () {
-    config(['capture.api_token' => '']);
+it('rejeita quando a credencial não está configurada', function () {
+    $user = auth()->user();
+    app(CaptureTokenService::class)->revokeToken($user);
 
     $this->postJson('/api/job-captures', capturePayload(), captureHeaders())
-        ->assertStatus(503)
-        ->assertJson(['message' => 'API de captura não configurada (VAGAS_API_TOKEN).']);
+        ->assertStatus(401)
+        ->assertJson(['message' => 'Token inválido.']);
+
+    $this->postJson('/api/job-captures', capturePayload())->assertStatus(401);
 });
 
 it('armazena payload completo com campos mapeados e responde 201', function () {
@@ -192,7 +209,7 @@ it('responde ao preflight CORS do LinkedIn', function () {
 it('promove a captura a vaga e despacha a análise de IA', function () {
     Queue::fake();
 
-    $capture = JobCapture::factory()->create(['description' => str_repeat('Vaga PHP sênior com Laravel. ', 5)]);
+    $capture = JobCapture::factory()->for(auth()->user(), 'user')->create(['description' => str_repeat('Vaga PHP sênior com Laravel. ', 5)]);
 
     Livewire::test(ViewJobCapture::class, ['record' => $capture->id])
         ->callAction('promote');
@@ -212,7 +229,7 @@ it('promove a captura a vaga e despacha a análise de IA', function () {
 it('não promove captura com descrição curta demais', function () {
     Queue::fake();
 
-    $capture = JobCapture::factory()->create(['description' => 'Texto curto.']);
+    $capture = JobCapture::factory()->for(auth()->user(), 'user')->create(['description' => 'Texto curto.']);
 
     Livewire::test(ViewJobCapture::class, ['record' => $capture->id])
         ->callAction('promote');
@@ -227,7 +244,7 @@ it('esconde a ação de promoção para captura já promovida', function () {
     Queue::fake();
 
     $posting = JobPosting::factory()->create();
-    $capture = JobCapture::factory()->create(['job_posting_id' => $posting->id]);
+    $capture = JobCapture::factory()->for(auth()->user(), 'user')->create(['job_posting_id' => $posting->id]);
 
     Livewire::test(ViewJobCapture::class, ['record' => $capture->id])
         ->assertActionHidden('promote');
@@ -236,7 +253,7 @@ it('esconde a ação de promoção para captura já promovida', function () {
 });
 
 it('renderiza a página de view com o conteúdo da captura', function () {
-    $capture = JobCapture::factory()->create([
+    $capture = JobCapture::factory()->for(auth()->user(), 'user')->create([
         'description' => 'Vaga para desenvolvedor PHP com Laravel e PostgreSQL.',
         'company' => 'Acme Ltda',
         'location' => 'Remoto',
@@ -257,7 +274,7 @@ it('renderiza a página de view com o conteúdo da captura', function () {
 
 it('exclui captura pela ação da tabela mantendo a vaga promovida', function () {
     $posting = JobPosting::factory()->create();
-    $capture = JobCapture::factory()->create(['job_posting_id' => $posting->id]);
+    $capture = JobCapture::factory()->for(auth()->user(), 'user')->create(['job_posting_id' => $posting->id]);
 
     Livewire::test(ListJobCaptures::class)
         ->callTableAction('delete', $capture);
@@ -271,8 +288,8 @@ it('exclui captura pela ação da tabela mantendo a vaga promovida', function ()
 });
 
 it('exclui capturas selecionadas em lote', function () {
-    $c1 = JobCapture::factory()->create();
-    $c2 = JobCapture::factory()->create();
+    $c1 = JobCapture::factory()->for(auth()->user(), 'user')->create();
+    $c2 = JobCapture::factory()->for(auth()->user(), 'user')->create();
 
     Livewire::test(ListJobCaptures::class)
         ->callTableBulkAction('delete', [$c1, $c2]);
@@ -289,8 +306,8 @@ it('exclui capturas selecionadas em lote', function () {
 
 it('filtra capturas pela situação promovida/pendente', function () {
     $posting = JobPosting::factory()->create();
-    JobCapture::factory()->create(['job_posting_id' => $posting->id, 'description' => 'Vaga promovida única.']);
-    JobCapture::factory()->create(['description' => 'Vaga pendente única.']);
+    JobCapture::factory()->for(auth()->user(), 'user')->create(['job_posting_id' => $posting->id, 'description' => 'Vaga promovida única.']);
+    JobCapture::factory()->for(auth()->user(), 'user')->create(['description' => 'Vaga pendente única.']);
 
     Livewire::test(ListJobCaptures::class)
         ->filterTable('situacao', 'promoted')
@@ -302,9 +319,9 @@ it('filtra capturas pela situação promovida/pendente', function () {
 });
 
 it('impede no banco dois registros com mesmo source e external_id', function () {
-    JobCapture::factory()->create(['source' => 'linkedin', 'external_id' => 'urn:li:activity:777', 'dedup_key' => 'ext:urn:li:activity:777']);
+    JobCapture::factory()->for(auth()->user(), 'user')->create(['source' => 'linkedin', 'external_id' => 'urn:li:activity:777', 'dedup_key' => 'ext:urn:li:activity:777']);
 
-    expect(fn () => JobCapture::create([
+    expect(fn () => auth()->user()->jobCaptures()->create([
         'source' => 'linkedin',
         'external_id' => 'urn:li:activity:777',
         'dedup_key' => 'content:'.hash('sha256', 'outra chave'), // burla o service de propósito
@@ -441,7 +458,7 @@ it('compatibilidade histórica: reenvio reconhece linha content: legada sem cria
     $descricao = 'Descrição histórica legada — vaga PHP Laravel com PostgreSQL.';
     $canonica = mb_strtolower(preg_replace('/\s+/u', ' ', trim($descricao)) ?? $descricao);
 
-    $legada = JobCapture::create([
+    $legada = auth()->user()->jobCaptures()->create([
         'source' => 'linkedin',
         'external_id' => null,
         'dedup_key' => 'content:'.hash('sha256', $canonica),
@@ -482,7 +499,7 @@ it('prioriza linha promovida na compatibilidade histórica fingerprint', functio
 
     // Para forçar colisão canônica, inserimos duas linhas legadas com dedup fingerprint divergente do novo,
     // mas que colidem quando normalizadas pelo novo algoritmo.
-    $antigaPendente = JobCapture::create([
+    $antigaPendente = auth()->user()->jobCaptures()->create([
         'source' => 'linkedin',
         'external_id' => null,
         'dedup_key' => 'fingerprint:legado-pendente-'.uniqid(),
@@ -494,7 +511,7 @@ it('prioriza linha promovida na compatibilidade histórica fingerprint', functio
     ]);
 
     $posting = JobPosting::factory()->create();
-    $antigaPromovida = JobCapture::create([
+    $antigaPromovida = auth()->user()->jobCaptures()->create([
         'source' => 'linkedin',
         'external_id' => null,
         'dedup_key' => 'fingerprint:legado-promovido-'.uniqid(),
@@ -573,7 +590,7 @@ it('compatibilidade histórica soft-deleted content: reenvio reconhece linha leg
     $descricao = 'Descrição histórica soft-deleted — vaga PHP Laravel com PostgreSQL.';
     $canonica = mb_strtolower(preg_replace('/\s+/u', ' ', trim($descricao)) ?? $descricao);
 
-    $legada = JobCapture::create([
+    $legada = auth()->user()->jobCaptures()->create([
         'source' => 'linkedin',
         'external_id' => null,
         'dedup_key' => 'content:'.hash('sha256', $canonica),
@@ -650,7 +667,7 @@ it('captura B com identidade diferente após exclusão de A cria nova linha', fu
 });
 
 it('constraint UNIQUE (source, external_id) permanece ocupada após soft delete', function () {
-    $original = JobCapture::factory()->create([
+    $original = JobCapture::factory()->for(auth()->user(), 'user')->create([
         'source' => 'linkedin',
         'external_id' => 'urn:li:activity:constraint-soft',
         'dedup_key' => 'ext:urn:li:activity:constraint-soft',
@@ -662,7 +679,7 @@ it('constraint UNIQUE (source, external_id) permanece ocupada após soft delete'
         ->and(JobCapture::withTrashed()->count())->toBe(1)
         ->and(JobCapture::onlyTrashed()->sole()->deleted_at)->not->toBeNull();
 
-    expect(fn () => JobCapture::create([
+    expect(fn () => auth()->user()->jobCaptures()->create([
         'source' => 'linkedin',
         'external_id' => 'urn:li:activity:constraint-soft',
         'dedup_key' => 'content:'.hash('sha256', 'outra chave'),
@@ -676,7 +693,7 @@ it('constraint UNIQUE (source, external_id) permanece ocupada após soft delete'
 });
 
 it('filament oculta captura soft-deleted da listagem normal', function () {
-    $capture = JobCapture::factory()->create(['description' => 'Vaga oculta soft delete para filament — única.']);
+    $capture = JobCapture::factory()->for(auth()->user(), 'user')->create(['description' => 'Vaga oculta soft delete para filament — única.']);
 
     Livewire::test(ListJobCaptures::class)
         ->assertSee('Vaga oculta soft delete para filament — única.');

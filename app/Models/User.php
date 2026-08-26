@@ -2,10 +2,10 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Database\Factories\UserFactory;
 use Filament\Models\Contracts\FilamentUser;
 use Filament\Panel;
+use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -15,18 +15,23 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
 #[Fillable(['name', 'email', 'password'])]
-#[Hidden(['password', 'remember_token'])]
-class User extends Authenticatable implements FilamentUser
+#[Hidden(['password', 'remember_token', 'capture_token_hash', 'capture_token_last_four', 'disabled_at'])]
+class User extends Authenticatable implements FilamentUser, MustVerifyEmail
 {
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable;
 
     /**
-     * Single-user app: o único usuário do sistema sempre pode acessar o painel.
+     * Aplicativo aberto: toda conta cadastrada pode acessar o painel admin,
+     * exceto contas desativadas.
      */
     public function canAccessPanel(Panel $panel): bool
     {
-        return true;
+        if ($this->disabled_at !== null) {
+            return false;
+        }
+
+        return $panel->getId() === 'admin';
     }
 
     public function screeningPreference(): HasOne
@@ -64,6 +69,7 @@ class User extends Authenticatable implements FilamentUser
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'disabled_at' => 'datetime',
         ];
     }
 }

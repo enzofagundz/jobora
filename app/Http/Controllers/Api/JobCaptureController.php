@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\User;
 use App\Services\JobCaptureService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -40,10 +41,20 @@ class JobCaptureController extends Controller
             'captured_at' => $validated['captured_at'] ?? now(),
         ];
 
-        [$capture, $duplicate] = $service->store($data);
+        $owner = $request->user();
+
+        if (! $owner instanceof User) {
+            $owner = $request->attributes->get('capture_user');
+        }
+
+        if (! $owner instanceof User) {
+            return response()->json(['message' => 'Token inválido.'], 401);
+        }
+
+        [$capture, $duplicate] = $service->store($data, $owner);
 
         return response()->json([
-            'capture' => $capture->makeHidden('deleted_at')->toArray(),
+            'capture' => $capture->toArray(),
             'duplicate' => $duplicate,
         ], $duplicate ? 200 : 201);
     }

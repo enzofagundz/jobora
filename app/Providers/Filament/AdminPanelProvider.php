@@ -36,11 +36,17 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('')
             ->brandName('Jobora')
-            ->viteTheme('resources/css/filament/admin/theme.css')
             ->login()
+            ->registration()
+            ->passwordReset()
+            ->emailVerification()
+            ->emailChangeVerification()
+            ->profile()
+            ->strictAuthorization()
             ->colors([
                 'primary' => Color::Amber,
             ])
+            ->viteTheme('resources/css/filament/admin/theme.css')
             ->navigationGroups([
                 NavigationGroup::make()->label('Vagas'),
                 NavigationGroup::make()->label('Perfil'),

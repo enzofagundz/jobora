@@ -8,7 +8,7 @@ import {
   type LastApiStatus,
 } from '@/utils/storage';
 import { hasConfiguredToken } from '@/utils/capture-control';
-import { sanitizeApiBaseUrl } from '@/api/captures';
+import { sanitizeApiBaseUrl, validateCaptureToken } from '@/api/captures';
 
 const url = ref('');
 const token = ref('');
@@ -70,7 +70,24 @@ async function save(): Promise<void> {
     captureEnabledValue.value = false;
     await captureEnabled.setValue(false);
   }
-  message.value = 'Configuração salva.';
+
+  if (!hasConfiguredToken(cleanToken)) {
+    message.value = 'Configuração salva.';
+    return;
+  }
+
+  const result = await validateCaptureToken();
+  if (result.ok) {
+    message.value = 'Conectado — credencial válida.';
+  } else if (result.error === 'auth') {
+    message.value = 'Token inválido.';
+  } else if (result.error === 'timeout') {
+    message.value = 'Tempo esgotado ao validar.';
+  } else if (result.error === 'network') {
+    message.value = 'Falha de rede ao validar.';
+  } else {
+    message.value = 'Falha ao validar.';
+  }
 }
 
 /** Equivalente ao "Limpar token" do menu do userscript; mantém a URL salva. */
@@ -91,7 +108,7 @@ async function disconnect(): Promise<void> {
     <label for="api-url">URL da API</label>
     <input id="api-url" v-model="url" type="url" placeholder="http://localhost:8000" />
 
-    <label for="api-token">Token (VAGAS_API_TOKEN)</label>
+    <label for="api-token">Token (credencial da conta)</label>
     <input
       id="api-token"
       v-model="token"

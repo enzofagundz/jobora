@@ -11,3 +11,5 @@ Artisan::command('inspire', function () {
 Schedule::command('job-posting-items:normalize')
     ->daily()
     ->withoutOverlapping();
+
+Schedule::command('auth:clear-resets')->everyFifteenMinutes();
