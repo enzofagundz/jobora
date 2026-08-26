@@ -4,15 +4,17 @@ use App\Agents\ResumeAdaptationAgent;
 use App\Models\JobPosting;
 use App\Models\Resume;
 use App\Models\ResumeAdaptation;
+use App\Models\User;
 use App\Services\ResumeAdaptationService;
 use App\Services\ResumeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
-function adaptationPosting(): JobPosting
+function adaptationPosting(?User $user = null): JobPosting
 {
-    $posting = JobPosting::factory()->confirmed()->create([
+    $user ??= User::factory()->create();
+    $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create([
         'description' => 'Vaga para desenvolvedor Python com React. Requisitos: Docker e AWS.',
     ]);
     $posting->items()->createMany([
@@ -23,9 +25,9 @@ function adaptationPosting(): JobPosting
     return $posting;
 }
 
-function adaptationResume(): void
+function adaptationResume(User $user): void
 {
-    app(ResumeService::class)->save('Currículo com Python e Laravel.');
+    app(ResumeService::class)->save($user, 'Currículo com Python e Laravel.');
 }
 
 function validAdaptationResponse(): array
@@ -42,10 +44,11 @@ function validAdaptationResponse(): array
 it('generates and persists the last adaptation per posting (UPSERT)', function () {
     ResumeAdaptationAgent::fake([validAdaptationResponse()]);
 
-    $posting = adaptationPosting();
-    adaptationResume();
+    $user = User::factory()->create();
+    $posting = adaptationPosting($user);
+    adaptationResume($user);
 
-    $first = app(ResumeAdaptationService::class)->adapt($posting);
+    $first = app(ResumeAdaptationService::class)->adapt($user, $posting);
 
     expect(ResumeAdaptation::count())->toBe(1)
         ->and($first->job_posting_id)->toBe($posting->id)
@@ -64,7 +67,7 @@ it('generates and persists the last adaptation per posting (UPSERT)', function (
         'alerts' => [],
     ]]);
 
-    $second = app(ResumeAdaptationService::class)->adapt($posting->fresh());
+    $second = app(ResumeAdaptationService::class)->adapt($user, $posting->fresh());
 
     expect(ResumeAdaptation::count())->toBe(1)
         ->and($second->id)->toBe($first->id)
@@ -74,13 +77,14 @@ it('generates and persists the last adaptation per posting (UPSERT)', function (
 it('never alters the original resume', function () {
     ResumeAdaptationAgent::fake([validAdaptationResponse()]);
 
-    $posting = adaptationPosting();
-    adaptationResume();
+    $user = User::factory()->create();
+    $posting = adaptationPosting($user);
+    adaptationResume($user);
 
-    app(ResumeAdaptationService::class)->adapt($posting);
+    app(ResumeAdaptationService::class)->adapt($user, $posting);
 
     expect(Resume::count())->toBe(1)
-        ->and(app(ResumeService::class)->content())->toBe('Currículo com Python e Laravel.');
+        ->and(app(ResumeService::class)->content($user))->toBe('Currículo com Python e Laravel.');
 });
 
 it('rejects an adapted resume with an invented concept', function () {
@@ -92,10 +96,11 @@ it('rejects an adapted resume with an invented concept', function () {
         'alerts' => [],
     ]]);
 
-    $posting = adaptationPosting();
-    adaptationResume();
+    $user = User::factory()->create();
+    $posting = adaptationPosting($user);
+    adaptationResume($user);
 
-    app(ResumeAdaptationService::class)->adapt($posting);
+    app(ResumeAdaptationService::class)->adapt($user, $posting);
 })->throws(RuntimeException::class, 'Integridade');
 
 it('rejects a covered keyword absent from the original resume', function () {
@@ -107,10 +112,11 @@ it('rejects a covered keyword absent from the original resume', function () {
         'alerts' => [],
     ]]);
 
-    $posting = adaptationPosting();
-    adaptationResume();
+    $user = User::factory()->create();
+    $posting = adaptationPosting($user);
+    adaptationResume($user);
 
-    app(ResumeAdaptationService::class)->adapt($posting);
+    app(ResumeAdaptationService::class)->adapt($user, $posting);
 })->throws(RuntimeException::class, 'covered_keywords');
 
 it('rejects a missing requirement that is present in the original resume', function () {
@@ -122,52 +128,58 @@ it('rejects a missing requirement that is present in the original resume', funct
         'alerts' => [],
     ]]);
 
-    $posting = adaptationPosting();
-    adaptationResume();
+    $user = User::factory()->create();
+    $posting = adaptationPosting($user);
+    adaptationResume($user);
 
-    app(ResumeAdaptationService::class)->adapt($posting);
+    app(ResumeAdaptationService::class)->adapt($user, $posting);
 })->throws(RuntimeException::class, 'missing_requirements');
 
 it('throws when the posting is not confirmed', function () {
     ResumeAdaptationAgent::fake([validAdaptationResponse()]);
 
-    $posting = JobPosting::factory()->create(['description' => str_repeat('Vaga Laravel. ', 20)]);
-    adaptationResume();
+    $user = User::factory()->create();
+    $posting = JobPosting::factory()->for($user, 'user')->create(['description' => str_repeat('Vaga Laravel. ', 20)]);
+    adaptationResume($user);
 
-    app(ResumeAdaptationService::class)->adapt($posting);
+    app(ResumeAdaptationService::class)->adapt($user, $posting);
 })->throws(LogicException::class, 'vaga confirmada');
 
 it('throws when no resume is saved', function () {
     ResumeAdaptationAgent::fake([validAdaptationResponse()]);
 
-    $posting = adaptationPosting();
+    $user = User::factory()->create();
+    $posting = adaptationPosting($user);
 
-    app(ResumeAdaptationService::class)->adapt($posting);
+    app(ResumeAdaptationService::class)->adapt($user, $posting);
 })->throws(LogicException::class, 'Cadastre o currículo');
 
 it('fails cleanly and persists nothing on invalid JSON', function () {
     ResumeAdaptationAgent::fake(['isto não é um JSON válido']);
 
-    $posting = adaptationPosting();
-    adaptationResume();
+    $user = User::factory()->create();
+    $posting = adaptationPosting($user);
+    adaptationResume($user);
 
-    app(ResumeAdaptationService::class)->adapt($posting);
+    app(ResumeAdaptationService::class)->adapt($user, $posting);
 })->throws(RuntimeException::class, 'JSON válido');
 
 it('fails cleanly and persists nothing on structurally invalid output', function () {
     ResumeAdaptationAgent::fake([['adapted_resume' => 123]]);
 
-    $posting = adaptationPosting();
-    adaptationResume();
+    $user = User::factory()->create();
+    $posting = adaptationPosting($user);
+    adaptationResume($user);
 
-    app(ResumeAdaptationService::class)->adapt($posting);
+    app(ResumeAdaptationService::class)->adapt($user, $posting);
 })->throws(RuntimeException::class, 'adapted_resume');
 
 it('persists nothing when the agent throws', function () {
     ResumeAdaptationAgent::fake(fn () => throw new RuntimeException('Provider indisponível'));
 
-    $posting = adaptationPosting();
-    adaptationResume();
+    $user = User::factory()->create();
+    $posting = adaptationPosting($user);
+    adaptationResume($user);
 
-    app(ResumeAdaptationService::class)->adapt($posting);
+    app(ResumeAdaptationService::class)->adapt($user, $posting);
 })->throws(RuntimeException::class, 'Provider indisponível');

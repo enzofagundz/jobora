@@ -170,12 +170,13 @@ class JobPostingsTable
                             ->label('Descartar sugestão')
                             ->icon(Heroicon::OutlinedXCircle)
                             ->color('danger')
+                            ->authorize('update')
                             ->requiresConfirmation()
                             ->modalHeading('Descartar sugestão')
                             ->modalDescription('A sugestão da IA será removida e a vaga voltará para "pendente".')
                             ->cancelParentActions()
                             ->action(function (JobPosting $record): void {
-                                app(JobReviewService::class)->discard($record);
+                                app(JobReviewService::class)->discard(auth()->user(), $record);
 
                                 Notification::make()
                                     ->warning()
@@ -186,6 +187,7 @@ class JobPostingsTable
                     ])
                     ->action(function (array $data, JobPosting $record): void {
                         app(JobReviewService::class)->confirm(
+                            auth()->user(),
                             $record,
                             $data['items'],
                             $data['application_methods'] ?? [],
@@ -210,7 +212,7 @@ class JobPostingsTable
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    DeleteBulkAction::make()->authorizeIndividualRecords(),
                 ]),
             ])
             ->defaultSort('collected_at', 'desc');

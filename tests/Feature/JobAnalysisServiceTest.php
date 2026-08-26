@@ -28,7 +28,7 @@ it('moves a pending posting to needs_review with the suggestion stored', functio
 
     $posting = postingWithDescription();
 
-    app(JobAnalysisService::class)->analyze($posting);
+    app(JobAnalysisService::class)->analyze($posting->user, $posting);
 
     $posting->refresh();
 
@@ -52,7 +52,7 @@ it('stores suggested application methods and keeps the prompt contract', functio
 
     $posting = postingWithDescription();
 
-    app(JobAnalysisService::class)->analyze($posting);
+    app(JobAnalysisService::class)->analyze($posting->user, $posting);
 
     $posting->refresh();
 
@@ -67,7 +67,7 @@ it('keeps old fakes without application methods as an empty list', function () {
 
     $posting = postingWithDescription();
 
-    app(JobAnalysisService::class)->analyze($posting);
+    app(JobAnalysisService::class)->analyze($posting->user, $posting);
 
     $posting->refresh();
 
@@ -79,7 +79,7 @@ it('marks the posting failed when the agent throws', function () {
 
     $posting = postingWithDescription();
 
-    app(JobAnalysisService::class)->analyze($posting);
+    app(JobAnalysisService::class)->analyze($posting->user, $posting);
 
     $posting->refresh();
 
@@ -98,7 +98,7 @@ it('keeps the posting pending on a transient provider error', function () {
 
     $posting = postingWithDescription();
 
-    app(JobAnalysisService::class)->analyze($posting);
+    app(JobAnalysisService::class)->analyze($posting->user, $posting);
 
     $posting->refresh();
 
@@ -112,7 +112,7 @@ it('keeps the posting pending on a provider rate-limit AiException', function ()
 
     $posting = postingWithDescription();
 
-    app(JobAnalysisService::class)->analyze($posting);
+    app(JobAnalysisService::class)->analyze($posting->user, $posting);
 
     $posting->refresh();
 
@@ -126,7 +126,7 @@ it('marks the posting failed on structurally invalid output', function () {
 
     $posting = postingWithDescription();
 
-    app(JobAnalysisService::class)->analyze($posting);
+    app(JobAnalysisService::class)->analyze($posting->user, $posting);
 
     $posting->refresh();
 
@@ -139,7 +139,7 @@ it('marks the posting failed when the response is not valid JSON', function () {
 
     $posting = postingWithDescription();
 
-    app(JobAnalysisService::class)->analyze($posting);
+    app(JobAnalysisService::class)->analyze($posting->user, $posting);
 
     $posting->refresh();
 
@@ -152,7 +152,7 @@ it('marks the posting failed when the description is out of bounds', function ()
 
     $posting = JobPosting::factory()->create(['description' => 'curta']);
 
-    app(JobAnalysisService::class)->analyze($posting);
+    app(JobAnalysisService::class)->analyze($posting->user, $posting);
 
     $posting->refresh();
 
@@ -176,10 +176,10 @@ it('retries a failed posting', function () {
     $posting = postingWithDescription();
     $service = app(JobAnalysisService::class);
 
-    $service->analyze($posting);
+    $service->analyze($posting->user, $posting);
     expect($posting->refresh()->status)->toBe(JobPostingStatus::Failed);
 
-    $service->analyze($posting->refresh());
+    $service->analyze($posting->user, $posting->refresh());
     expect($posting->refresh()->status)->toBe(JobPostingStatus::NeedsReview)
         ->and($posting->role)->toBe('Dev')
         ->and($posting->error_message)->toBeNull();
@@ -190,7 +190,7 @@ it('never re-analyzes a confirmed posting', function () {
 
     $posting = JobPosting::factory()->confirmed()->create(['description' => str_repeat('Vaga Laravel. ', 20)]);
 
-    app(JobAnalysisService::class)->analyze($posting);
+    app(JobAnalysisService::class)->analyze($posting->user, $posting);
 
     $posting->refresh();
 

@@ -12,9 +12,11 @@ use Illuminate\Support\Collection;
 
 uses(RefreshDatabase::class);
 
-function triageCaptures(int $count = 2): Collection
+function triageCaptures(int $count = 2, ?User $owner = null): Collection
 {
-    return Collection::times($count, fn () => JobCapture::factory()->create([
+    $owner ??= User::factory()->create();
+
+    return Collection::times($count, fn () => JobCapture::factory()->for($owner, 'user')->create([
         'description' => str_repeat('Vaga para desenvolvedor PHP com Laravel. ', 5),
     ]));
 }
@@ -28,7 +30,9 @@ it('classifica posts de curadoria de vagas como não-vaga no prompt', function (
 });
 
 it('persists results by capture_id regardless of response order', function () {
-    [$c1, $c2] = triageCaptures(2)->all();
+    $captures = triageCaptures(2);
+    [$c1, $c2] = $captures->all();
+    $user = $c1->user;
 
     JobTriageAgent::fake([[
         'results' => [
@@ -37,7 +41,7 @@ it('persists results by capture_id regardless of response order', function () {
         ],
     ]]);
 
-    app(JobTriageService::class)->triageBatch(collect([$c1, $c2]));
+    app(JobTriageService::class)->triageBatch(collect([$c1, $c2]), $user);
 
     expect($c1->refresh()->triage_status)->toBe(JobCaptureTriageStatus::Completed)
         ->and($c1->refresh()->triage_result)->toBe(JobCaptureTriageResult::Rejected)
@@ -49,7 +53,9 @@ it('persists results by capture_id regardless of response order', function () {
 });
 
 it('persists not_a_job distinct from rejected', function () {
-    [$c1, $c2] = triageCaptures(2)->all();
+    $captures = triageCaptures(2);
+    [$c1, $c2] = $captures->all();
+    $user = $c1->user;
 
     JobTriageAgent::fake([[
         'results' => [
@@ -58,14 +64,16 @@ it('persists not_a_job distinct from rejected', function () {
         ],
     ]]);
 
-    app(JobTriageService::class)->triageBatch(collect([$c1, $c2]));
+    app(JobTriageService::class)->triageBatch(collect([$c1, $c2]), $user);
 
     expect($c1->refresh()->triage_result)->toBe(JobCaptureTriageResult::NotAJob)
         ->and($c2->refresh()->triage_result)->toBe(JobCaptureTriageResult::Rejected);
 });
 
 it('persists uncertain', function () {
-    [$c1] = triageCaptures(1)->all();
+    $captures = triageCaptures(1);
+    [$c1] = $captures->all();
+    $user = $c1->user;
 
     JobTriageAgent::fake([[
         'results' => [
@@ -73,7 +81,7 @@ it('persists uncertain', function () {
         ],
     ]]);
 
-    app(JobTriageService::class)->triageBatch(collect([$c1]));
+    app(JobTriageService::class)->triageBatch(collect([$c1]), $user);
 
     expect($c1->refresh()->triage_status)->toBe(JobCaptureTriageStatus::Completed)
         ->and($c1->refresh()->triage_result)->toBe(JobCaptureTriageResult::Uncertain)
@@ -88,7 +96,7 @@ it('sends ids, preferences and rejections in the payload', function () {
         'rejections' => ['Tech Lead'],
     ]);
 
-    [$c1] = triageCaptures(1)->all();
+    [$c1] = triageCaptures(1, $user)->all();
 
     $capturedPrompt = null;
 
@@ -110,7 +118,9 @@ it('sends ids, preferences and rejections in the payload', function () {
 });
 
 it('marks captures without a valid decision as failed', function () {
-    [$c1, $c2] = triageCaptures(2)->all();
+    $captures = triageCaptures(2);
+    [$c1, $c2] = $captures->all();
+    $user = $c1->user;
 
     JobTriageAgent::fake([[
         'results' => [
@@ -118,7 +128,7 @@ it('marks captures without a valid decision as failed', function () {
         ],
     ]]);
 
-    app(JobTriageService::class)->triageBatch(collect([$c1, $c2]));
+    app(JobTriageService::class)->triageBatch(collect([$c1, $c2]), $user);
 
     expect($c1->refresh()->triage_status)->toBe(JobCaptureTriageStatus::Completed)
         ->and($c2->refresh()->triage_status)->toBe(JobCaptureTriageStatus::Failed)
@@ -129,10 +139,11 @@ it('marks captures without a valid decision as failed', function () {
 
 it('marks all captures failed when the response is not valid JSON', function () {
     $captures = triageCaptures(2);
+    $user = $captures->first()->user;
 
     JobTriageAgent::fake(['isto não é um JSON válido']);
 
-    app(JobTriageService::class)->triageBatch($captures);
+    app(JobTriageService::class)->triageBatch($captures, $user);
 
     foreach ($captures as $capture) {
         expect($capture->refresh()->triage_status)->toBe(JobCaptureTriageStatus::Failed)
@@ -143,10 +154,11 @@ it('marks all captures failed when the response is not valid JSON', function () 
 
 it('marks all captures failed when the provider throws', function () {
     $captures = triageCaptures(2);
+    $user = $captures->first()->user;
 
     JobTriageAgent::fake(fn () => throw new RuntimeException('Provider indisponível'));
 
-    app(JobTriageService::class)->triageBatch($captures);
+    app(JobTriageService::class)->triageBatch($captures, $user);
 
     foreach ($captures as $capture) {
         expect($capture->refresh()->triage_status)->toBe(JobCaptureTriageStatus::Failed)

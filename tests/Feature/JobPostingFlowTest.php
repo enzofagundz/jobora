@@ -28,7 +28,7 @@ function flowDescription(): string
 }
 
 it('cria vaga como pending com collected_at = now e descrição preservada', function () {
-    $posting = JobPosting::factory()->create([
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->create([
         'description' => flowDescription(),
         'source_url' => 'https://exemplo.com/vaga-1',
     ]);
@@ -67,8 +67,8 @@ it('analisa e confirma a vaga pela página de revisão', function () {
         'skills' => ['Laravel', 'PostgreSQL', 'PHP'],
     ]]);
 
-    $posting = JobPosting::factory()->create(['description' => flowDescription()]);
-    app(JobAnalysisService::class)->analyze($posting);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->create(['description' => flowDescription()]);
+    app(JobAnalysisService::class)->analyze(auth()->user(), $posting);
 
     $posting->refresh();
     expect($posting->status)->toBe(JobPostingStatus::NeedsReview)
@@ -108,8 +108,8 @@ it('persiste correção manual após recarregar e marca origem como user', funct
         'skills' => ['postgres'],
     ]]);
 
-    $posting = JobPosting::factory()->create(['description' => flowDescription()]);
-    app(JobAnalysisService::class)->analyze($posting);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->create(['description' => flowDescription()]);
+    app(JobAnalysisService::class)->analyze(auth()->user(), $posting);
 
     Livewire::test(ListJobPostings::class)->callTableAction('review', $posting, data: [
         'items' => [
@@ -142,9 +142,9 @@ it('confirma formas de candidatura com origem ai/user, idempotência e reanális
         ],
     ]);
 
-    $posting = JobPosting::factory()->create(['description' => flowDescription(), 'source_url' => 'https://www.linkedin.com/jobs/view/999']);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->create(['description' => flowDescription(), 'source_url' => 'https://www.linkedin.com/jobs/view/999']);
 
-    app(JobAnalysisService::class)->analyze($posting);
+    app(JobAnalysisService::class)->analyze(auth()->user(), $posting);
     $posting->refresh();
 
     // Mantém o método da IA e adiciona um novo via revisão.
@@ -172,7 +172,7 @@ it('confirma formas de candidatura com origem ai/user, idempotência e reanális
     $keys = $posting->applicationMethods()->pluck('dedup_key')->all();
 
     // Confirmação repetida não duplica.
-    app(JobReviewService::class)->confirm($posting, [], [
+    app(JobReviewService::class)->confirm(auth()->user(), $posting, [], [
         ['type' => 'email', 'email' => 'recrutamento@empresa.com'],
         ['type' => 'phone', 'phone' => '(11) 3000-0000'],
     ], null, null);
@@ -182,14 +182,14 @@ it('confirma formas de candidatura com origem ai/user, idempotência e reanális
         ->toBe(collect($keys)->sort()->values()->all());
 
     // Descarte zera tudo e volta a pending.
-    app(JobReviewService::class)->discard($posting);
+    app(JobReviewService::class)->discard(auth()->user(), $posting);
 
     expect($posting->refresh()->status)->toBe(JobPostingStatus::Pending)
         ->and($posting->suggested_data)->toBeNull()
         ->and($posting->applicationMethods()->count())->toBe(0);
 
     // Reanálise substitui o array sugerido inteiro (e-mail → URL).
-    app(JobAnalysisService::class)->analyze($posting);
+    app(JobAnalysisService::class)->analyze(auth()->user(), $posting);
     $posting->refresh();
 
     expect($posting->suggested_data['application_methods'])->toHaveCount(1)
@@ -203,8 +203,8 @@ it('descarta a sugestão e volta para pending', function () {
         'skills' => ['Laravel'],
     ]]);
 
-    $posting = JobPosting::factory()->create(['description' => flowDescription()]);
-    app(JobAnalysisService::class)->analyze($posting);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->create(['description' => flowDescription()]);
+    app(JobAnalysisService::class)->analyze(auth()->user(), $posting);
 
     Livewire::test(ListJobPostings::class)->mountTableAction('review', $posting)->callAction('discard');
 
@@ -229,17 +229,18 @@ it('falha, registra error_message e permite nova análise com sucesso', function
         return ['role' => 'Dev', 'skills' => ['PHP']];
     });
 
-    $posting = JobPosting::factory()->create(['description' => flowDescription()]);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->create(['description' => flowDescription()]);
     $service = app(JobAnalysisService::class);
+    $user = auth()->user();
 
-    $service->analyze($posting);
+    $service->analyze($user, $posting);
 
     $posting->refresh();
     expect($posting->status)->toBe(JobPostingStatus::Failed)
         ->and($posting->error_message)->toContain('Serviço indisponível')
         ->and($posting->suggested_data)->toBeNull();
 
-    $service->analyze($posting->refresh());
+    $service->analyze($user, $posting->refresh());
 
     $posting->refresh();
     expect($posting->status)->toBe(JobPostingStatus::NeedsReview)
@@ -248,13 +249,14 @@ it('falha, registra error_message e permite nova análise com sucesso', function
 });
 
 it('vaga pendente/aguardando revisão não entra nas análises', function () {
-    JobPosting::factory()->confirmed()->create(['description' => flowDescription()])
+    $user = auth()->user();
+    JobPosting::factory()->for($user, 'user')->confirmed()->create(['description' => flowDescription()])
         ->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
 
-    JobPosting::factory()->create(['description' => flowDescription()])
+    JobPosting::factory()->for($user, 'user')->create(['description' => flowDescription()])
         ->items()->create(['category' => 'skill', 'name' => 'Python', 'source' => 'ai']);
 
-    $frequencies = app(MarketAnalysisService::class)->frequencies();
+    $frequencies = app(MarketAnalysisService::class)->frequencies($user);
 
     expect($frequencies)->toHaveCount(1)
         ->and($frequencies[0]['name'])->toBe('PHP');

@@ -10,15 +10,26 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
-function screeningTriageCapture(): JobCapture
+function screeningTriageCapture(?User $user = null): JobCapture
 {
-    return JobCapture::factory()->create([
+    $factory = JobCapture::factory();
+
+    if ($user !== null) {
+        $factory = $factory->for($user, 'user');
+    }
+
+    return $factory->create([
         'description' => str_repeat('Vaga para desenvolvedor PHP com Laravel. ', 5),
     ]);
 }
 
 function screeningTriagePrompt(JobCapture $capture, ?User $user): array
 {
+    if ($user !== null && $capture->user_id !== $user->id) {
+        $capture->forceFill(['user_id' => $user->id])->save();
+        $capture->refresh();
+    }
+
     $captured = null;
 
     JobTriageAgent::fake(function (string $prompt) use (&$captured, $capture) {
@@ -42,7 +53,7 @@ it('envia as preferências do usuário no payload', function () {
         'rejections' => [],
     ]);
 
-    $payload = screeningTriagePrompt(screeningTriageCapture(), $user);
+    $payload = screeningTriagePrompt(screeningTriageCapture($user), $user);
 
     expect($payload['preferences'])->toBe(['PHP', 'Laravel']);
 });
@@ -55,7 +66,7 @@ it('envia as rejeições do usuário no payload', function () {
         'rejections' => ['presencial', 'estágio'],
     ]);
 
-    $payload = screeningTriagePrompt(screeningTriageCapture(), $user);
+    $payload = screeningTriagePrompt(screeningTriageCapture($user), $user);
 
     expect($payload['rejections'])->toBe(['presencial', 'estágio']);
 });
@@ -75,10 +86,11 @@ it('cada usuário recebe somente os próprios critérios', function () {
         'rejections' => ['remoto'],
     ]);
 
-    $capture = screeningTriageCapture();
+    $captureA = screeningTriageCapture($userA);
+    $captureB = screeningTriageCapture($userB);
 
-    $payloadA = screeningTriagePrompt($capture, $userA);
-    $payloadB = screeningTriagePrompt($capture, $userB);
+    $payloadA = screeningTriagePrompt($captureA, $userA);
+    $payloadB = screeningTriagePrompt($captureB, $userB);
 
     expect($payloadA['preferences'])->toBe(['PHP'])
         ->and($payloadA['rejections'])->toBe(['presencial'])
@@ -101,31 +113,37 @@ it('mesma captura pode produzir decisões diferentes dependendo do usuário', fu
         'rejections' => ['remoto'],
     ]);
 
-    $capture = screeningTriageCapture();
+    $captureA = screeningTriageCapture($userA);
+    $captureB = screeningTriageCapture($userB);
+    $captureB->forceFill(['description' => $captureA->description])->save();
 
     // Fake reage aos critérios do payload: prefere PHP → relevant; senão → rejected.
-    JobTriageAgent::fake(function (string $prompt) use ($capture) {
+    JobTriageAgent::fake(function (string $prompt) use ($captureA) {
         $payload = json_decode($prompt, true);
         $result = in_array('PHP', $payload['preferences'], true) ? 'relevant' : 'rejected';
 
+        // Captura id é o da requisição corrente; deduzir pelo prompt não é necessário: usar o primeiro id do payload
+        $payloadIds = json_decode($prompt, true)['captures'] ?? [];
+        $captureId = $payloadIds[0]['id'] ?? $captureA->id;
+
         return ['results' => [
-            ['capture_id' => $capture->id, 'is_job' => true, 'result' => $result, 'reason' => 'critério do usuário'],
+            ['capture_id' => $captureId, 'is_job' => true, 'result' => $result, 'reason' => 'critério do usuário'],
         ]];
     });
 
     $service = app(JobTriageService::class);
 
-    $service->triageBatch(collect([$capture]), $userA);
-    expect($capture->refresh()->triage_result)->toBe(JobCaptureTriageResult::Relevant);
+    $service->triageBatch(collect([$captureA]), $userA);
+    expect($captureA->refresh()->triage_result)->toBe(JobCaptureTriageResult::Relevant);
 
-    $service->triageBatch(collect([$capture->refresh()]), $userB);
-    expect($capture->refresh()->triage_result)->toBe(JobCaptureTriageResult::Rejected);
+    $service->triageBatch(collect([$captureB]), $userB);
+    expect($captureB->refresh()->triage_result)->toBe(JobCaptureTriageResult::Rejected);
 });
 
 it('usuário sem critérios configurados envia listas vazias', function () {
     $user = User::factory()->create();
 
-    $payload = screeningTriagePrompt(screeningTriageCapture(), $user);
+    $payload = screeningTriagePrompt(screeningTriageCapture($user), $user);
 
     expect($payload['preferences'])->toBe([])
         ->and($payload['rejections'])->toBe([]);

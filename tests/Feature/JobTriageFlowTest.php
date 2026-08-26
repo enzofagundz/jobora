@@ -23,7 +23,7 @@ beforeEach(function (): void {
 
 function triageCapture(array $overrides = []): JobCapture
 {
-    return JobCapture::factory()->create(array_merge([
+    return JobCapture::factory()->for(auth()->user(), 'user')->create(array_merge([
         'description' => str_repeat('Vaga para desenvolvedor PHP com Laravel. ', 5),
     ], $overrides));
 }

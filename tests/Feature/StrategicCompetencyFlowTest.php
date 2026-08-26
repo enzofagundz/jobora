@@ -18,14 +18,14 @@ function competencyUser(): User
     return User::factory()->create();
 }
 
-function competencyResume(string $text): void
+function competencyResume(User $user, string $text): void
 {
-    app(ResumeService::class)->save($text);
+    app(ResumeService::class)->save($user, $text);
 }
 
-function confirmedMarket(array $names): void
+function confirmedMarket(User $user, array $names): void
 {
-    $posting = JobPosting::factory()->confirmed()->create();
+    $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
 
     foreach ($names as $name) {
         $posting->items()->create(['category' => 'skill', 'name' => $name, 'source' => 'ai']);
@@ -55,8 +55,8 @@ function captureClassificationPrompt(User $user, callable $respond): array
 
 it('classifica com IA enviando currículo, candidatos e papéis no prompt', function () {
     $user = competencyUser();
-    competencyResume('Currículo com PHP e Laravel.');
-    confirmedMarket(['PHP', 'Laravel', 'Docker']);
+    competencyResume($user, 'Currículo com PHP e Laravel.');
+    confirmedMarket($user, ['PHP', 'Laravel', 'Docker']);
 
     [$prompt, $count] = captureClassificationPrompt($user, fn (): array => [
         'competencies' => [
@@ -98,8 +98,10 @@ it('classifica com IA enviando currículo, candidatos e papéis no prompt', func
 it('isola classificações entre usuários para o mesmo conceito', function () {
     $alice = competencyUser();
     $bob = competencyUser();
-    competencyResume('Currículo com PHP.');
-    confirmedMarket(['PHP']);
+    competencyResume($alice, 'Currículo com PHP.');
+    competencyResume($bob, 'Currículo com PHP.');
+    confirmedMarket($alice, ['PHP']);
+    confirmedMarket($bob, ['PHP']);
 
     captureClassificationPrompt($alice, fn (): array => [
         'competencies' => [['concept' => 'PHP', 'strategic_role' => 'core']],
@@ -121,8 +123,8 @@ it('isola classificações entre usuários para o mesmo conceito', function () {
 
 it('reclassificação remove IA omitida, preserva manual e não sobrescreve manual homônima', function () {
     $user = competencyUser();
-    competencyResume('Currículo com PHP, Laravel e Docker.');
-    confirmedMarket(['PHP', 'Laravel', 'Docker', 'React']);
+    competencyResume($user, 'Currículo com PHP, Laravel e Docker.');
+    confirmedMarket($user, ['PHP', 'Laravel', 'Docker', 'React']);
 
     captureClassificationPrompt($user, fn (): array => [
         'competencies' => [
@@ -161,8 +163,8 @@ it('reclassificação remove IA omitida, preserva manual e não sobrescreve manu
 
 it('ignora conceito da resposta que não pertence ao conjunto de candidatos', function () {
     $user = competencyUser();
-    competencyResume('Currículo com PHP.');
-    confirmedMarket(['PHP']);
+    competencyResume($user, 'Currículo com PHP.');
+    confirmedMarket($user, ['PHP']);
 
     [, $count] = captureClassificationPrompt($user, fn (): array => [
         'competencies' => [
@@ -178,7 +180,7 @@ it('ignora conceito da resposta que não pertence ao conjunto de candidatos', fu
 
 it('sem vagas confirmadas classifica conceitos canônicos do currículo apenas', function () {
     $user = competencyUser();
-    competencyResume('Currículo com PHP e Laravel.');
+    competencyResume($user, 'Currículo com PHP e Laravel.');
 
     [, $count] = captureClassificationPrompt($user, fn (): array => [
         'competencies' => [
@@ -194,7 +196,7 @@ it('sem vagas confirmadas classifica conceitos canônicos do currículo apenas',
 
 it('retorna zero sem candidatos e não chama o provider', function () {
     $user = competencyUser();
-    competencyResume('Currículo sem nenhum conceito conhecido pelo vocabulário.');
+    competencyResume($user, 'Currículo sem nenhum conceito conhecido pelo vocabulário.');
 
     StrategicCompetencyAgent::fake([]);
 
@@ -214,8 +216,8 @@ it('exige currículo antes de classificar', function () {
 
 it('falha sem persistir nada quando a resposta não é JSON válido', function () {
     $user = competencyUser();
-    competencyResume('Currículo com PHP.');
-    confirmedMarket(['PHP']);
+    competencyResume($user, 'Currículo com PHP.');
+    confirmedMarket($user, ['PHP']);
 
     StrategicCompetencyAgent::fake(fn (): string => 'não é json');
 
@@ -224,8 +226,8 @@ it('falha sem persistir nada quando a resposta não é JSON válido', function (
 
 it('falha sem persistir nada em saída estruturalmente inválida', function () {
     $user = competencyUser();
-    competencyResume('Currículo com PHP.');
-    confirmedMarket(['PHP']);
+    competencyResume($user, 'Currículo com PHP.');
+    confirmedMarket($user, ['PHP']);
 
     StrategicCompetencyAgent::fake([['competencies' => [['concept' => 'PHP', 'strategic_role' => 'nucleo']]]]);
 
@@ -234,8 +236,8 @@ it('falha sem persistir nada em saída estruturalmente inválida', function () {
 
 it('preserva classificações anteriores quando a IA falha', function () {
     $user = competencyUser();
-    competencyResume('Currículo com PHP.');
-    confirmedMarket(['PHP']);
+    competencyResume($user, 'Currículo com PHP.');
+    confirmedMarket($user, ['PHP']);
 
     captureClassificationPrompt($user, fn (): array => [
         'competencies' => [['concept' => 'PHP', 'strategic_role' => 'core']],
@@ -289,8 +291,8 @@ it('remove somente a classificação do usuário informado', function () {
 
 it('present e is_gap acompanham o currículo sem mudar o papel', function () {
     $user = competencyUser();
-    competencyResume('Currículo com PHP.');
-    confirmedMarket(['PHP']);
+    competencyResume($user, 'Currículo com PHP.');
+    confirmedMarket($user, ['PHP']);
 
     captureClassificationPrompt($user, fn (): array => [
         'competencies' => [['concept' => 'PHP', 'strategic_role' => 'core']],
@@ -302,7 +304,7 @@ it('present e is_gap acompanham o currículo sem mudar o papel', function () {
         ->and($present[0]['is_gap'])->toBeFalse()
         ->and($present[0]['strategic_role'])->toBe(StrategicRole::Core);
 
-    competencyResume('Currículo sem tecnologias citadas.');
+    competencyResume($user, 'Currículo sem tecnologias citadas.');
 
     $absent = app(StrategicCompetencyService::class)->rows($user);
 

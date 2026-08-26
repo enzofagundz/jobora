@@ -13,13 +13,14 @@ class TrendsChartWidget extends LineChartWidget
     public function getData(): array
     {
         $analysis = app(MarketAnalysisService::class);
-        $months = $analysis->months();
+        $user = auth()->user();
+        $months = $analysis->months($user);
 
         if ($months === []) {
             return ['datasets' => [], 'labels' => []];
         }
 
-        $series = collect($analysis->monthlySeries());
+        $series = collect($analysis->monthlySeries($user));
 
         $byName = $series->groupBy('name');
         $topNames = $byName
@@ -53,7 +54,7 @@ class TrendsChartWidget extends LineChartWidget
 
     public function getDescription(): string|Htmlable|null
     {
-        if (app(MarketAnalysisService::class)->months() !== []) {
+        if (app(MarketAnalysisService::class)->months(auth()->user()) !== []) {
             return null;
         }
 

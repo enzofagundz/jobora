@@ -39,6 +39,9 @@ final class JobTriageService
      */
     public function startBatch(Collection $captures, User $user): Collection
     {
+        // Filtrar seleção por usuário — nunca processar coleção estrangeira.
+        $captures = $captures->filter(fn (JobCapture $c): bool => $c->user_id === $user->id);
+
         $eligible = $captures->filter(fn (JobCapture $c): bool => $c->job_posting_id === null
             && in_array($c->triage_status, [JobCaptureTriageStatus::Pending, JobCaptureTriageStatus::Failed], true));
 
@@ -52,7 +55,7 @@ final class JobTriageService
 
         $ids = $eligible->pluck('id')->all();
 
-        JobCapture::query()->whereIn('id', $ids)->update([
+        $user->jobCaptures()->whereIn('id', $ids)->update([
             'triage_status' => JobCaptureTriageStatus::Processing,
             'triage_error' => null,
         ]);
@@ -65,15 +68,22 @@ final class JobTriageService
     /**
      * @param  Collection<int, JobCapture>  $captures
      */
-    public function triageBatch(Collection $captures, ?User $user = null): void
+    public function triageBatch(Collection $captures, User $user): void
     {
+        // Filtragem por proprietário — nunca processar captura estrangeira.
+        $captures = $captures->filter(fn (JobCapture $c): bool => $c->user_id === $user->id);
+
+        if ($captures->isEmpty()) {
+            return;
+        }
+
         $started = microtime(true);
         $ids = $captures->pluck('id')->all();
         $inputChars = 0;
         $usage = null;
 
         try {
-            $criteria = $user?->screeningPreference;
+            $criteria = $user->screeningPreference;
 
             $payload = [
                 'captures' => $captures->map(fn (JobCapture $c) => [

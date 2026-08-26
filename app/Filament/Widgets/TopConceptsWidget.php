@@ -31,6 +31,7 @@ class TopConceptsWidget extends TableWidget
                 JobPostingItem::query()
                     ->join('job_postings', 'job_postings.id', '=', 'job_posting_items.job_posting_id')
                     ->where('job_postings.status', 'confirmed')
+                    ->where('job_postings.user_id', auth()->id())
                     ->selectRaw('job_posting_items.category, job_posting_items.name, COUNT(DISTINCT job_posting_items.job_posting_id) AS total')
                     ->groupBy('job_posting_items.category', 'job_posting_items.name')
                     ->orderByDesc('total')

@@ -6,24 +6,27 @@ use App\Enums\ApplicationStatus;
 use App\Models\Application;
 use App\Models\ApplicationEvent;
 use App\Models\JobPosting;
+use App\Models\User;
 use Carbon\CarbonInterface;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 
 /**
  * Mutação transacional do acompanhamento de candidatura.
- *
- * O início é idempotente por vaga (hasOne + unique em job_posting_id) e o
- * histórico é append-only: toda movimentação grava um novo ApplicationEvent
- * sem nunca alterar ou apagar registros anteriores.
  */
 final class ApplicationTrackingService
 {
-    public function start(JobPosting $posting): Application
+    public function start(User $user, JobPosting $posting): Application
     {
-        return DB::transaction(function () use ($posting): Application {
-            // Trava a linha da vaga para serializar inícios concorrentes.
-            JobPosting::whereKey($posting->getKey())->lockForUpdate()->first();
+        Gate::forUser($user)->authorize('update', $posting);
+
+        if ($posting->user_id !== $user->id) {
+            throw new \LogicException('Vaga não pertence ao usuário.');
+        }
+
+        return DB::transaction(function () use ($user, $posting): Application {
+            $user->jobPostings()->whereKey($posting->getKey())->lockForUpdate()->first();
 
             $application = Application::where('job_posting_id', $posting->getKey())->first();
 
@@ -42,8 +45,6 @@ final class ApplicationTrackingService
                     'occurred_at' => now(),
                 ]);
             } catch (UniqueConstraintViolationException) {
-                // ponytail: corrida no índice único; reaproveita a candidatura
-                // já criada pela outra transação e não duplica o evento inicial.
                 $application = Application::where('job_posting_id', $posting->getKey())->firstOrFail();
             }
 
@@ -52,15 +53,17 @@ final class ApplicationTrackingService
     }
 
     public function recordUpdate(
+        User $user,
         Application $application,
         ApplicationStatus $status,
-        ?string $title,
-        ?string $notes,
-        ?string $contact,
-        CarbonInterface $occurredAt,
+        ?string $title = null,
+        ?string $notes = null,
+        ?string $contact = null,
+        ?CarbonInterface $occurredAt = null,
     ): ApplicationEvent {
-        return DB::transaction(function () use ($application, $status, $title, $notes, $contact, $occurredAt): ApplicationEvent {
+        return DB::transaction(function () use ($user, $application, $status, $title, $notes, $contact, $occurredAt): ApplicationEvent {
             $application = Application::whereKey($application->getKey())
+                ->whereHas('jobPosting', fn ($query) => $query->whereBelongsTo($user))
                 ->lockForUpdate()
                 ->firstOrFail();
 

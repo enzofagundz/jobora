@@ -3,13 +3,14 @@
 namespace App\Services;
 
 use App\Models\JobCapture;
+use App\Models\User;
 use Illuminate\Database\QueryException;
 
 class JobCaptureService
 {
     /**
      * Ordem de precedência — identidade definida pelo backend (fonte de verdade é
-     * a tabela, unique(source, dedup_key); espelha utils/capture-identity.ts do cliente):
+     * a tabela, unique(user_id, source, dedup_key); espelha utils/capture-identity.ts do cliente):
      * 1. external_id → 'ext:<external_id>' (trim externo; source case-insensitive)
      * 2. url → 'url:<sha1 da URL canônica>' (scheme://host/path, sem query/fragment)
      * 3. fingerprint → 'fingerprint:<sha256 do JSON composto>' com source, URL
@@ -95,10 +96,10 @@ class JobCaptureService
         return empty($data['url']) || $this->normalizeUrl((string) $data['url']) === null;
     }
 
-    private function findHistoricalCompatibility(array $data): ?JobCapture
+    private function findHistoricalCompatibility(array $data, User $user): ?JobCapture
     {
-        // ponytail: busca linear limitada a registros do mesmo source sem external_id e sem URL válida; coluna canônica indexada só se houver tarefa de saneamento aprovada
-        $candidates = JobCapture::query()->withTrashed()
+        // ponytail: busca linear limitada a registros do mesmo user e source sem external_id e sem URL válida
+        $candidates = $user->jobCaptures()->withTrashed()
             ->where('source', $data['source'])
             ->whereNull('external_id')
             ->where(function ($query): void {
@@ -197,13 +198,12 @@ class JobCaptureService
     }
 
     /**
-     * Armazena a captura, deduplicando. Retorna [JobCapture, bool $duplicate].
+     * Armazena a captura, deduplicando por usuário. Retorna [JobCapture, bool $duplicate].
      *
-     * O unique(source, dedup_key) é a garantia; a re-consulta após QueryException
-     * cobre a corrida real (busy_timeout faz o escritor concorrente aguardar e
-     * depois receber a violação única recuperável).
+     * O unique(user_id, source, dedup_key) é a garantia; a re-consulta após QueryException
+     * cobre a corrida real.
      */
-    public function store(array $data): array
+    public function store(array $data, User $user): array
     {
         $data['source'] = mb_strtolower(trim((string) ($data['source'] ?? '')));
         $data['external_id'] = isset($data['external_id']) ? trim((string) $data['external_id']) : null;
@@ -214,7 +214,7 @@ class JobCaptureService
 
         $data['dedup_key'] = $this->dedupKey($data);
 
-        $existing = JobCapture::query()->withTrashed()
+        $existing = $user->jobCaptures()->withTrashed()
             ->where('source', $data['source'])
             ->where('dedup_key', $data['dedup_key'])
             ->first();
@@ -224,7 +224,7 @@ class JobCaptureService
         }
 
         if ($this->isFingerprintPayload($data)) {
-            $historical = $this->findHistoricalCompatibility($data);
+            $historical = $this->findHistoricalCompatibility($data, $user);
 
             if ($historical) {
                 return [$historical, true];
@@ -232,13 +232,13 @@ class JobCaptureService
         }
 
         try {
-            $capture = JobCapture::create($data);
+            $capture = $user->jobCaptures()->create($data);
         } catch (QueryException $e) {
             if (! $this->isUniqueViolation($e)) {
                 throw $e;
             }
 
-            $capture = JobCapture::query()->withTrashed()
+            $capture = $user->jobCaptures()->withTrashed()
                 ->where('source', $data['source'])
                 ->where('dedup_key', $data['dedup_key'])
                 ->first();

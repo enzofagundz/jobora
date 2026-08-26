@@ -70,7 +70,7 @@ class ApplicationPage extends Page implements HasTable
         }
 
         $this->form->fill([
-            'original_resume' => ResumeService::plainText(app(ResumeService::class)->content()),
+            'original_resume' => ResumeService::plainText(app(ResumeService::class)->content(auth()->user())),
         ]);
 
         $this->fillAdaptedForm();
@@ -122,7 +122,7 @@ class ApplicationPage extends Page implements HasTable
 
     public function originalResume(): ?string
     {
-        return app(ResumeService::class)->content();
+        return app(ResumeService::class)->content(auth()->user());
     }
 
     public function adaptation(): ?ResumeAdaptation
@@ -293,7 +293,7 @@ class ApplicationPage extends Page implements HasTable
         Gate::authorize('update', $this->record);
 
         try {
-            app(ResumeAdaptationService::class)->adapt($this->record);
+            app(ResumeAdaptationService::class)->adapt(auth()->user(), $this->record);
 
             $this->fillAdaptedForm();
 
@@ -331,7 +331,7 @@ class ApplicationPage extends Page implements HasTable
                 ->action(function (): void {
                     Gate::authorize('update', $this->record);
 
-                    app(ApplicationTrackingService::class)->start($this->record);
+                    app(ApplicationTrackingService::class)->start(auth()->user(), $this->record);
 
                     $this->record->refresh();
 
@@ -391,6 +391,7 @@ class ApplicationPage extends Page implements HasTable
 
                     try {
                         app(ApplicationTrackingService::class)->recordUpdate(
+                            auth()->user(),
                             $application,
                             $status,
                             $data['title'] ?? null,
@@ -455,6 +456,7 @@ class ApplicationPage extends Page implements HasTable
                 ->action(function (array $data, JobPosting $record): void {
                     try {
                         app(JobReviewService::class)->replaceApplicationMethods(
+                            auth()->user(),
                             $record,
                             $data['application_methods'] ?? [],
                         );

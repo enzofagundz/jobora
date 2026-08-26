@@ -35,7 +35,7 @@ it('notifica análise concluída apenas ao destinatário com evento broadcast', 
 
     $userA = User::factory()->create();
     $userB = User::factory()->create();
-    $posting = JobPosting::factory()->create(['description' => jobNotificationsDescription()]);
+    $posting = JobPosting::factory()->for($userA, 'user')->create(['description' => jobNotificationsDescription()]);
 
     (new AnalyzeJobPosting($posting, $userA->id))->handle(app(JobAnalysisService::class));
 
@@ -60,8 +60,8 @@ it('notifica triagem concluída com contagem correta apenas ao destinatário', f
     $userA = User::factory()->create();
     $userB = User::factory()->create();
 
-    $c1 = JobCapture::factory()->create(['description' => str_repeat('Vaga PHP com Laravel. ', 5)]);
-    $c2 = JobCapture::factory()->create(['description' => str_repeat('Vaga PHP com Docker. ', 5)]);
+    $c1 = JobCapture::factory()->for($userA, 'user')->create(['description' => str_repeat('Vaga PHP com Laravel. ', 5)]);
+    $c2 = JobCapture::factory()->for($userA, 'user')->create(['description' => str_repeat('Vaga PHP com Docker. ', 5)]);
 
     JobTriageAgent::fake([[
         'results' => [
@@ -93,7 +93,7 @@ it('notifica falha terminal de análise sem criar sucesso', function () {
 
     $userA = User::factory()->create();
     $userB = User::factory()->create();
-    $posting = JobPosting::factory()->create(['description' => jobNotificationsDescription()]);
+    $posting = JobPosting::factory()->for($userA, 'user')->create(['description' => jobNotificationsDescription()]);
 
     (new AnalyzeJobPosting($posting, $userA->id))->handle(app(JobAnalysisService::class));
 
@@ -118,7 +118,7 @@ it('AnalyzeJobPosting failed() persiste falha e notifica erro apenas uma vez', f
     Event::fake([DatabaseNotificationsSent::class]);
 
     $user = User::factory()->create();
-    $posting = JobPosting::factory()->create(['description' => jobNotificationsDescription(), 'status' => JobPostingStatus::Pending]);
+    $posting = JobPosting::factory()->for($user, 'user')->create(['description' => jobNotificationsDescription(), 'status' => JobPostingStatus::Pending]);
 
     (new AnalyzeJobPosting($posting, $user->id))->failed(new RuntimeException('timeout worker'));
 
@@ -132,8 +132,8 @@ it('AnalyzeJobPosting failed() persiste falha e notifica erro apenas uma vez', f
         ->and($notification->data['format'])->toBe('filament');
 
     Event::fake([DatabaseNotificationsSent::class]);
-    $posting2 = JobPosting::factory()->needsReview()->create(['description' => jobNotificationsDescription()]);
     $user2 = User::factory()->create();
+    $posting2 = JobPosting::factory()->for($user2, 'user')->needsReview()->create(['description' => jobNotificationsDescription()]);
     (new AnalyzeJobPosting($posting2, $user2->id))->failed(new RuntimeException('timeout'));
 
     expect($posting2->refresh()->status)->toBe(JobPostingStatus::NeedsReview);
@@ -145,8 +145,8 @@ it('TriageJobCaptures failed() marca processing como failed e notifica erro', fu
     Event::fake([DatabaseNotificationsSent::class]);
 
     $user = User::factory()->create();
-    $c1 = JobCapture::factory()->create(['triage_status' => JobCaptureTriageStatus::Processing]);
-    $c2 = JobCapture::factory()->create(['triage_status' => JobCaptureTriageStatus::Completed]);
+    $c1 = JobCapture::factory()->for($user, 'user')->create(['triage_status' => JobCaptureTriageStatus::Processing]);
+    $c2 = JobCapture::factory()->for($user, 'user')->create(['triage_status' => JobCaptureTriageStatus::Completed]);
 
     (new TriageJobCaptures([$c1->id, $c2->id], $user->id))->failed(new RuntimeException('timeout triage'));
 
@@ -172,7 +172,7 @@ it('isolamento entre destinatarios e formato persistido', function () {
 
     $userA = User::factory()->create();
     $userB = User::factory()->create();
-    $posting = JobPosting::factory()->create(['description' => jobNotificationsDescription()]);
+    $posting = JobPosting::factory()->for($userA, 'user')->create(['description' => jobNotificationsDescription()]);
 
     (new AnalyzeJobPosting($posting, $userA->id))->handle(app(JobAnalysisService::class));
 
@@ -198,12 +198,15 @@ it('não notifica quando usuario não existe mais', function () {
         'skills' => ['PHP'],
     ]]);
 
-    $posting = JobPosting::factory()->create(['description' => jobNotificationsDescription()]);
+    // Posting pertence a um usuário existente, mas o job é despachado para um usuário inexistente.
+    $owner = User::factory()->create();
+    $posting = JobPosting::factory()->for($owner, 'user')->create(['description' => jobNotificationsDescription()]);
     $nonExistentUserId = 999999;
 
     (new AnalyzeJobPosting($posting, $nonExistentUserId))->handle(app(JobAnalysisService::class));
 
-    expect($posting->refresh()->status)->toBe(JobPostingStatus::NeedsReview);
+    // Com isolamento multiusuário, job com owner inexistente não muta posting nem notifica.
+    expect($posting->refresh()->status)->toBe(JobPostingStatus::Pending);
     expect(DatabaseNotification::count())->toBe(0);
     Event::assertNotDispatched(DatabaseNotificationsSent::class);
 });
@@ -212,8 +215,8 @@ it('triagem mista gera warning com contagem correta', function () {
     Event::fake([DatabaseNotificationsSent::class]);
 
     $user = User::factory()->create();
-    $c1 = JobCapture::factory()->create(['description' => str_repeat('Vaga PHP. ', 5)]);
-    $c2 = JobCapture::factory()->create(['description' => str_repeat('Vaga PHP. ', 5)]);
+    $c1 = JobCapture::factory()->for($user, 'user')->create(['description' => str_repeat('Vaga PHP. ', 5)]);
+    $c2 = JobCapture::factory()->for($user, 'user')->create(['description' => str_repeat('Vaga PHP. ', 5)]);
 
     JobTriageAgent::fake([[
         'results' => [

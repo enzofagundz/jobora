@@ -84,17 +84,17 @@ class MarketComparisonPage extends Page implements HasSchemas, HasTable
      */
     public function getRows(?ConceptCategory $category = null): array
     {
-        return app(MarketComparisonService::class)->table($category);
+        return app(MarketComparisonService::class)->table(auth()->user(), $category);
     }
 
     public function getTotalConfirmed(): int
     {
-        return app(MarketAnalysisService::class)->totalConfirmed();
+        return app(MarketAnalysisService::class)->totalConfirmed(auth()->user());
     }
 
     public function hasResume(): bool
     {
-        return ! blank(app(ResumeService::class)->content());
+        return ! blank(app(ResumeService::class)->content(auth()->user()));
     }
 
     public function categoryLabel(string $value): string

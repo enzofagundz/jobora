@@ -12,6 +12,8 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Str;
 use UnitEnum;
 
 class JobCaptureResource extends Resource
@@ -29,6 +31,11 @@ class JobCaptureResource extends Resource
     protected static ?string $modelLabel = 'captura';
 
     protected static ?string $pluralModelLabel = 'capturas';
+
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->whereBelongsTo(auth()->user());
+    }
 
     public static function infolist(Schema $schema): Schema
     {
@@ -55,12 +62,14 @@ class JobCaptureResource extends Resource
                     ->columnSpanFull(),
                 TextEntry::make('url')
                     ->label('URL')
-                    ->url(fn (string $state): string => $state)
+                    ->url(fn (?string $state): ?string => filled($state) ? Str::sanitizeUrl($state) : null)
                     ->openUrlInNewTab()
                     ->placeholder('—')
                     ->columnSpanFull(),
                 TextEntry::make('search_url')
                     ->label('URL de busca')
+                    ->url(fn (string $state): ?string => $state ? Str::sanitizeUrl($state) : null)
+                    ->openUrlInNewTab()
                     ->placeholder('—')
                     ->columnSpanFull(),
                 TextEntry::make('author_name')
@@ -68,6 +77,8 @@ class JobCaptureResource extends Resource
                     ->placeholder('—'),
                 TextEntry::make('author_profile_url')
                     ->label('Perfil do autor')
+                    ->url(fn (string $state): ?string => $state ? Str::sanitizeUrl($state) : null)
+                    ->openUrlInNewTab()
                     ->placeholder('—')
                     ->columnSpanFull(),
                 TextEntry::make('captured_at')

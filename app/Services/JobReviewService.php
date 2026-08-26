@@ -7,7 +7,9 @@ use App\Enums\ConceptCategory;
 use App\Enums\ItemSource;
 use App\Enums\JobPostingStatus;
 use App\Models\JobPosting;
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 
 /**
  * Confirmação e descarte da sugestão de reestruturação de uma vaga,
@@ -25,8 +27,14 @@ final class JobReviewService
      * @param  array<int, array{category: string, name: string}>  $items
      * @param  array<int, array<string, mixed>>  $applicationMethods
      */
-    public function confirm(JobPosting $posting, array $items, array $applicationMethods, ?string $role, ?string $company): void
+    public function confirm(User $user, JobPosting $posting, array $items, array $applicationMethods, ?string $role, ?string $company): void
     {
+        Gate::forUser($user)->authorize('update', $posting);
+
+        if ($posting->user_id !== $user->id) {
+            throw new \LogicException('Vaga não pertence ao usuário.');
+        }
+
         $suggestedPairs = collect($posting->suggested_data['items'] ?? [])
             ->map(fn (array $item): string => $item['category'].'|'.$item['name'])
             ->all();
@@ -68,8 +76,14 @@ final class JobReviewService
         });
     }
 
-    public function discard(JobPosting $posting): void
+    public function discard(User $user, JobPosting $posting): void
     {
+        Gate::forUser($user)->authorize('update', $posting);
+
+        if ($posting->user_id !== $user->id) {
+            throw new \LogicException('Vaga não pertence ao usuário.');
+        }
+
         $posting->applicationMethods()->delete();
 
         $posting->forceFill([
@@ -83,24 +97,22 @@ final class JobReviewService
 
     /**
      * Substitui os métodos de candidatura da vaga por uma entrada manual.
-     * Não consulta suggested_data: tudo é gravado como User. Usado pela
-     * página ApplicationPage ao "Gerenciar métodos".
      *
      * @param  array<int, array<string, mixed>>  $methods
      */
-    public function replaceApplicationMethods(JobPosting $posting, array $methods): void
+    public function replaceApplicationMethods(User $user, JobPosting $posting, array $methods): void
     {
+        Gate::forUser($user)->authorize('update', $posting);
+
+        if ($posting->user_id !== $user->id) {
+            throw new \LogicException('Vaga não pertence ao usuário.');
+        }
+
         DB::transaction(function () use ($posting, $methods): void {
             $this->syncApplicationMethods($posting, $methods, []);
         });
     }
 
-    /**
-     * Substitui os métodos de candidatura da vaga pelos revisados.
-     *
-     * @param  array<int, array<string, mixed>>  $methods
-     * @param  array<int, string>  $suggestedKeys  dedup_keys vindos da sugestão; ausentes aqui viram User
-     */
     private function syncApplicationMethods(JobPosting $posting, array $methods, array $suggestedKeys = []): void
     {
         $posting->applicationMethods()->delete();

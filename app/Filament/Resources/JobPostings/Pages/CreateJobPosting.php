@@ -6,6 +6,7 @@ use App\Enums\JobPostingStatus;
 use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Jobs\AnalyzeJobPosting;
 use Filament\Resources\Pages\CreateRecord;
+use Illuminate\Database\Eloquent\Model;
 
 class CreateJobPosting extends CreateRecord
 {
@@ -17,6 +18,11 @@ class CreateJobPosting extends CreateRecord
         $data['status'] = JobPostingStatus::Pending;
 
         return $data;
+    }
+
+    protected function handleRecordCreation(array $data): Model
+    {
+        return auth()->user()->jobPostings()->create($data);
     }
 
     protected function afterCreate(): void

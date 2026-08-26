@@ -15,6 +15,8 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Str;
 use UnitEnum;
 
 class JobPostingResource extends Resource
@@ -33,6 +35,11 @@ class JobPostingResource extends Resource
 
     protected static ?string $pluralModelLabel = 'vagas';
 
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->whereBelongsTo(auth()->user());
+    }
+
     public static function form(Schema $schema): Schema
     {
         return JobPostingForm::configure($schema);
@@ -48,7 +55,7 @@ class JobPostingResource extends Resource
                     ->columnSpanFull(),
                 TextEntry::make('source_url')
                     ->label('Link de referência (opcional)')
-                    ->url(fn (string $state): string => $state)
+                    ->url(fn (?string $state): ?string => filled($state) ? Str::sanitizeUrl($state) : null)
                     ->openUrlInNewTab()
                     ->placeholder('—')
                     ->columnSpanFull(),

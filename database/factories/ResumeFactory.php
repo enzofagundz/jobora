@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Models\Resume;
+use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -14,6 +15,7 @@ class ResumeFactory extends Factory
     {
         return [
             'content' => fake()->paragraphs(2, true),
+            'user_id' => User::factory(),
         ];
     }
 }

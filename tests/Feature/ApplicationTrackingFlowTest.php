@@ -20,7 +20,7 @@ beforeEach(function (): void {
 });
 
 it('não cria candidatura ao abrir a página e o início cria exatamente uma', function () {
-    $posting = JobPosting::factory()->confirmed()->create();
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create();
 
     Livewire::test(ApplicationPage::class, ['record' => $posting->id])
         ->assertSuccessful()
@@ -41,19 +41,20 @@ it('não cria candidatura ao abrir a página e o início cria exatamente uma', f
 });
 
 it('é idempotente e a unique protege contra duas candidaturas', function () {
-    $posting = JobPosting::factory()->confirmed()->create();
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create();
     $service = app(ApplicationTrackingService::class);
+    $user = auth()->user();
 
-    $first = $service->start($posting);
-    $second = $service->start($posting);
+    $first = $service->start($user, $posting);
+    $second = $service->start($user, $posting);
 
     expect($first->is($second))->toBeTrue()
         ->and(Application::where('job_posting_id', $posting->id)->count())->toBe(1)
         ->and(ApplicationEvent::count())->toBe(1);
 
     // Outra vaga pode ter sua própria candidatura.
-    $other = JobPosting::factory()->confirmed()->create();
-    $service->start($other);
+    $other = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create();
+    $service->start($user, $other);
     expect(Application::count())->toBe(2);
 
     // Unique do banco impede duas candidaturas para a mesma vaga.
@@ -64,8 +65,8 @@ it('é idempotente e a unique protege contra duas candidaturas', function () {
 });
 
 it('relaciona candidatura e eventos nos dois sentidos', function () {
-    $posting = JobPosting::factory()->confirmed()->create();
-    $application = app(ApplicationTrackingService::class)->start($posting);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create();
+    $application = app(ApplicationTrackingService::class)->start(auth()->user(), $posting);
 
     expect($posting->application)->toBeInstanceOf(Application::class)
         ->and($posting->application->is($application))->toBeTrue()
@@ -79,7 +80,7 @@ it('relaciona candidatura e eventos nos dois sentidos', function () {
 });
 
 it('preserva métodos e currículo ao iniciar e atualizar', function () {
-    $posting = JobPosting::factory()->confirmed()->create();
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create();
     $posting->applicationMethods()->create([
         'type' => 'email',
         'email' => 'vagas@empresa.com',
@@ -108,10 +109,12 @@ it('preserva métodos e currículo ao iniciar e atualizar', function () {
 });
 
 it('registra alteração de status com todos os campos e não apaga o anterior', function () {
-    $posting = JobPosting::factory()->confirmed()->create();
-    $application = app(ApplicationTrackingService::class)->start($posting);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create();
+    $user = auth()->user();
+    $application = app(ApplicationTrackingService::class)->start($user, $posting);
 
     app(ApplicationTrackingService::class)->recordUpdate(
+        $user,
         $application,
         ApplicationStatus::Submitted,
         'Candidatura enviada por e-mail',
@@ -132,6 +135,7 @@ it('registra alteração de status com todos os campos e não apaga o anterior',
 
     // Repetir o mesmo status grava nova linha sem apagar a anterior.
     app(ApplicationTrackingService::class)->recordUpdate(
+        $user,
         $application,
         ApplicationStatus::Submitted,
         'Complemento enviado',
@@ -145,8 +149,9 @@ it('registra alteração de status com todos os campos e não apaga o anterior',
 });
 
 it('ordena o histórico por occurred_at desc e id desc', function () {
-    $posting = JobPosting::factory()->confirmed()->create();
-    $application = app(ApplicationTrackingService::class)->start($posting);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create();
+    $user = auth()->user();
+    $application = app(ApplicationTrackingService::class)->start($user, $posting);
     $service = app(ApplicationTrackingService::class);
 
     $future = now()->addDays(5);
@@ -154,13 +159,13 @@ it('ordena o histórico por occurred_at desc e id desc', function () {
     $retro = now()->subDays(10);
 
     // Criação fora de ordem de data.
-    $service->recordUpdate($application, ApplicationStatus::Interview, 'Entrevista', null, null, $near);
-    $service->recordUpdate($application, ApplicationStatus::Submitted, 'Enviada', null, null, $future);
-    $service->recordUpdate($application, ApplicationStatus::Preparing, 'Preparando', null, null, $retro);
+    $service->recordUpdate($user, $application, ApplicationStatus::Interview, 'Entrevista', null, null, $near);
+    $service->recordUpdate($user, $application, ApplicationStatus::Submitted, 'Enviada', null, null, $future);
+    $service->recordUpdate($user, $application, ApplicationStatus::Preparing, 'Preparando', null, null, $retro);
 
     // Desempate: duas movimentações com a mesma occurred_at.
-    $service->recordUpdate($application, ApplicationStatus::Waiting, 'Espera', null, null, $near);
-    $service->recordUpdate($application, ApplicationStatus::Assessment, 'Avaliação', null, null, $near);
+    $service->recordUpdate($user, $application, ApplicationStatus::Waiting, 'Espera', null, null, $near);
+    $service->recordUpdate($user, $application, ApplicationStatus::Assessment, 'Avaliação', null, null, $near);
 
     $ordered = $application->events()->orderByDesc('occurred_at')->orderByDesc('id')->get();
 
@@ -186,30 +191,32 @@ it('ordena o histórico por occurred_at desc e id desc', function () {
 });
 
 it('registra rejeição e conclusão mantendo eventos anteriores', function () {
-    $posting = JobPosting::factory()->confirmed()->create();
-    $application = app(ApplicationTrackingService::class)->start($posting);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create();
+    $user = auth()->user();
+    $application = app(ApplicationTrackingService::class)->start($user, $posting);
     $service = app(ApplicationTrackingService::class);
 
-    $service->recordUpdate($application, ApplicationStatus::Submitted, 'Enviada', null, null, now()->subDays(3));
-    $service->recordUpdate($application, ApplicationStatus::Rejected, 'Reprovada', 'Perfil não aderente', null, now()->subDay());
+    $service->recordUpdate($user, $application, ApplicationStatus::Submitted, 'Enviada', null, null, now()->subDays(3));
+    $service->recordUpdate($user, $application, ApplicationStatus::Rejected, 'Reprovada', 'Perfil não aderente', null, now()->subDay());
 
     expect($application->refresh()->status)->toBe(ApplicationStatus::Rejected)
         ->and($application->events)->toHaveCount(3)
         ->and(ApplicationStatus::Rejected->isTerminal())->toBeTrue();
 
-    $service->recordUpdate($application, ApplicationStatus::Completed, 'Recontratada', null, null, now());
+    $service->recordUpdate($user, $application, ApplicationStatus::Completed, 'Recontratada', null, null, now());
 
     expect($application->refresh()->status)->toBe(ApplicationStatus::Completed)
         ->and($application->events)->toHaveCount(4);
 });
 
 it('permite retroceder sem forçar avanço monotônico', function () {
-    $posting = JobPosting::factory()->confirmed()->create();
-    $application = app(ApplicationTrackingService::class)->start($posting);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create();
+    $user = auth()->user();
+    $application = app(ApplicationTrackingService::class)->start($user, $posting);
     $service = app(ApplicationTrackingService::class);
 
-    $service->recordUpdate($application, ApplicationStatus::Interview, 'Entrevista', null, null, now()->subDay());
-    $service->recordUpdate($application, ApplicationStatus::Preparing, 'Voltou a preparar', null, null, now());
+    $service->recordUpdate($user, $application, ApplicationStatus::Interview, 'Entrevista', null, null, now()->subDay());
+    $service->recordUpdate($user, $application, ApplicationStatus::Preparing, 'Voltou a preparar', null, null, now());
 
     expect($application->refresh()->status)->toBe(ApplicationStatus::Preparing)
         ->and($application->events)->toHaveCount(3)
@@ -217,11 +224,12 @@ it('permite retroceder sem forçar avanço monotônico', function () {
 });
 
 it('registra observação no mesmo status sem mudar o status', function () {
-    $posting = JobPosting::factory()->confirmed()->create();
-    $application = app(ApplicationTrackingService::class)->start($posting);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create();
+    $user = auth()->user();
+    $application = app(ApplicationTrackingService::class)->start($user, $posting);
     $service = app(ApplicationTrackingService::class);
 
-    $service->recordUpdate($application, ApplicationStatus::Planned, 'Anotação inicial', 'Lembrar de ajustar CV', 'mentor', now());
+    $service->recordUpdate($user, $application, ApplicationStatus::Planned, 'Anotação inicial', 'Lembrar de ajustar CV', 'mentor', now());
 
     $application->refresh();
     expect($application->status)->toBe(ApplicationStatus::Planned)
@@ -229,13 +237,13 @@ it('registra observação no mesmo status sem mudar o status', function () {
         ->and($application->events()->latest('id')->first()->notes)->toBe('Lembrar de ajustar CV');
 
     // Título vazio usa o label do status.
-    $service->recordUpdate($application, ApplicationStatus::Planned, null, 'Segunda anotação', null, now());
+    $service->recordUpdate($user, $application, ApplicationStatus::Planned, null, 'Segunda anotação', null, now());
     expect($application->refresh()->events()->latest('id')->first()->title)
         ->toBe(ApplicationStatus::Planned->getLabel());
 });
 
 it('rejeita dados longos no formulário sem gravar parcialmente', function () {
-    $posting = JobPosting::factory()->confirmed()->create();
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create();
     Livewire::test(ApplicationPage::class, ['record' => $posting->id])
         ->callAction('startTracking');
 
@@ -256,7 +264,7 @@ it('rejeita dados longos no formulário sem gravar parcialmente', function () {
 });
 
 it('renderiza a página com e sem acompanhamento e após atualização', function () {
-    $posting = JobPosting::factory()->confirmed()->create();
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create();
 
     // Sem acompanhamento: mostra o botão de início.
     Livewire::test(ApplicationPage::class, ['record' => $posting->id])
@@ -296,7 +304,7 @@ it('renderiza a página com e sem acompanhamento e após atualização', functio
 it('esconde as ações de tracking quando a policy nega update', function () {
     Gate::policy(JobPosting::class, DenyingUpdateJobPostingPolicy::class);
 
-    $posting = JobPosting::factory()->confirmed()->create();
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create();
 
     // View permitida, update negado: a página abre mas as mutações ficam ocultas.
     Livewire::test(ApplicationPage::class, ['record' => $posting->id])
@@ -306,10 +314,12 @@ it('esconde as ações de tracking quando a policy nega update', function () {
 });
 
 it('registra movimentação por título sem criar status de canal', function () {
-    $posting = JobPosting::factory()->confirmed()->create();
-    $application = app(ApplicationTrackingService::class)->start($posting);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create();
+    $user = auth()->user();
+    $application = app(ApplicationTrackingService::class)->start($user, $posting);
 
     app(ApplicationTrackingService::class)->recordUpdate(
+        $user,
         $application,
         ApplicationStatus::Submitted,
         'Candidatura enviada pelo LinkedIn',
@@ -342,5 +352,10 @@ class DenyingUpdateJobPostingPolicy
     public function update(User $user, JobPosting $posting): bool
     {
         return false;
+    }
+
+    public function delete(User $user, JobPosting $posting): bool
+    {
+        return true;
     }
 }

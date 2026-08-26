@@ -39,6 +39,21 @@ class User extends Authenticatable implements FilamentUser
         return $this->hasMany(ProfessionalCompetency::class);
     }
 
+    public function jobPostings(): HasMany
+    {
+        return $this->hasMany(JobPosting::class);
+    }
+
+    public function jobCaptures(): HasMany
+    {
+        return $this->hasMany(JobCapture::class);
+    }
+
+    public function resume(): HasOne
+    {
+        return $this->hasOne(Resume::class);
+    }
+
     /**
      * Get the attributes that should be cast.
      *

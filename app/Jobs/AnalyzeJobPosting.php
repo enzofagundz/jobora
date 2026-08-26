@@ -54,9 +54,21 @@ class AnalyzeJobPosting implements ShouldBeUnique, ShouldQueueAfterCommit
 
     public function handle(JobAnalysisService $service): void
     {
-        $service->analyze($this->posting);
+        $user = User::find($this->userId);
 
-        $fresh = $this->posting->fresh();
+        if (! $user) {
+            return;
+        }
+
+        $posting = $user->jobPostings()->whereKey($this->posting->getKey())->first();
+
+        if (! $posting) {
+            return;
+        }
+
+        $service->analyze($user, $posting);
+
+        $fresh = $posting->fresh();
 
         if (! $fresh) {
             return;
@@ -67,24 +79,18 @@ class AnalyzeJobPosting implements ShouldBeUnique, ShouldQueueAfterCommit
             return;
         }
 
-        $recipient = User::find($this->userId);
-
-        if (! $recipient) {
-            return;
-        }
-
         if ($fresh->status === JobPostingStatus::NeedsReview) {
             Notification::make()
                 ->success()
                 ->title('Análise de vaga concluída')
                 ->body('A vaga foi analisada e está aguardando revisão.')
-                ->sendToDatabase($recipient, isEventDispatched: true);
+                ->sendToDatabase($user, isEventDispatched: true);
         } elseif ($fresh->status === JobPostingStatus::Failed) {
             Notification::make()
                 ->danger()
                 ->title('Falha na análise da vaga')
                 ->body('A análise não foi concluída. Abra a vaga para tentar novamente.')
-                ->sendToDatabase($recipient, isEventDispatched: true);
+                ->sendToDatabase($user, isEventDispatched: true);
         }
     }
 
@@ -95,7 +101,18 @@ class AnalyzeJobPosting implements ShouldBeUnique, ShouldQueueAfterCommit
      */
     public function failed(?Throwable $exception): void
     {
-        $fresh = $this->posting->fresh();
+        $user = User::find($this->userId);
+
+        $fresh = null;
+
+        if ($user) {
+            $fresh = $user->jobPostings()->whereKey($this->posting->getKey())->first();
+        } else {
+            $fresh = $this->posting->fresh();
+            if ($fresh && $fresh->user_id !== $this->userId) {
+                $fresh = null;
+            }
+        }
 
         if ($fresh && $fresh->status->value === 'pending') {
             $fresh->forceFill([
@@ -103,14 +120,12 @@ class AnalyzeJobPosting implements ShouldBeUnique, ShouldQueueAfterCommit
                 'error_message' => 'Falha na análise com IA: '.($exception?->getMessage() ?? 'timeout'),
             ])->save();
 
-            $recipient = User::find($this->userId);
-
-            if ($recipient) {
+            if ($user) {
                 Notification::make()
                     ->danger()
                     ->title('Falha na análise da vaga')
                     ->body('A análise não foi concluída. Abra a vaga para tentar novamente.')
-                    ->sendToDatabase($recipient, isEventDispatched: true);
+                    ->sendToDatabase($user, isEventDispatched: true);
             }
         }
     }

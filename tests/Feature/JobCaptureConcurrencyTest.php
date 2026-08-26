@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\JobCapture;
+use App\Models\User;
 use App\Services\JobCaptureService;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Concurrency;
@@ -59,9 +60,12 @@ class JobCaptureConcurrencyTest extends TestCase
                 'captured_at' => now()->toDateTimeString(),
             ];
 
+            $user = User::factory()->create();
+            $userId = $user->id;
+
             $tasks = [];
             for ($i = 0; $i < 10; $i++) {
-                $tasks[] = static function () use ($payload, $tmp) {
+                $tasks[] = static function () use ($payload, $tmp, $userId) {
                     putenv("DB_DATABASE={$tmp}");
                     $_ENV['DB_DATABASE'] = $tmp;
                     $_SERVER['DB_DATABASE'] = $tmp;
@@ -73,7 +77,8 @@ class JobCaptureConcurrencyTest extends TestCase
                     DB::purge('sqlite');
 
                     $service = app(JobCaptureService::class);
-                    [$capture, $duplicate] = $service->store($payload);
+                    $user = User::findOrFail($userId);
+                    [$capture, $duplicate] = $service->store($payload, $user);
 
                     return [
                         'id' => $capture->id,

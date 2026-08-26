@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Models\JobCapture;
+use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -27,6 +28,7 @@ class JobCaptureFactory extends Factory
             'author_name' => null,
             'author_profile_url' => null,
             'captured_at' => now(),
+            'user_id' => User::factory(),
         ];
     }
 }

@@ -4,11 +4,13 @@ namespace App\Models;
 
 use App\Enums\JobCaptureTriageResult;
 use App\Enums\JobCaptureTriageStatus;
+use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+#[Hidden(['user_id', 'deleted_at'])]
 class JobCapture extends Model
 {
     use HasFactory, SoftDeletes;
@@ -40,6 +42,11 @@ class JobCapture extends Model
             'triage_status' => JobCaptureTriageStatus::class,
             'triage_result' => JobCaptureTriageResult::class,
         ];
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
     }
 
     public function jobPosting(): BelongsTo

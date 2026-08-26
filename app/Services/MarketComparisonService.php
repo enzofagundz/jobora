@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\ConceptCategory;
+use App\Models\User;
 
 class MarketComparisonService
 {
@@ -15,28 +16,13 @@ class MarketComparisonService
     ) {}
 
     /**
-     * Market × resume table rows: item, category, absolute/relative
-     * frequency among confirmed postings, presence in the resume and
-     * whether the item is a gap (frequent in postings, absent in resume).
-     * Rows classified in the authenticated user's profile also carry the
-     * strategic role and its source; the role never filters the rows.
-     *
-     * @return array<int, array{
-     *     name: string,
-     *     category: string,
-     *     total: int,
-     *     percent: float,
-     *     present: bool,
-     *     is_gap: bool,
-     *     strategic_role: string|null,
-     *     strategic_source: string|null,
-     * }>
+     * @return array<int, array{...}>
      */
-    public function table(?ConceptCategory $category = null): array
+    public function table(User $user, ?ConceptCategory $category = null): array
     {
-        $content = $this->resumes->content();
-        $roleMap = $this->competencies->roleMap(auth()->user());
-        $rows = $this->analysis->relativeFrequencies($category);
+        $content = $this->resumes->content($user);
+        $roleMap = $this->competencies->roleMap($user);
+        $rows = $this->analysis->relativeFrequencies($user, $category);
 
         return array_map(function (array $row) use ($content, $roleMap): array {
             $isPresent = $this->analyzer->contains($content, $row['name']);
@@ -56,14 +42,9 @@ class MarketComparisonService
         }, $rows);
     }
 
-    /**
-     * Top gaps: frequent in postings, absent in the resume, by frequency.
-     *
-     * @return array<int, array{name: string, category: string, total: int, percent: float, present: bool, is_gap: bool, strategic_role: string|null, strategic_source: string|null}>
-     */
-    public function gaps(int $limit = 10): array
+    public function gaps(User $user, int $limit = 10): array
     {
-        $rows = array_filter($this->table(), fn (array $row): bool => $row['is_gap']);
+        $rows = array_filter($this->table($user), fn (array $row): bool => $row['is_gap']);
 
         return array_slice(array_values($rows), 0, $limit);
     }

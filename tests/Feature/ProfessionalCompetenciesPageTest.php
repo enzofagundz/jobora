@@ -20,12 +20,12 @@ beforeEach(function (): void {
 
 function competencyPageResume(string $text): void
 {
-    app(ResumeService::class)->save($text);
+    app(ResumeService::class)->save(auth()->user(), $text);
 }
 
 function competencyPageMarket(array $names): void
 {
-    $posting = JobPosting::factory()->confirmed()->create();
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create();
 
     foreach ($names as $name) {
         $posting->items()->create(['category' => 'skill', 'name' => $name, 'source' => 'ai']);

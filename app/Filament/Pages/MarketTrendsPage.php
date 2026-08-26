@@ -51,7 +51,7 @@ class MarketTrendsPage extends Page
      */
     public function months(): array
     {
-        return $this->memoizedMonths ??= app(MarketAnalysisService::class)->months();
+        return $this->memoizedMonths ??= app(MarketAnalysisService::class)->months(auth()->user());
     }
 
     /**
@@ -70,7 +70,7 @@ class MarketTrendsPage extends Page
     public function monthlyRows(): array
     {
         $months = $this->months();
-        $series = collect(app(MarketAnalysisService::class)->monthlySeries($this->selectedCategory()));
+        $series = collect(app(MarketAnalysisService::class)->monthlySeries(auth()->user(), $this->selectedCategory()));
 
         return $series
             ->groupBy('name')
@@ -109,10 +109,11 @@ class MarketTrendsPage extends Page
 
         $analysis = app(MarketAnalysisService::class);
         $category = $this->selectedCategory();
+        $user = auth()->user();
 
-        $previous = collect($analysis->frequencies($category, $periodAFrom, $periodBFrom))
+        $previous = collect($analysis->frequencies($user, $category, $periodAFrom, $periodBFrom))
             ->pluck('total', 'name');
-        $current = collect($analysis->frequencies($category, $periodBFrom, $periodBTo))
+        $current = collect($analysis->frequencies($user, $category, $periodBFrom, $periodBTo))
             ->pluck('total', 'name');
 
         return $current

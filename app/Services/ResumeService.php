@@ -3,16 +3,16 @@
 namespace App\Services;
 
 use App\Models\Resume;
+use App\Models\User;
 
 class ResumeService
 {
     /**
-     * Save the current resume. A single row is guaranteed: saving always
-     * updates the existing row (new submissions replace the previous text).
+     * Save the current resume. A single row per user is guaranteed.
      */
-    public function save(string $content): Resume
+    public function save(User $user, string $content): Resume
     {
-        $resume = Resume::query()->first() ?? new Resume;
+        $resume = $user->resume()->first() ?? $user->resume()->make();
 
         $resume->content = $content;
         $resume->save();
@@ -20,14 +20,14 @@ class ResumeService
         return $resume;
     }
 
-    public function current(): ?Resume
+    public function current(User $user): ?Resume
     {
-        return Resume::query()->first();
+        return $user->resume()->first();
     }
 
-    public function content(): ?string
+    public function content(User $user): ?string
     {
-        return $this->current()?->content;
+        return $this->current($user)?->content;
     }
 
     /**

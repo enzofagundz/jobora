@@ -141,7 +141,7 @@ class ProfessionalCompetenciesPage extends Page implements HasSchemas, HasTable
                 ->requiresConfirmation()
                 ->modalHeading('Classificar com IA')
                 ->modalDescription('O currículo e os itens do mercado confirmado serão enviados ao modelo de linguagem. Custo de uma chamada de IA por execução. Classificações manuais não são alteradas.')
-                ->disabled(fn (): bool => blank(app(ResumeService::class)->content()))
+                ->disabled(fn (): bool => blank(app(ResumeService::class)->content(auth()->user())))
                 ->tooltip('Cadastre o currículo antes de classificar com IA.')
                 ->action(function (): void {
                     try {

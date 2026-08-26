@@ -4,7 +4,6 @@ namespace App\Providers\Filament;
 
 use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Models\JobPosting;
-use App\Models\ResumeAdaptation;
 use App\Services\ResumePdfService;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
@@ -82,7 +81,7 @@ class AdminPanelProvider extends PanelProvider
                 Route::get('/job-postings/{posting}/resume-pdf', function (JobPosting $posting) {
                     Gate::authorize('view', $posting);
 
-                    $adaptation = ResumeAdaptation::where('job_posting_id', $posting->id)->firstOrFail();
+                    $adaptation = $posting->resumeAdaptation()->firstOrFail();
 
                     try {
                         // toResponse gera o conteúdo (chamada real ao driver);

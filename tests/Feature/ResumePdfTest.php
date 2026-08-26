@@ -12,9 +12,10 @@ use Spatie\LaravelPdf\PdfBuilder;
 
 uses(RefreshDatabase::class);
 
-function pdfAdaptation(): ResumeAdaptation
+function pdfAdaptation(?User $user = null): ResumeAdaptation
 {
-    $posting = JobPosting::factory()->confirmed()->create([
+    $user ??= User::factory()->create();
+    $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create([
         'description' => 'Vaga para desenvolvedor Python com React.',
         'role' => 'Desenvolvedor Python',
     ]);
@@ -75,10 +76,11 @@ it('redireciona com notificação quando a geração do PDF falha', function () 
     config()->set('laravel-pdf.driver', 'cloudflare');
     config()->set('laravel-pdf.cloudflare', ['api_token' => '', 'account_id' => '']);
 
-    $adaptation = pdfAdaptation();
+    $user = User::factory()->create();
+    $adaptation = pdfAdaptation($user);
     $posting = $adaptation->jobPosting;
 
-    $this->actingAs(User::factory()->create())
+    $this->actingAs($user)
         ->from(JobPostingResource::getUrl('application', ['record' => $posting]))
         ->get(route('filament.admin.resume-pdf.download', $posting))
         ->assertRedirect(JobPostingResource::getUrl('application', ['record' => $posting]))

@@ -4,6 +4,7 @@ namespace Database\Factories;
 
 use App\Enums\JobPostingStatus;
 use App\Models\JobPosting;
+use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -22,6 +23,7 @@ class JobPostingFactory extends Factory
             'company' => null,
             'suggested_data' => null,
             'error_message' => null,
+            'user_id' => User::factory(),
         ];
     }
 

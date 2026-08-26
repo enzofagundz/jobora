@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\ConceptCategory;
+use App\Models\User;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -17,11 +18,12 @@ class MarketAnalysisService
      *
      * @return array<int, array{category: string, name: string, total: int}>
      */
-    public function frequencies(?ConceptCategory $category = null, ?string $from = null, ?string $to = null): array
+    public function frequencies(User $user, ?ConceptCategory $category = null, ?string $from = null, ?string $to = null): array
     {
         return DB::table('job_posting_items as i')
             ->join('job_postings as jp', 'jp.id', '=', 'i.job_posting_id')
             ->where('jp.status', 'confirmed')
+            ->where('jp.user_id', $user->id)
             ->when($category, fn ($q) => $q->where('i.category', $category->value))
             ->when($from, fn ($q) => $q->where('jp.collected_at', '>=', $from))
             ->when($to, fn ($q) => $q->where('jp.collected_at', '<', $to))
@@ -41,10 +43,11 @@ class MarketAnalysisService
     /**
      * Total distinct confirmed postings in the same scope.
      */
-    public function totalConfirmed(?string $from = null, ?string $to = null): int
+    public function totalConfirmed(User $user, ?string $from = null, ?string $to = null): int
     {
         return DB::table('job_postings')
             ->where('status', 'confirmed')
+            ->where('user_id', $user->id)
             ->when($from, fn ($q) => $q->where('collected_at', '>=', $from))
             ->when($to, fn ($q) => $q->where('collected_at', '<', $to))
             ->distinct()
@@ -56,9 +59,9 @@ class MarketAnalysisService
      *
      * @return array<int, array{category: string, name: string, total: int, percent: float}>
      */
-    public function relativeFrequencies(?ConceptCategory $category = null, ?string $from = null, ?string $to = null): array
+    public function relativeFrequencies(User $user, ?ConceptCategory $category = null, ?string $from = null, ?string $to = null): array
     {
-        $total = $this->totalConfirmed($from, $to);
+        $total = $this->totalConfirmed($user, $from, $to);
 
         if ($total === 0) {
             return [];
@@ -66,7 +69,7 @@ class MarketAnalysisService
 
         return array_map(
             fn (array $row) => $row + ['percent' => round($row['total'] / $total * 100, 1)],
-            $this->frequencies($category, $from, $to),
+            $this->frequencies($user, $category, $from, $to),
         );
     }
 
@@ -75,9 +78,9 @@ class MarketAnalysisService
      *
      * @return array<int, array{category: string, name: string, total: int}>
      */
-    public function top(int $limit = 10, ?ConceptCategory $category = null): array
+    public function top(User $user, int $limit = 10, ?ConceptCategory $category = null): array
     {
-        return array_slice($this->frequencies($category), 0, $limit);
+        return array_slice($this->frequencies($user, $category), 0, $limit);
     }
 
     /**
@@ -85,7 +88,7 @@ class MarketAnalysisService
      *
      * @return array<int, array{category: string, name_a: string, name_b: string, total: int}>
      */
-    public function pairsByCategory(?ConceptCategory $category = null, int $limit = 20): array
+    public function pairsByCategory(User $user, ?ConceptCategory $category = null, int $limit = 20): array
     {
         return DB::table('job_posting_items as a')
             ->join('job_posting_items as b', function ($join) {
@@ -95,6 +98,7 @@ class MarketAnalysisService
             })
             ->join('job_postings as jp', 'jp.id', '=', 'a.job_posting_id')
             ->where('jp.status', 'confirmed')
+            ->where('jp.user_id', $user->id)
             ->when($category, fn ($q) => $q->where('a.category', $category->value))
             ->selectRaw('a.category, a.name AS name_a, b.name AS name_b, COUNT(DISTINCT a.job_posting_id) AS total')
             ->groupBy('a.category', 'a.name', 'b.name')
@@ -118,11 +122,12 @@ class MarketAnalysisService
      * @param  array<int, string>  $topNames
      * @return array<int, array{month: string, name: string, total: int}>
      */
-    public function monthlySeries(?ConceptCategory $category = null, ?string $from = null, ?string $to = null, array $topNames = []): array
+    public function monthlySeries(User $user, ?ConceptCategory $category = null, ?string $from = null, ?string $to = null, array $topNames = []): array
     {
         return DB::table('job_posting_items as i')
             ->join('job_postings as jp', 'jp.id', '=', 'i.job_posting_id')
             ->where('jp.status', 'confirmed')
+            ->where('jp.user_id', $user->id)
             ->when($category, fn ($q) => $q->where('i.category', $category->value))
             ->when($from, fn ($q) => $q->where('jp.collected_at', '>=', $from))
             ->when($to, fn ($q) => $q->where('jp.collected_at', '<', $to))
@@ -145,10 +150,11 @@ class MarketAnalysisService
      *
      * @return array<int, string>
      */
-    public function months(?string $from = null, ?string $to = null): array
+    public function months(User $user, ?string $from = null, ?string $to = null): array
     {
         return DB::table('job_postings')
             ->where('status', 'confirmed')
+            ->where('user_id', $user->id)
             ->when($from, fn ($q) => $q->where('collected_at', '>=', $from))
             ->when($to, fn ($q) => $q->where('collected_at', '<', $to))
             ->selectRaw("strftime('%Y-%m', collected_at) AS month")
@@ -163,14 +169,18 @@ class MarketAnalysisService
      */
     public static function monthStart(?string $month): ?Carbon
     {
-        return blank($month) ? null : Carbon::createFromFormat('Y-m', $month)->startOfMonth();
+        if (blank($month)) {
+            return null;
+        }
+
+        return Carbon::createFromFormat('Y-m', $month)?->startOfMonth();
     }
 
     /**
-     * Label pt-BR curto de um mês "YYYY-MM" (ex.: "mai/26").
+     * Human label for a "YYYY-MM" month.
      */
     public static function monthLabel(string $month): string
     {
-        return Carbon::createFromFormat('Y-m', $month)->translatedFormat('M/y');
+        return Carbon::createFromFormat('Y-m', $month)?->translatedFormat('M/Y') ?? $month;
     }
 }

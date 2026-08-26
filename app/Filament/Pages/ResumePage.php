@@ -31,7 +31,7 @@ class ResumePage extends Page
     public function mount(): void
     {
         $this->form->fill([
-            'content' => ResumeService::plainText(app(ResumeService::class)->content()),
+            'content' => ResumeService::plainText(app(ResumeService::class)->content(auth()->user())),
         ]);
     }
 
@@ -53,8 +53,7 @@ class ResumePage extends Page
     {
         $data = $this->form->getState();
 
-        app(ResumeService::class)->save($data['content']);
-
+        app(ResumeService::class)->save(auth()->user(), $data['content']);
         Notification::make()
             ->success()
             ->title('Currículo salvo')
@@ -64,6 +63,6 @@ class ResumePage extends Page
 
     public function lastUpdatedAt(): ?string
     {
-        return app(ResumeService::class)->current()?->updated_at?->format('d/m/Y H:i');
+        return app(ResumeService::class)->current(auth()->user())?->updated_at?->format('d/m/Y H:i');
     }
 }

@@ -5,15 +5,13 @@ namespace App\Support;
 use App\Models\JobCapture;
 use App\Models\JobPosting;
 use App\Models\ProfessionalCompetency;
-use App\Models\Resume;
 use App\Models\ResumeAdaptation;
 use App\Models\ScreeningPreference;
 use Illuminate\Support\Facades\DB;
 
 /**
  * Checks if derived AI results are stale relative to their inputs.
- * Uses updated_at timestamps for the single-user MVP — simple and robust,
- * no extra version column needed.
+ * Uses updated_at timestamps — simple and robust, no extra version column needed.
  */
 final class Staleness
 {
@@ -23,8 +21,9 @@ final class Staleness
      */
     public static function isAdaptationStale(ResumeAdaptation $adaptation): bool
     {
-        $resume = Resume::query()->first();
+        $resume = $adaptation->jobPosting?->user?->resume()->first();
 
+        // Fallback: if adaptation has no posting/user, fallback to null check
         if ($resume !== null && $adaptation->updated_at->lt($resume->updated_at)) {
             return true;
         }
@@ -44,15 +43,18 @@ final class Staleness
      */
     public static function isCompetencyStale(ProfessionalCompetency $competency): bool
     {
-        $resume = Resume::query()->first();
+        $resume = $competency->user?->resume()->first();
 
         if ($resume !== null && $competency->updated_at->lt($resume->updated_at)) {
             return true;
         }
 
+        $userId = $competency->user_id;
+
         $latestMarket = DB::table('job_posting_items')
             ->join('job_postings', 'job_postings.id', '=', 'job_posting_items.job_posting_id')
             ->where('job_postings.status', 'confirmed')
+            ->where('job_postings.user_id', $userId)
             ->max('job_posting_items.updated_at');
 
         if ($latestMarket !== null && $competency->updated_at->lt($latestMarket)) {
@@ -60,7 +62,7 @@ final class Staleness
         }
 
         // Also check if a new confirmed posting appeared after classification
-        $latestPosting = JobPosting::where('status', 'confirmed')->max('updated_at');
+        $latestPosting = JobPosting::where('status', 'confirmed')->where('user_id', $userId)->max('updated_at');
 
         if ($latestPosting !== null && $competency->updated_at->lt($latestPosting)) {
             return true;
@@ -79,7 +81,7 @@ final class Staleness
             return false;
         }
 
-        $pref = $preference ?? ScreeningPreference::query()->first();
+        $pref = $preference ?? $capture->user?->screeningPreference;
 
         if ($pref === null) {
             return false;

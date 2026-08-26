@@ -158,7 +158,7 @@ class JobCapturesTable
                         ->requiresConfirmation()
                         ->modalDescription('As capturas selecionadas viram vagas e entram na análise completa. Custo de 1 chamada de IA por vaga.')
                         ->action(function (BulkAction $action, Collection $records): void {
-                            $promoted = app(JobPromotionService::class)->promoteEligible($records, (int) auth()->id());
+                            $promoted = app(JobPromotionService::class)->promoteEligible(auth()->user(), $records);
 
                             if ($promoted === 0) {
                                 Notification::make()
@@ -175,7 +175,7 @@ class JobCapturesTable
                                 ->body($promoted.' vaga(s) criada(s) — análise de IA em andamento.')
                                 ->send();
                         }),
-                    DeleteBulkAction::make(),
+                    DeleteBulkAction::make()->authorizeIndividualRecords(),
                 ]),
             ])
             ->defaultSort('captured_at', 'desc');

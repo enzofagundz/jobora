@@ -6,8 +6,10 @@ use App\Agents\JobExtractionAgent;
 use App\DTO\JobAnalysisResult;
 use App\Enums\JobPostingStatus;
 use App\Models\JobPosting;
+use App\Models\User;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\RequestException;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Laravel\Ai\Exceptions\AiException;
 use Throwable;
@@ -31,8 +33,14 @@ class JobAnalysisService
      * vaga em pending — não são falha da análise.
      * Confirmed postings are never re-analyzed.
      */
-    public function analyze(JobPosting $posting): JobPosting
+    public function analyze(User $user, JobPosting $posting): JobPosting
     {
+        Gate::forUser($user)->authorize('update', $posting);
+
+        if ($posting->user_id !== $user->id) {
+            throw new \LogicException('Vaga não pertence ao usuário.');
+        }
+
         if ($posting->status === JobPostingStatus::Confirmed) {
             throw new \LogicException('Vaga confirmada não pode ser re-analisada.');
         }
@@ -116,15 +124,16 @@ class JobAnalysisService
 
     private function assertDescriptionWithinLimits(string $description): void
     {
-        $length = mb_strlen($description);
+        if (mb_strlen($description) < self::MIN_DESCRIPTION_LENGTH) {
+            throw new \InvalidArgumentException(
+                'A descrição da vaga deve ter entre '.self::MIN_DESCRIPTION_LENGTH.' e '.self::MAX_DESCRIPTION_LENGTH.' caracteres.'
+            );
+        }
 
-        if ($length < self::MIN_DESCRIPTION_LENGTH || $length > self::MAX_DESCRIPTION_LENGTH) {
-            throw new \InvalidArgumentException(sprintf(
-                'A descrição deve ter entre %d e %d caracteres (atual: %d).',
-                self::MIN_DESCRIPTION_LENGTH,
-                self::MAX_DESCRIPTION_LENGTH,
-                $length,
-            ));
+        if (mb_strlen($description) > self::MAX_DESCRIPTION_LENGTH) {
+            throw new \InvalidArgumentException(
+                'A descrição da vaga deve ter entre '.self::MIN_DESCRIPTION_LENGTH.' e '.self::MAX_DESCRIPTION_LENGTH.' caracteres.'
+            );
         }
     }
 
@@ -133,20 +142,10 @@ class JobAnalysisService
      */
     private function log(string $level, string $message, JobPosting $posting, float $started, array $context = []): void
     {
-        $usage = $context['usage'] ?? null;
-        unset($context['usage']);
-
-        $usageData = $this->extractUsageData($usage);
-
-        Log::channel('ai')->{$level}($message, array_merge([
+        Log::channel('ai')->$level($message, array_merge([
             'job_posting_id' => $posting->id,
-            'operation' => $context['operation'] ?? 'job_extraction',
-            'provider' => $context['provider'] ?? $this->agent->provider(),
-            'model' => $this->agent->model(),
-            'input_chars' => $context['input_chars'] ?? 0,
-            'success' => $level === 'info',
             'latency_ms' => (int) round((microtime(true) - $started) * 1000),
-        ], $usageData, $context));
+        ], $context));
     }
 
     /**

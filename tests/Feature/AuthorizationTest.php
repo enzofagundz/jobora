@@ -49,7 +49,7 @@ class DenyingJobPostingPolicy
 }
 
 it('permite com a policy single-user (fronteira explícita)', function () {
-    $posting = JobPosting::factory()->confirmed()->create([
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create([
         'description' => 'Vaga para desenvolvedor Python com React.',
     ]);
 
@@ -63,7 +63,7 @@ it('permite com a policy single-user (fronteira explícita)', function () {
 it('nega acesso quando a policy nega (prova do wiring de autorização)', function () {
     Gate::policy(JobPosting::class, DenyingJobPostingPolicy::class);
 
-    $posting = JobPosting::factory()->confirmed()->create([
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create([
         'description' => 'Vaga para desenvolvedor Python com React.',
     ]);
     ResumeAdaptation::create([
@@ -129,7 +129,7 @@ class DenyingJobCapturePolicy
 }
 
 it('permite com a policy single-user do JobCapture (fronteira explícita)', function () {
-    $capture = JobCapture::factory()->create();
+    $capture = JobCapture::factory()->for(auth()->user(), 'user')->create();
 
     expect(JobCaptureResource::canViewAny())->toBeTrue()
         ->and(JobCaptureResource::canCreate())->toBeTrue()
@@ -143,7 +143,7 @@ it('permite com a policy single-user do JobCapture (fronteira explícita)', func
 it('nega acesso ao JobCapture quando a policy nega (prova do wiring)', function () {
     Gate::policy(JobCapture::class, DenyingJobCapturePolicy::class);
 
-    $capture = JobCapture::factory()->create();
+    $capture = JobCapture::factory()->for(auth()->user(), 'user')->create();
 
     expect(JobCaptureResource::canViewAny())->toBeFalse()
         ->and(JobCaptureResource::canCreate())->toBeFalse()

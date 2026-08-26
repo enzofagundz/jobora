@@ -18,7 +18,7 @@ class ComparisonSummaryWidget extends TableWidget
     {
         return $table
             ->heading('Principais lacunas')
-            ->records(fn (): array => app(MarketComparisonService::class)->gaps(10))
+            ->records(fn (): array => app(MarketComparisonService::class)->gaps(auth()->user(), 10))
             ->columns([
                 TextColumn::make('name')
                     ->label('Item')

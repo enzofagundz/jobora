@@ -16,9 +16,10 @@ beforeEach(function (): void {
     $this->actingAs(User::factory()->create());
 });
 
-function postingAt(Carbon $date, array $items): JobPosting
+function postingAt(Carbon $date, array $items, ?User $owner = null): JobPosting
 {
-    $posting = JobPosting::factory()->confirmed()->create(['collected_at' => $date]);
+    $user = $owner ?? auth()->user() ?? User::factory()->create();
+    $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create(['collected_at' => $date]);
 
     foreach ($items as $name) {
         $posting->items()->create(['category' => 'skill', 'name' => $name, 'source' => 'ai']);
@@ -28,12 +29,13 @@ function postingAt(Carbon $date, array $items): JobPosting
 }
 
 it('agrupa frequências por mês de coleta', function () {
-    postingAt(Carbon::create(2026, 5, 10), ['Python']);
-    postingAt(Carbon::create(2026, 5, 20), ['Python']);
-    postingAt(Carbon::create(2026, 6, 5), ['Python']);
-    postingAt(Carbon::create(2026, 6, 8), ['React']);
+    $user = auth()->user();
+    postingAt(Carbon::create(2026, 5, 10), ['Python'], $user);
+    postingAt(Carbon::create(2026, 5, 20), ['Python'], $user);
+    postingAt(Carbon::create(2026, 6, 5), ['Python'], $user);
+    postingAt(Carbon::create(2026, 6, 8), ['React'], $user);
 
-    $series = app(MarketAnalysisService::class)->monthlySeries();
+    $series = app(MarketAnalysisService::class)->monthlySeries($user);
 
     expect($series)->toBe([
         ['month' => '2026-05', 'name' => 'Python', 'total' => 2],
@@ -43,18 +45,20 @@ it('agrupa frequências por mês de coleta', function () {
 });
 
 it('lista meses distintos com vagas confirmadas', function () {
-    postingAt(Carbon::create(2026, 5, 10), ['Python']);
-    postingAt(Carbon::create(2026, 7, 2), ['Python']);
+    $user = auth()->user();
+    postingAt(Carbon::create(2026, 5, 10), ['Python'], $user);
+    postingAt(Carbon::create(2026, 7, 2), ['Python'], $user);
 
-    expect(app(MarketAnalysisService::class)->months())->toBe(['2026-05', '2026-07']);
+    expect(app(MarketAnalysisService::class)->months($user))->toBe(['2026-05', '2026-07']);
 });
 
 it('filtra série mensal por categoria', function () {
-    $posting = JobPosting::factory()->confirmed()->create(['collected_at' => Carbon::create(2026, 5, 10)]);
+    $user = auth()->user();
+    $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create(['collected_at' => Carbon::create(2026, 5, 10)]);
     $posting->items()->create(['category' => 'skill', 'name' => 'Python', 'source' => 'ai']);
     $posting->items()->create(['category' => 'tool', 'name' => 'React', 'source' => 'ai']);
 
-    $series = app(MarketAnalysisService::class)->monthlySeries(ConceptCategory::Skill);
+    $series = app(MarketAnalysisService::class)->monthlySeries($user, ConceptCategory::Skill);
 
     expect($series)->toHaveCount(1)
         ->and($series[0]['name'])->toBe('Python');

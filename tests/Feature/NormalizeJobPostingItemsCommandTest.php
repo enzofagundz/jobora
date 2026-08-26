@@ -4,13 +4,14 @@ use App\Enums\ItemSource;
 use App\Models\JobPosting;
 use App\Models\JobPostingItem;
 use App\Models\ResumeAdaptation;
+use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
 function confirmedPostingWithItems(array $items): JobPosting
 {
-    $posting = JobPosting::factory()->confirmed()->create();
+    $posting = JobPosting::factory()->for(User::factory()->create(), 'user')->confirmed()->create();
 
     foreach ($items as $item) {
         $posting->items()->create([

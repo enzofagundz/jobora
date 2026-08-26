@@ -37,21 +37,16 @@ class StrategicCompetencyService
 
     /**
      * Run the AI classification for the user's profile and persist valid
-     * results. Requires a non-empty resume; returns the number of AI
-     * classifications persisted (0 when there are no candidates).
-     *
-     * @throws LogicException when no resume is saved
-     * @throws RuntimeException on any failure (nothing is persisted)
      */
     public function classify(User $user): int
     {
-        $resume = $this->resumeService->content();
+        $resume = $this->resumeService->content($user);
 
         if (blank($resume)) {
             throw new LogicException('Cadastre o currículo antes de classificar as competências.');
         }
 
-        $payload = $this->buildPayload($resume);
+        $payload = $this->buildPayload($user, $resume);
 
         if ($payload['candidate_concepts'] === []) {
             return 0;
@@ -153,7 +148,7 @@ class StrategicCompetencyService
             return [];
         }
 
-        $content = $this->resumeService->content();
+        $content = $this->resumeService->content($user);
 
         return $user->professionalCompetencies()
             ->orderBy('concept')
@@ -208,7 +203,7 @@ class StrategicCompetencyService
      *
      * @return array<string, mixed>
      */
-    private function buildPayload(string $resume): array
+    private function buildPayload(User $user, string $resume): array
     {
         $plainResume = ResumeService::plainText($resume);
         $resumeConcepts = $this->resumeAnalyzer->conceptsIn($plainResume);
@@ -220,7 +215,7 @@ class StrategicCompetencyService
                 'total' => $row['total'],
                 'present_in_resume' => $this->resumeAnalyzer->contains($plainResume, $row['name']),
             ];
-        }, $this->marketAnalysis->frequencies());
+        }, $this->marketAnalysis->frequencies($user));
 
         $candidates = [];
 

@@ -7,21 +7,11 @@ use App\DTO\ResumeAdaptationResult;
 use App\Enums\JobPostingStatus;
 use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
+use App\Models\User;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
-/**
- * Orquestra a adequação de currículo para uma vaga (F6):
- * coleta → agent → validação estrutural + integridade → UPSERT por vaga.
- *
- * Regras de integridade (TP §8):
- * - todo conceito canônico do currículo adaptado deve existir no currículo
- *   original (conceito novo ⇒ rejeição);
- * - covered_keywords que mapeiam para conceitos canônicos devem estar no
- *   currículo original;
- * - missing_requirements que mapeiam para conceitos canônicos não podem
- *   estar no currículo original (não-contradição).
- */
 class ResumeAdaptationService
 {
     public function __construct(
@@ -31,22 +21,22 @@ class ResumeAdaptationService
         private readonly ResumeService $resumeService,
     ) {}
 
-    /**
-     * Generate (or regenerate) the adapted resume for a posting.
-     * The last version is replaced per posting; the original resume is never touched.
-     *
-     * @throws \RuntimeException on any failure (nothing is persisted).
-     */
-    public function adapt(JobPosting $posting): ResumeAdaptation
+    public function adapt(User $user, JobPosting $posting): ResumeAdaptation
     {
-        $this->assertEligible($posting);
+        Gate::forUser($user)->authorize('update', $posting);
+
+        if ($posting->user_id !== $user->id) {
+            throw new \LogicException('Vaga não pertence ao usuário.');
+        }
+
+        $this->assertEligible($user, $posting);
 
         $started = microtime(true);
         $inputChars = 0;
         $usage = null;
 
         try {
-            $payload = $this->buildPayload($posting);
+            $payload = $this->buildPayload($user, $posting);
             $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             $inputChars = mb_strlen($jsonPayload);
 
@@ -61,7 +51,7 @@ class ResumeAdaptationService
 
             $result = ResumeAdaptationResult::fromStructured($data);
 
-            $this->assertIntegrity($result, $posting);
+            $this->assertIntegrity($user, $result, $posting);
 
             $adaptation = ResumeAdaptation::updateOrCreate(
                 ['job_posting_id' => $posting->id],
@@ -101,27 +91,20 @@ class ResumeAdaptationService
         }
     }
 
-    private function assertEligible(JobPosting $posting): void
+    private function assertEligible(User $user, JobPosting $posting): void
     {
         if ($posting->status !== JobPostingStatus::Confirmed) {
             throw new \LogicException('A adequação exige uma vaga confirmada.');
         }
 
-        if (blank($this->resumeService->content())) {
+        if (blank($this->resumeService->content($user))) {
             throw new \LogicException('Cadastre o currículo antes de adequá-lo a uma vaga.');
         }
     }
 
-    /**
-     * Context sent to the agent: resume + description + positioning.
-     * Deduplicated: positioning already carries category/name + presence flag,
-     * so the redundant job_items list and the derived resume_concepts are omitted.
-     *
-     * @return array<string, mixed>
-     */
-    private function buildPayload(JobPosting $posting): array
+    private function buildPayload(User $user, JobPosting $posting): array
     {
-        $resume = ResumeService::plainText($this->resumeService->content());
+        $resume = ResumeService::plainText($this->resumeService->content($user));
         $description = ResumeService::plainText($posting->description);
 
         $positioning = $posting->items
@@ -142,17 +125,9 @@ class ResumeAdaptationService
         ];
     }
 
-    /**
-     * Validação de integridade (TP §8). As regras duras só mordem conceitos
-     * que mapeiam para nomes canônicos; frases de forma livre (ex.: "Conhecimento
-     * em Docker") são cobertas pelas instruções, pelos alertas e pela revisão
-     * humana antes da exportação.
-     *
-     * @throws \InvalidArgumentException
-     */
-    private function assertIntegrity(ResumeAdaptationResult $result, JobPosting $posting): void
+    private function assertIntegrity(User $user, ResumeAdaptationResult $result, JobPosting $posting): void
     {
-        $resume = $this->resumeService->content();
+        $resume = $this->resumeService->content($user);
         $originalConcepts = $this->resumeAnalyzer->conceptsIn($resume);
         $adaptedConcepts = $this->resumeAnalyzer->conceptsIn($result->adaptedResume);
 
@@ -196,9 +171,6 @@ class ResumeAdaptationService
         }
     }
 
-    /**
-     * @return array<string, int>
-     */
     private function extractUsageData(mixed $usage): array
     {
         try {
