@@ -43,7 +43,7 @@ return [
             // Must exceed the longest AI agent timeout (120s) plus headroom to avoid
             // releasing a job while the worker is still processing it.
             'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 180),
-            'after_commit' => false,
+            'after_commit' => (bool) env('DB_QUEUE_AFTER_COMMIT', true),
         ],
 
         'beanstalkd' => [
