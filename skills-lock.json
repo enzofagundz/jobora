@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "skills": {
+    "code-review": {
+      "source": "leandrocfe/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/code-review/SKILL.md",
+      "computedHash": "4f40f46555032a96846e905f0a5e5c61c0f5d7f4b2791215667241cf54f3027b"
+    },
+    "diagnosing-bugs": {
+      "source": "leandrocfe/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/diagnosing-bugs/SKILL.md",
+      "computedHash": "b1be7d86e4e055744c1678abf820d1b1c5fdb3f4ec55ead7af594590f3a1952c"
+    },
+    "domain-modeling": {
+      "source": "leandrocfe/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/domain-modeling/SKILL.md",
+      "computedHash": "d3b23fab0ce0a94bff3d332678c58c1aa30ea045855101c87997aa0a03da0f52"
+    },
+    "grill-with-docs": {
+      "source": "leandrocfe/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/grill-with-docs/SKILL.md",
+      "computedHash": "73a95f0389fac0ff6ce8f72e771da3524db591d0c0542140834c6474b0ba0686"
+    },
+    "improve-codebase-architecture": {
+      "source": "leandrocfe/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/improve-codebase-architecture/SKILL.md",
+      "computedHash": "4454b4e292a5a0acf4ee45dce1ff7f64367c1e0b7923dcc23b262b97332bc8ae"
+    },
+    "tdd": {
+      "source": "leandrocfe/skills",
+      "sourceType": "github",
+      "skillPath": "skills/engineering/tdd/SKILL.md",
+      "computedHash": "6bf5d8a75189850b35ef628c24ea4b5a9144a29d93d7f326473d0579a35d0eea"
+    }
+  }
+}
