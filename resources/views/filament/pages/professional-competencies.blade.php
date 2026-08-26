@@ -11,7 +11,7 @@
 
         {{ $this->table }}
 
-        @if (blank(app(\App\Services\ResumeService::class)->content()))
+        @if (blank(app(\App\Services\ResumeService::class)->content(auth()->user())))
             <p class="mt-4 text-sm text-warning-600 dark:text-warning-400">
                 Nenhum currículo cadastrado — a classificação com IA exige o currículo para montar os candidatos.
             </p>
