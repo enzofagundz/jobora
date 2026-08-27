@@ -8,6 +8,9 @@ use App\Enums\JobPostingStatus;
 use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
 use App\Models\User;
+use App\Support\Ai\AiRequestGate;
+use App\Support\Ai\AiUsageHelper;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -19,6 +22,7 @@ class ResumeAdaptationService
         private readonly ConceptNormalizer $normalizer,
         private readonly ResumeAnalyzer $resumeAnalyzer,
         private readonly ResumeService $resumeService,
+        private readonly ?AiRequestGate $gate = null,
     ) {}
 
     public function adapt(User $user, JobPosting $posting): ResumeAdaptation
@@ -35,12 +39,30 @@ class ResumeAdaptationService
         $inputChars = 0;
         $usage = null;
 
+        $store = config('cache.lock_store', config('cache.default', 'file'));
+        $stores = config('cache.stores', []);
+
+        if (! isset($stores[$store])) {
+            $store = 'file';
+        }
+
+        $opLock = Cache::store($store)->lock("adapt:posting:{$posting->id}", 130);
+
+        if (! $opLock->get()) {
+            throw new \RuntimeException('Adequação já em andamento para esta vaga. Aguarde a conclusão.');
+        }
+
         try {
             $payload = $this->buildPayload($user, $posting);
             $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             $inputChars = mb_strlen($jsonPayload);
 
-            $response = $this->agent->prompt($jsonPayload);
+            $gate = $this->gate ?? new AiRequestGate;
+            $response = $gate->run(
+                $this->agent->provider(),
+                $this->agent->model(),
+                fn () => $this->agent->prompt($jsonPayload)
+            );
             $usage = $response->usage ?? null;
 
             $data = json_decode($response->text, true);
@@ -72,7 +94,7 @@ class ResumeAdaptationService
                 'input_chars' => $inputChars,
                 'success' => true,
                 'latency_ms' => (int) round((microtime(true) - $started) * 1000),
-            ], $this->extractUsageData($usage)));
+            ], AiUsageHelper::extract($usage)));
 
             return $adaptation;
         } catch (Throwable $e) {
@@ -85,9 +107,14 @@ class ResumeAdaptationService
                 'success' => false,
                 'latency_ms' => (int) round((microtime(true) - $started) * 1000),
                 'error' => $e->getMessage(),
-            ], $this->extractUsageData($usage)));
+            ], AiUsageHelper::extract($usage)));
 
             throw new \RuntimeException('Falha na adequação do currículo: '.$e->getMessage(), 0, $e);
+        } finally {
+            try {
+                $opLock->release();
+            } catch (Throwable) {
+            }
         }
     }
 
@@ -168,37 +195,6 @@ class ResumeAdaptationService
                     $requirement,
                 ));
             }
-        }
-    }
-
-    private function extractUsageData(mixed $usage): array
-    {
-        try {
-            if ($usage === null) {
-                return [
-                    'prompt_tokens' => 0,
-                    'completion_tokens' => 0,
-                    'cache_write_input_tokens' => 0,
-                    'cache_read_input_tokens' => 0,
-                    'reasoning_tokens' => 0,
-                ];
-            }
-
-            return [
-                'prompt_tokens' => (int) ($usage->promptTokens ?? $usage->prompt_tokens ?? 0),
-                'completion_tokens' => (int) ($usage->completionTokens ?? $usage->completion_tokens ?? 0),
-                'cache_write_input_tokens' => (int) ($usage->cacheWriteInputTokens ?? $usage->cache_write_input_tokens ?? 0),
-                'cache_read_input_tokens' => (int) ($usage->cacheReadInputTokens ?? $usage->cache_read_input_tokens ?? 0),
-                'reasoning_tokens' => (int) ($usage->reasoningTokens ?? $usage->reasoning_tokens ?? 0),
-            ];
-        } catch (Throwable) {
-            return [
-                'prompt_tokens' => 0,
-                'completion_tokens' => 0,
-                'cache_write_input_tokens' => 0,
-                'cache_read_input_tokens' => 0,
-                'reasoning_tokens' => 0,
-            ];
         }
     }
 }

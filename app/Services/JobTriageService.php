@@ -8,7 +8,11 @@ use App\Enums\JobCaptureTriageStatus;
 use App\Jobs\TriageJobCaptures;
 use App\Models\JobCapture;
 use App\Models\User;
+use App\Support\Ai\AiRequestGate;
+use App\Support\Ai\AiUsageHelper;
+use App\Support\Ai\TransientAiClassifier;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 use Throwable;
@@ -26,7 +30,10 @@ final class JobTriageService
 {
     public const MAX_BATCH_SIZE = 50;
 
-    public function __construct(private readonly JobTriageAgent $agent) {}
+    public function __construct(
+        private readonly JobTriageAgent $agent,
+        private readonly ?AiRequestGate $gate = null,
+    ) {}
 
     /**
      * Inicia a triagem em lote das capturas elegíveis da seleção: marca
@@ -53,16 +60,48 @@ final class JobTriageService
             return $eligible;
         }
 
-        $ids = $eligible->pluck('id')->all();
+        $store = config('cache.lock_store', config('cache.default', 'file'));
+        $stores = config('cache.stores', []);
 
-        $user->jobCaptures()->whereIn('id', $ids)->update([
-            'triage_status' => JobCaptureTriageStatus::Processing,
-            'triage_error' => null,
-        ]);
+        if (! isset($stores[$store])) {
+            $store = 'file';
+        }
 
-        TriageJobCaptures::dispatch($ids, (int) $user->id);
+        $lock = Cache::store($store)->lock("triage:start:{$user->id}", 10);
 
-        return $eligible;
+        if (! $lock->get()) {
+            throw new \RuntimeException('Triagem em andamento para este usuário. Tente novamente em instantes.');
+        }
+
+        try {
+            // Re-validate inside lock and claim only still-eligible rows
+            $ids = $eligible->pluck('id')->all();
+
+            $claimed = $user->jobCaptures()
+                ->whereIn('id', $ids)
+                ->whereNull('job_posting_id')
+                ->whereIn('triage_status', [JobCaptureTriageStatus::Pending, JobCaptureTriageStatus::Failed])
+                ->pluck('id')
+                ->all();
+
+            if ($claimed === []) {
+                return collect();
+            }
+
+            $user->jobCaptures()->whereIn('id', $claimed)->update([
+                'triage_status' => JobCaptureTriageStatus::Processing,
+                'triage_error' => null,
+            ]);
+
+            TriageJobCaptures::dispatch($claimed, (int) $user->id);
+
+            return $eligible->whereIn('id', $claimed)->values();
+        } finally {
+            try {
+                $lock->release();
+            } catch (Throwable) {
+            }
+        }
     }
 
     /**
@@ -76,6 +115,19 @@ final class JobTriageService
         if ($captures->isEmpty()) {
             return;
         }
+
+        // Avoid duplicate AI calls: skip captures already completed (e.g., overlapping batch after first succeeded)
+        $fresh = $user->jobCaptures()
+            ->whereIn('id', $captures->pluck('id')->all())
+            ->where('triage_status', '!=', JobCaptureTriageStatus::Completed)
+            ->pluck('id')
+            ->all();
+
+        if ($fresh === []) {
+            return;
+        }
+
+        $captures = $captures->whereIn('id', $fresh)->values();
 
         $started = microtime(true);
         $ids = $captures->pluck('id')->all();
@@ -100,7 +152,12 @@ final class JobTriageService
             $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             $inputChars = mb_strlen($jsonPayload);
 
-            $response = $this->agent->prompt($jsonPayload);
+            $gate = $this->gate ?? new AiRequestGate;
+            $response = $gate->run(
+                $this->agent->provider(),
+                $this->agent->model(),
+                fn () => $this->agent->prompt($jsonPayload)
+            );
             $usage = $response->usage ?? null;
 
             $data = json_decode($response->text, true);
@@ -157,8 +214,27 @@ final class JobTriageService
                 'input_chars' => $inputChars,
                 'success' => true,
                 'latency_ms' => (int) round((microtime(true) - $started) * 1000),
-            ], $this->extractUsageData($usage)));
+            ], AiUsageHelper::extract($usage)));
         } catch (Throwable $e) {
+            if (TransientAiClassifier::isTransient($e)) {
+                $meta = TransientAiClassifier::metadata($e);
+
+                Log::channel('ai')->warning('Job captures triage deferred due to transient error.', array_merge([
+                    'job_capture_ids' => $ids,
+                    'operation' => 'job_triage',
+                    'provider' => $this->agent->provider(),
+                    'model' => $this->agent->model(),
+                    'input_chars' => $inputChars,
+                    'success' => false,
+                    'latency_ms' => (int) round((microtime(true) - $started) * 1000),
+                    'error' => $e->getMessage(),
+                    'retry_after' => $meta['retry_after'],
+                    'status' => $meta['status'],
+                ], AiUsageHelper::extract($usage)));
+
+                throw $e;
+            }
+
             foreach ($captures as $capture) {
                 $capture->update([
                     'triage_status' => JobCaptureTriageStatus::Failed,
@@ -177,41 +253,7 @@ final class JobTriageService
                 'success' => false,
                 'latency_ms' => (int) round((microtime(true) - $started) * 1000),
                 'error' => $e->getMessage(),
-            ], $this->extractUsageData($usage)));
-        }
-    }
-
-    /**
-     * @return array<string, int>
-     */
-    private function extractUsageData(mixed $usage): array
-    {
-        try {
-            if ($usage === null) {
-                return [
-                    'prompt_tokens' => 0,
-                    'completion_tokens' => 0,
-                    'cache_write_input_tokens' => 0,
-                    'cache_read_input_tokens' => 0,
-                    'reasoning_tokens' => 0,
-                ];
-            }
-
-            return [
-                'prompt_tokens' => (int) ($usage->promptTokens ?? $usage->prompt_tokens ?? 0),
-                'completion_tokens' => (int) ($usage->completionTokens ?? $usage->completion_tokens ?? 0),
-                'cache_write_input_tokens' => (int) ($usage->cacheWriteInputTokens ?? $usage->cache_write_input_tokens ?? 0),
-                'cache_read_input_tokens' => (int) ($usage->cacheReadInputTokens ?? $usage->cache_read_input_tokens ?? 0),
-                'reasoning_tokens' => (int) ($usage->reasoningTokens ?? $usage->reasoning_tokens ?? 0),
-            ];
-        } catch (Throwable) {
-            return [
-                'prompt_tokens' => 0,
-                'completion_tokens' => 0,
-                'cache_write_input_tokens' => 0,
-                'cache_read_input_tokens' => 0,
-                'reasoning_tokens' => 0,
-            ];
+            ], AiUsageHelper::extract($usage)));
         }
     }
 }

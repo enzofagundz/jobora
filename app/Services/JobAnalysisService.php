@@ -7,11 +7,11 @@ use App\DTO\JobAnalysisResult;
 use App\Enums\JobPostingStatus;
 use App\Models\JobPosting;
 use App\Models\User;
-use Illuminate\Http\Client\ConnectionException;
-use Illuminate\Http\Client\RequestException;
+use App\Support\Ai\AiRequestGate;
+use App\Support\Ai\AiUsageHelper;
+use App\Support\Ai\TransientAiClassifier;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
-use Laravel\Ai\Exceptions\AiException;
 use Throwable;
 
 class JobAnalysisService
@@ -23,6 +23,7 @@ class JobAnalysisService
     public function __construct(
         private readonly JobExtractionAgent $agent,
         private readonly ConceptNormalizer $normalizer,
+        private readonly ?AiRequestGate $gate = null,
     ) {}
 
     /**
@@ -54,7 +55,12 @@ class JobAnalysisService
             $inputChars = mb_strlen($plainDescription);
             $this->assertDescriptionWithinLimits($plainDescription);
 
-            $response = $this->agent->prompt($plainDescription);
+            $gate = $this->gate ?? new AiRequestGate;
+            $response = $gate->run(
+                $this->agent->provider(),
+                $this->agent->model(),
+                fn () => $this->agent->prompt($plainDescription)
+            );
             $usage = $response->usage ?? null;
 
             $data = json_decode($response->text, true);
@@ -77,22 +83,28 @@ class JobAnalysisService
                 'item_count' => count($result->items, COUNT_RECURSIVE) - count($result->items),
                 'operation' => 'job_extraction',
                 'provider' => $this->agent->provider(),
+                'model' => $this->agent->model(),
                 'input_chars' => $inputChars,
                 'usage' => $usage,
-            ]);
+            ] + AiUsageHelper::extract($usage));
 
             return $posting;
         } catch (Throwable $e) {
-            if ($this->isTransientProviderError($e)) {
+            if (TransientAiClassifier::isTransient($e)) {
+                $meta = TransientAiClassifier::metadata($e);
+
                 $this->log('warning', 'Job posting analysis deferred due to a transient provider error.', $posting, $started, [
                     'error' => $e->getMessage(),
                     'operation' => 'job_extraction',
                     'provider' => $this->agent->provider(),
+                    'model' => $this->agent->model(),
                     'input_chars' => $inputChars,
+                    'retry_after' => $meta['retry_after'],
+                    'status' => $meta['status'],
                     'usage' => $usage,
-                ]);
+                ] + AiUsageHelper::extract($usage));
 
-                return $posting;
+                throw $e;
             }
 
             $posting->forceFill([
@@ -105,21 +117,13 @@ class JobAnalysisService
                 'error' => $e->getMessage(),
                 'operation' => 'job_extraction',
                 'provider' => $this->agent->provider(),
+                'model' => $this->agent->model(),
                 'input_chars' => $inputChars,
                 'usage' => $usage,
-            ]);
+            ] + AiUsageHelper::extract($usage));
 
             return $posting;
         }
-    }
-
-    private function isTransientProviderError(Throwable $e): bool
-    {
-        // Erros do provedor de IA: HTTP (401 saldo, 5xx), rede e falhas mapeadas
-        // pelo gateway do laravel/ai (saldo, limite de requisições, sobrecarga).
-        return $e instanceof RequestException
-            || $e instanceof ConnectionException
-            || $e instanceof AiException;
     }
 
     private function assertDescriptionWithinLimits(string $description): void
@@ -146,41 +150,5 @@ class JobAnalysisService
             'job_posting_id' => $posting->id,
             'latency_ms' => (int) round((microtime(true) - $started) * 1000),
         ], $context));
-    }
-
-    /**
-     * Extract normalized usage fields defensively.
-     *
-     * @return array<string, int>
-     */
-    private function extractUsageData(mixed $usage): array
-    {
-        try {
-            if ($usage === null) {
-                return [
-                    'prompt_tokens' => 0,
-                    'completion_tokens' => 0,
-                    'cache_write_input_tokens' => 0,
-                    'cache_read_input_tokens' => 0,
-                    'reasoning_tokens' => 0,
-                ];
-            }
-
-            return [
-                'prompt_tokens' => (int) ($usage->promptTokens ?? $usage->prompt_tokens ?? 0),
-                'completion_tokens' => (int) ($usage->completionTokens ?? $usage->completion_tokens ?? 0),
-                'cache_write_input_tokens' => (int) ($usage->cacheWriteInputTokens ?? $usage->cache_write_input_tokens ?? 0),
-                'cache_read_input_tokens' => (int) ($usage->cacheReadInputTokens ?? $usage->cache_read_input_tokens ?? 0),
-                'reasoning_tokens' => (int) ($usage->reasoningTokens ?? $usage->reasoning_tokens ?? 0),
-            ];
-        } catch (Throwable) {
-            return [
-                'prompt_tokens' => 0,
-                'completion_tokens' => 0,
-                'cache_write_input_tokens' => 0,
-                'cache_read_input_tokens' => 0,
-                'reasoning_tokens' => 0,
-            ];
-        }
     }
 }
