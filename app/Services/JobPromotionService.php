@@ -9,12 +9,14 @@ use App\Jobs\AnalyzeJobPosting;
 use App\Models\JobCapture;
 use App\Models\JobPosting;
 use App\Models\User;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 
 /**
  * Invariante único de promoção de captura → vaga (criação + análise +
- * vínculo), reutilizado pela página de view e pelo bulk action da listagem.
+ * vínculo), reutilizado pelas ações da listagem.
  */
 final class JobPromotionService
 {
@@ -30,18 +32,49 @@ final class JobPromotionService
             throw new \LogicException('Descrição insuficiente para criar vaga (mínimo de '.JobAnalysisService::MIN_DESCRIPTION_LENGTH.' caracteres).');
         }
 
-        $posting = $user->jobPostings()->create([
-            'description' => $capture->description,
-            'source_url' => $capture->url,
-            'collected_at' => $capture->captured_at ?? now(),
-            'status' => JobPostingStatus::Pending,
-        ]);
+        return DB::transaction(function () use ($user, $capture): JobPosting {
+            $fresh = $user->jobCaptures()->whereKey($capture->id)->lockForUpdate()->first();
 
-        AnalyzeJobPosting::dispatch($posting, $user->id);
+            if (! $fresh) {
+                throw new \LogicException('Captura não encontrada.');
+            }
 
-        $capture->update(['job_posting_id' => $posting->id]);
+            if ($fresh->job_posting_id !== null) {
+                $existing = $user->jobPostings()->whereKey($fresh->job_posting_id)->first();
 
-        return $posting;
+                if ($existing) {
+                    return $existing;
+                }
+            }
+
+            try {
+                $posting = $user->jobPostings()->create([
+                    'description' => $fresh->description,
+                    'source_url' => $fresh->url,
+                    'collected_at' => $fresh->captured_at ?? now(),
+                    'status' => JobPostingStatus::Pending,
+                ]);
+
+                $fresh->update(['job_posting_id' => $posting->id]);
+            } catch (UniqueConstraintViolationException $e) {
+                // Race: another transaction promoted this capture
+                $fresh->refresh();
+
+                if ($fresh->job_posting_id !== null) {
+                    $existing = $user->jobPostings()->whereKey($fresh->job_posting_id)->first();
+
+                    if ($existing) {
+                        return $existing;
+                    }
+                }
+
+                throw $e;
+            }
+
+            AnalyzeJobPosting::dispatch($posting, $user->id);
+
+            return $posting;
+        });
     }
 
     /**
