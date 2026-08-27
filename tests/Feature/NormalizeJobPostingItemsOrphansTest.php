@@ -12,6 +12,7 @@ function createOrphanItem(): JobPostingItem
     // Inserção fora da transação do RefreshDatabase via PDO separado,
     // pois PRAGMA foreign_keys não pode ser alterado dentro de transação.
     $pdo = new PDO('sqlite:'.database_path('database.testing.sqlite'));
+    $pdo->exec('PRAGMA busy_timeout = 5000');
     $pdo->exec('PRAGMA foreign_keys = OFF');
     $pdo->exec('DELETE FROM job_posting_items WHERE job_posting_id = 999999');
     $pdo->exec("INSERT INTO job_posting_items (job_posting_id, category, name, created_at, updated_at) VALUES (999999, 'skill', 'laravel', datetime('now'), datetime('now'))");

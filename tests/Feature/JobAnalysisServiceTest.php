@@ -98,7 +98,12 @@ it('keeps the posting pending on a transient provider error', function () {
 
     $posting = postingWithDescription();
 
-    app(JobAnalysisService::class)->analyze($posting->user, $posting);
+    try {
+        app(JobAnalysisService::class)->analyze($posting->user, $posting);
+        expect(false)->toBeTrue('Expected RequestException not thrown');
+    } catch (RequestException $e) {
+        expect($e->getMessage())->not->toBeEmpty();
+    }
 
     $posting->refresh();
 
@@ -112,7 +117,12 @@ it('keeps the posting pending on a provider rate-limit AiException', function ()
 
     $posting = postingWithDescription();
 
-    app(JobAnalysisService::class)->analyze($posting->user, $posting);
+    try {
+        app(JobAnalysisService::class)->analyze($posting->user, $posting);
+        expect(false)->toBeTrue('Expected AiException not thrown');
+    } catch (AiException $e) {
+        expect($e->getMessage())->toContain('Rate limit');
+    }
 
     $posting->refresh();
 
