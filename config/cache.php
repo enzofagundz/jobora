@@ -15,7 +15,7 @@ return [
     |
     */
 
-    'default' => env('CACHE_STORE', 'database'),
+    'default' => env('CACHE_STORE', 'file'),
 
     /*
     |--------------------------------------------------------------------------
@@ -119,6 +119,18 @@ return [
     */
 
     'prefix' => env('CACHE_PREFIX', Str::slug((string) env('APP_NAME', 'laravel')).'-cache-'),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Lock Store
+    |--------------------------------------------------------------------------
+    |
+    | Store used for atomic locks (ShouldBeUnique, AiRequestGate, triage).
+    | Defaults to file to avoid SQLite write contention. Use redis in
+    | multi-host production.
+    |
+    */
+    'lock_store' => env('CACHE_LOCK_STORE', env('CACHE_STORE', 'file')),
 
     /*
     |--------------------------------------------------------------------------
