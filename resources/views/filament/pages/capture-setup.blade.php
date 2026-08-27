@@ -1,5 +1,5 @@
 <x-filament-panels::page>
-    <div class="space-y-4 max-w-2xl">
+    <div class="w-full space-y-4">
 
         <x-filament::section>
             <x-slot:heading>
