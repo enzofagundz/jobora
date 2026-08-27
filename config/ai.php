@@ -135,7 +135,7 @@ return [
         'opencode_zen' => [
             'driver' => 'openai-compatible',
             'key' => env('OPENCODE_ZEN_API_KEY'),
-            'url' => env('OPENCODE_ZEN_BASE_URL', 'https://opencode.ai/zen/v1'),
+            'url' => env('OPENCODE_ZEN_BASE_URL', 'https://opencode.ai/zen/go/v1'),
             'models' => [
                 'text' => [
                     'default' => env('OPENCODE_ZEN_MODEL', 'mimo-v2.5-free'),
