@@ -4,7 +4,6 @@ use App\Enums\JobCaptureTriageResult;
 use App\Enums\JobCaptureTriageStatus;
 use App\Enums\JobPostingStatus;
 use App\Filament\Resources\JobCaptures\Pages\ListJobCaptures;
-use App\Filament\Resources\JobCaptures\Pages\ViewJobCapture;
 use App\Jobs\AnalyzeJobPosting;
 use App\Models\JobCapture;
 use App\Models\JobPosting;
@@ -211,8 +210,8 @@ it('promove a captura a vaga e despacha a análise de IA', function () {
 
     $capture = JobCapture::factory()->for(auth()->user(), 'user')->create(['description' => str_repeat('Vaga PHP sênior com Laravel. ', 5)]);
 
-    Livewire::test(ViewJobCapture::class, ['record' => $capture->id])
-        ->callAction('promote');
+    Livewire::test(ListJobCaptures::class)
+        ->callTableAction('promote', $capture);
 
     $posting = JobPosting::query()->sole();
 
@@ -231,8 +230,8 @@ it('não promove captura com descrição curta demais', function () {
 
     $capture = JobCapture::factory()->for(auth()->user(), 'user')->create(['description' => 'Texto curto.']);
 
-    Livewire::test(ViewJobCapture::class, ['record' => $capture->id])
-        ->callAction('promote');
+    Livewire::test(ListJobCaptures::class)
+        ->callTableAction('promote', $capture);
 
     expect(JobPosting::query()->count())->toBe(0)
         ->and($capture->refresh()->job_posting_id)->toBeNull();
@@ -246,13 +245,13 @@ it('esconde a ação de promoção para captura já promovida', function () {
     $posting = JobPosting::factory()->create();
     $capture = JobCapture::factory()->for(auth()->user(), 'user')->create(['job_posting_id' => $posting->id]);
 
-    Livewire::test(ViewJobCapture::class, ['record' => $capture->id])
-        ->assertActionHidden('promote');
+    Livewire::test(ListJobCaptures::class)
+        ->assertTableActionHidden('promote', $capture);
 
     expect(JobPosting::query()->count())->toBe(1);
 });
 
-it('renderiza a página de view com o conteúdo da captura', function () {
+it('renderiza o modal da ação view com o conteúdo da captura', function () {
     $capture = JobCapture::factory()->for(auth()->user(), 'user')->create([
         'description' => 'Vaga para desenvolvedor PHP com Laravel e PostgreSQL.',
         'company' => 'Acme Ltda',
@@ -262,14 +261,31 @@ it('renderiza a página de view com o conteúdo da captura', function () {
         'triage_reason' => 'Vaga de Laravel; atende às preferências.',
     ]);
 
-    Livewire::test(ViewJobCapture::class, ['record' => $capture->id])
-        ->assertSuccessful()
-        ->assertSee('Vaga para desenvolvedor PHP com Laravel e PostgreSQL.')
-        ->assertSee('Acme Ltda')
-        ->assertSee('Remoto')
-        ->assertSee('Triagem concluída')
-        ->assertSee('Relevante')
-        ->assertSee('Vaga de Laravel; atende às preferências.');
+    $modalHtml = Livewire::test(ListJobCaptures::class)
+        ->mountTableAction('view', $capture)
+        ->assertActionMounted()
+        ->getMountedActionModalHtml();
+
+    expect($modalHtml)
+        ->toContain('Vaga para desenvolvedor PHP com Laravel e PostgreSQL.')
+        ->toContain('Acme Ltda')
+        ->toContain('Remoto')
+        ->toContain('Triagem concluída')
+        ->toContain('Relevante')
+        ->toContain('Vaga de Laravel; atende às preferências.');
+});
+
+it('abre o modal da ação view da tabela com os detalhes da captura', function () {
+    $capture = JobCapture::factory()->for(auth()->user(), 'user')->create();
+
+    $modalHtml = Livewire::test(ListJobCaptures::class)
+        ->mountTableAction('view', $capture)
+        ->assertActionMounted()
+        ->getMountedActionModalHtml();
+
+    expect($modalHtml)
+        ->toContain('Fechar')
+        ->not->toContain('Salvar');
 });
 
 it('exclui captura pela ação da tabela mantendo a vaga promovida', function () {

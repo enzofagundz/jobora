@@ -4,20 +4,24 @@ namespace App\Filament\Resources\JobCaptures\Tables;
 
 use App\Enums\JobCaptureTriageResult;
 use App\Enums\JobCaptureTriageStatus;
+use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Models\JobCapture;
 use App\Services\JobPromotionService;
 use App\Services\JobTriageService;
+use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\ViewAction;
 use Filament\Notifications\Notification;
+use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Support\Collection;
 use InvalidArgumentException;
+use LogicException;
 
 class JobCapturesTable
 {
@@ -110,7 +114,34 @@ class JobCapturesTable
             ])
             ->recordActions([
                 ViewAction::make()
-                    ->label('Ver'),
+                    ->label('Ver')
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel('Fechar')
+                    ->modalHeading('Visualizar captura'),
+                Action::make('promote')
+                    ->label('Criar vaga')
+                    ->icon(Heroicon::OutlinedPlusCircle)
+                    ->authorize('promote')
+                    ->visible(fn (JobCapture $record): bool => $record->job_posting_id === null)
+                    ->action(function (Action $action, JobCapture $record): void {
+                        try {
+                            $posting = app(JobPromotionService::class)->promote(auth()->user(), $record);
+                        } catch (LogicException $e) {
+                            Notification::make()
+                                ->danger()
+                                ->title($e->getMessage())
+                                ->send();
+
+                            return;
+                        }
+
+                        Notification::make()
+                            ->success()
+                            ->title('Vaga criada — análise de IA em andamento')
+                            ->send();
+
+                        $action->redirect(JobPostingResource::getUrl('view', ['record' => $posting]));
+                    }),
                 DeleteAction::make(),
             ])
             ->toolbarActions([

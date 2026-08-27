@@ -3,7 +3,6 @@
 namespace App\Filament\Resources\JobCaptures;
 
 use App\Filament\Resources\JobCaptures\Pages\ListJobCaptures;
-use App\Filament\Resources\JobCaptures\Pages\ViewJobCapture;
 use App\Filament\Resources\JobCaptures\Tables\JobCapturesTable;
 use App\Models\JobCapture;
 use BackedEnum;
@@ -109,7 +108,6 @@ class JobCaptureResource extends Resource
     {
         return [
             'index' => ListJobCaptures::route('/'),
-            'view' => ViewJobCapture::route('/{record}'),
         ];
     }
 }
