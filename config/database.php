@@ -39,9 +39,9 @@ return [
             'prefix' => '',
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
             'busy_timeout' => env('DB_SQLITE_BUSY_TIMEOUT', 5000),
-            'journal_mode' => null,
-            'synchronous' => null,
-            'transaction_mode' => 'DEFERRED',
+            'journal_mode' => env('DB_SQLITE_JOURNAL_MODE', 'WAL'),
+            'synchronous' => env('DB_SQLITE_SYNCHRONOUS', 'NORMAL'),
+            'transaction_mode' => env('DB_SQLITE_TRANSACTION_MODE', 'IMMEDIATE'),
         ],
 
         'mysql' => [
