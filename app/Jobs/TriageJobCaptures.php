@@ -7,9 +7,11 @@ use App\Models\JobCapture;
 use App\Models\User;
 use App\Services\JobTriageService;
 use Filament\Notifications\Notification;
+use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueueAfterCommit;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\Cache;
 use Throwable;
 
 class TriageJobCaptures implements ShouldBeUnique, ShouldQueueAfterCommit
@@ -41,6 +43,22 @@ class TriageJobCaptures implements ShouldBeUnique, ShouldQueueAfterCommit
     public function uniqueFor(): int
     {
         return 600;
+    }
+
+    public function uniqueVia(): CacheRepository
+    {
+        $store = config('cache.lock_store', config('cache.default', 'file'));
+        $stores = config('cache.stores', []);
+
+        if (! isset($stores[$store])) {
+            $store = 'file';
+        }
+
+        try {
+            return Cache::store($store);
+        } catch (Throwable) {
+            return Cache::store('file');
+        }
     }
 
     public function handle(JobTriageService $service): void
