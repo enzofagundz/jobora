@@ -2,8 +2,10 @@
 
 namespace App\Filament\Pages;
 
+use App\Enums\AnalysisPeriod;
 use App\Enums\ConceptCategory;
 use App\Services\MarketAnalysisService;
+use Carbon\CarbonImmutable;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Carbon;
@@ -30,7 +32,14 @@ class MarketTrendsPage extends Page
     #[Url]
     public ?string $category = null;
 
-    private ?array $memoizedMonths = null;
+    #[Url]
+    public ?string $period = 'month';
+
+    /** @var array<string, array> */
+    private array $memoizedBuckets = [];
+
+    /** @var array<string, array>|null */
+    private ?array $memoizedRows = null;
 
     /**
      * @return array<string, string>
@@ -43,138 +52,218 @@ class MarketTrendsPage extends Page
     }
 
     /**
-     * Distinct months (YYYY-MM) with confirmed postings in scope.
-     * Memoizado por request: a query roda uma vez mesmo com múltiplas
-     * chamadas (blade, hasEnoughData, monthlyRows, comparison).
+     * @return array<string, string>
+     */
+    public function periodOptions(): array
+    {
+        return AnalysisPeriod::options();
+    }
+
+    public function selectedPeriod(): AnalysisPeriod
+    {
+        return AnalysisPeriod::tryFrom($this->period ?? 'month') ?? AnalysisPeriod::Month;
+    }
+
+    public function selectedPeriodLabel(): string
+    {
+        return $this->selectedPeriod()->getLabel();
+    }
+
+    public function headingLabel(): string
+    {
+        return match ($this->selectedPeriod()) {
+            AnalysisPeriod::Week => 'Evolução semanal das frequências',
+            AnalysisPeriod::Month => 'Evolução mensal das frequências',
+            AnalysisPeriod::Quarter => 'Evolução trimestral das frequências',
+            AnalysisPeriod::Year => 'Evolução anual das frequências',
+        };
+    }
+
+    /**
+     * Buckets para o período/categoria selecionados.
+     *
+     * @return array<int, array{key: string, label: string, start: CarbonImmutable, end: CarbonImmutable, observed_count: int, is_complete: bool}>
+     */
+    public function buckets(): array
+    {
+        $period = $this->selectedPeriod();
+        $category = $this->selectedCategory();
+        $cacheKey = $period->value.'|'.($category?->value ?? '_all');
+
+        if (isset($this->memoizedBuckets[$cacheKey])) {
+            return $this->memoizedBuckets[$cacheKey];
+        }
+
+        return $this->memoizedBuckets[$cacheKey] = app(MarketAnalysisService::class)->periodBuckets(auth()->user(), $period, $category);
+    }
+
+    /**
+     * Compat: meses distintos (YYYY-MM) para callers antigos. Quando período não é mensal, retorna chaves do período atual.
      *
      * @return array<int, string>
      */
     public function months(): array
     {
-        return $this->memoizedMonths ??= app(MarketAnalysisService::class)->months(auth()->user());
+        // Keep BC for TestsChartWidget and existing tests that call months() expecting monthly keys.
+        // For monthly period, return bucket keys. For other periods, still return current period keys (so hasEnoughData remains coherent).
+        // If caller expects only monthly, they will still get correct when period is month (default).
+        return array_map(fn (array $b): string => $b['key'], $this->buckets());
     }
 
-    /**
-     * Fewer than 2 distinct months → insufficient data (PRD).
-     */
     public function hasEnoughData(): bool
     {
-        return count($this->months()) >= 2;
+        return app(MarketAnalysisService::class)->periodHasEnoughData(auth()->user(), $this->selectedPeriod(), $this->selectedCategory());
+    }
+
+    public function isEmpty(): bool
+    {
+        return $this->buckets() === [];
+    }
+
+    public function insufficientMessage(): string
+    {
+        $period = $this->selectedPeriod();
+        $label = match ($period) {
+            AnalysisPeriod::Week => '4 semanas completas distintas (segunda a domingo)',
+            AnalysisPeriod::Month => '2 meses diferentes',
+            AnalysisPeriod::Quarter => '2 trimestres completos distintos',
+            AnalysisPeriod::Year => '2 anos completos distintos',
+        };
+
+        return "Dados insuficientes para análise temporal: são necessárias vagas confirmadas em pelo menos {$label} no escopo selecionado.";
+    }
+
+    public function partialBucketNotice(): ?string
+    {
+        $buckets = $this->buckets();
+        if ($buckets === []) {
+            return null;
+        }
+        $last = end($buckets);
+        if ($last['is_complete'] === false && $last['observed_count'] > 0) {
+            $label = $last['label'];
+
+            return "O período atual ({$label}) está incompleto e não entra na comparação. Os valores são parciais.";
+        }
+
+        return null;
     }
 
     /**
-     * Monthly rows: one per item (top 12 by total in scope), columns = months.
+     * Monthly rows compat + period-aware: one per item (top 12), columns = buckets.
      *
-     * @return array<int, array{name: string, months: array<string, int>, total: int}>
+     * @return array<int, array{name: string, category: string, months: array<string, int|null>, buckets: array<string, int|null>, total: int}>
      */
     public function monthlyRows(): array
     {
-        $months = $this->months();
-        $series = collect(app(MarketAnalysisService::class)->monthlySeries(auth()->user(), $this->selectedCategory()));
-
-        return $series
-            ->groupBy('name')
-            ->map(function (Collection $rows, string $name) use ($months): array {
-                $byMonth = $rows->pluck('total', 'month');
-
-                return [
-                    'name' => $name,
-                    'months' => collect($months)->mapWithKeys(
-                        fn (string $month): array => [$month => (int) ($byMonth[$month] ?? 0)],
-                    )->all(),
-                    'total' => (int) $rows->sum('total'),
-                ];
-            })
-            ->sortByDesc('total')
-            ->take(12)
-            ->values()
-            ->all();
-    }
-
-    /**
-     * Period comparison: last 3 complete months × the 3 months before.
-     * Delta relativo com threshold ±20% → subiu/desceu/estável.
-     *
-     * @return array<int, array{name: string, previous: int, current: int, delta_abs: int, delta_rel: float|null, trend: string}>
-     */
-    public function comparison(): array
-    {
-        $periods = $this->comparisonPeriods();
-
-        if ($periods === null) {
-            return [];
+        // Use memoization for rows per period+category
+        if ($this->memoizedRows !== null) {
+            return $this->memoizedRows;
         }
 
-        [$periodAFrom, $periodBFrom, $periodBTo] = $periods;
+        $buckets = $this->buckets();
+        if ($buckets === []) {
+            return $this->memoizedRows = [];
+        }
 
-        $analysis = app(MarketAnalysisService::class);
+        $period = $this->selectedPeriod();
         $category = $this->selectedCategory();
         $user = auth()->user();
 
-        $previous = collect($analysis->frequencies($user, $category, $periodAFrom, $periodBFrom))
-            ->pluck('total', 'name');
-        $current = collect($analysis->frequencies($user, $category, $periodBFrom, $periodBTo))
-            ->pluck('total', 'name');
+        $series = collect(app(MarketAnalysisService::class)->periodSeries($user, $period, $category));
 
-        return $current
-            ->map(function (int $currentTotal, string $name) use ($previous): array {
-                $previousTotal = (int) ($previous[$name] ?? 0);
-                $deltaAbs = $currentTotal - $previousTotal;
-                $deltaRel = $previousTotal > 0
-                    ? round($deltaAbs / $previousTotal * 100, 1)
-                    : null;
+        // Build buckets map for quick observed check
+        $bucketKeys = array_map(fn (array $b): string => $b['key'], $buckets);
+        $observedMap = collect($buckets)->pluck('observed_count', 'key')->all();
 
-                return [
-                    'name' => $name,
-                    'previous' => $previousTotal,
-                    'current' => $currentTotal,
-                    'delta_abs' => $deltaAbs,
-                    'delta_rel' => $deltaRel,
-                    'trend' => $this->classify($deltaRel, $deltaAbs),
-                ];
-            })
-            ->sortByDesc(fn (array $row): int => $row['current'])
-            ->values()
-            ->all();
+        // Group by category|name to avoid merging same name across categories
+        $byItem = $series->groupBy(fn (array $row): string => $row['category'].'|'.$row['name']);
+
+        // Compute total per item
+        $items = $byItem->map(function (Collection $rows, string $key) use ($bucketKeys, $observedMap): array {
+            [$cat, $name] = explode('|', $key, 2);
+            $byBucket = $rows->pluck('total', 'bucket');
+
+            $bucketCounts = [];
+            foreach ($bucketKeys as $bk) {
+                if (($observedMap[$bk] ?? 0) === 0) {
+                    // No postings in this bucket at all (gap) -> null/placeholder
+                    $bucketCounts[$bk] = null;
+                } else {
+                    $bucketCounts[$bk] = (int) ($byBucket[$bk] ?? 0);
+                }
+            }
+
+            return [
+                'name' => $name,
+                'category' => $cat,
+                'months' => $bucketCounts, // BC
+                'buckets' => $bucketCounts,
+                'total' => (int) $rows->sum('total'),
+            ];
+        });
+
+        $sorted = $items->sortByDesc('total')->take(12)->values()->all();
+
+        return $this->memoizedRows = $sorted;
     }
 
     /**
-     * Window labels for the comparison (pt-BR, e.g. "mai/26 – jul/26").
+     * Compat alias for new rows handling
      *
+     * @return array<int, array{name: string, category: string, months: array<string, int|null>, buckets: array<string, int|null>, total: int}>
+     */
+    public function periodRows(): array
+    {
+        return $this->monthlyRows();
+    }
+
+    /**
+     * Period comparison: janelas de calendário completas.
+     *
+     * @return array<int, array{name: string, category: string, previous: int, current: int, delta_abs: int, delta_rel: float|null, trend: string}>
+     */
+    public function comparison(): array
+    {
+        $period = $this->selectedPeriod();
+        $category = $this->selectedCategory();
+        $user = auth()->user();
+
+        return app(MarketAnalysisService::class)->periodComparison($user, $period, $category);
+    }
+
+    /**
      * @return array{previous: string, current: string}
      */
     public function comparisonLabels(): array
     {
-        $periods = $this->comparisonPeriods();
+        $period = $this->selectedPeriod();
 
-        if ($periods === null) {
-            return ['previous' => '—', 'current' => '—'];
-        }
-
-        [$periodAFrom, $periodBFrom, $periodBTo] = $periods;
-
-        $fmt = fn (Carbon $date): string => mb_strtolower($date->translatedFormat('M/y'), 'UTF-8');
-
-        return [
-            'previous' => $fmt($periodAFrom).' – '.$fmt($periodBFrom->copy()->subDay()),
-            'current' => $fmt($periodBFrom).' – '.$fmt($periodBTo->copy()->subDay()),
-        ];
+        return app(MarketAnalysisService::class)->periodComparisonLabels($period);
     }
 
     /**
-     * [periodAFrom, periodBFrom, periodBTo): A = 3 meses anteriores,
-     * B = últimos 3 meses completos. Null quando não há mês completo passado.
+     * Keep comparisonPeriods for BC if needed, but now delegates to service windows.
+     * Not used internally anymore.
      *
      * @return array{0: Carbon, 1: Carbon, 2: Carbon}|null
      */
     private function comparisonPeriods(): ?array
     {
-        // Last complete month = month before the current (partial) one.
-        $periodBFrom = now()->startOfMonth()->subMonths(3);
-        $periodBTo = now()->startOfMonth();
-        $periodAFrom = $periodBFrom->copy()->subMonths(3);
+        // Preserve shape for any external caller, but map to period-aware windows
+        $period = $this->selectedPeriod();
+        $labels = $this->comparisonLabels();
+        // Not reconstructing Carbon; return null to signal new path
+        // Keep original month logic for month period to avoid breaking old tests that might inspect this private method via reflection?
+        if ($period === AnalysisPeriod::Month) {
+            $periodBFrom = now()->startOfMonth()->subMonths(3);
+            $periodBTo = now()->startOfMonth();
+            $periodAFrom = $periodBFrom->copy()->subMonths(3);
 
-        return [$periodAFrom, $periodBFrom, $periodBTo];
+            return [$periodAFrom, $periodBFrom, $periodBTo];
+        }
+
+        return null;
     }
 
     private function classify(?float $deltaRel, int $deltaAbs): string
