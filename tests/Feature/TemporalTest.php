@@ -37,10 +37,11 @@ it('agrupa frequências por mês de coleta', function () {
 
     $series = app(MarketAnalysisService::class)->monthlySeries($user);
 
+    // Ordem determinística: mês asc, total desc, nome asc.
     expect($series)->toBe([
         ['month' => '2026-05', 'name' => 'Python', 'total' => 2],
-        ['month' => '2026-06', 'name' => 'React', 'total' => 1],
         ['month' => '2026-06', 'name' => 'Python', 'total' => 1],
+        ['month' => '2026-06', 'name' => 'React', 'total' => 1],
     ]);
 });
 
