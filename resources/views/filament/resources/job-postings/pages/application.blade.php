@@ -143,6 +143,61 @@
                         </div>
                     </div>
                 </x-filament::section>
+
+                @if(\Illuminate\Support\Facades\Gate::allows('useAtsOptimization'))
+                    <x-filament::section divided icon="heroicon-o-cpu-chip" heading="Otimização para triagem IA" description="Bloco invisível para ATS com IA — visível apenas para você.">
+
+                        @if($adaptation->is_ats_optimized && filled($adaptation->ats_prompt))
+                            <div class="space-y-4">
+                                <div class="rounded-lg border border-warning-300 bg-warning-50 p-4 dark:border-warning-500/30 dark:bg-warning-400/10">
+                                    <div class="flex gap-3">
+                                        <x-filament::icon icon="heroicon-o-exclamation-triangle" class="size-5 shrink-0 text-warning-600 dark:text-warning-400" />
+                                        <div>
+                                            <p class="text-sm font-semibold text-warning-800 dark:text-warning-200">Aviso: bloco invisível para ATS</p>
+                                            <p class="mt-1 text-sm text-warning-700 dark:text-warning-300">Este PDF contém um bloco invisível (texto branco 1px ao final) destinado a sistemas de triagem com IA. Alguns ATS podem detectar como manipulação. Use por sua conta.</p>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <p class="mb-2 text-sm font-medium text-gray-700 dark:text-gray-200">Preview do bloco invisível (extraído por ATS, invisível no PDF):</p>
+                                    <div class="rounded-lg border border-gray-200 bg-yellow-50 p-3 dark:border-white/10 dark:bg-yellow-400/10">
+                                        <p class="font-mono text-xs text-gray-800 dark:text-gray-200">{{ $adaptation->ats_prompt }}</p>
+                                        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Invisível no PDF — extraído por parsers de texto. Máx 300 caracteres, máx 15 palavras-chave.</p>
+                                    </div>
+                                </div>
+
+                                <div class="flex items-center gap-2">
+                                    <input type="checkbox" wire:model.live="atsConsent" id="atsConsent" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+                                    <label for="atsConsent" class="text-sm text-gray-700 dark:text-gray-300">Entendo os riscos e quero baixar o PDF otimizado assim.</label>
+                                </div>
+
+                                @if($this->atsScoreResult)
+                                    <div class="rounded-lg border border-info-200 bg-info-50 p-3 dark:border-info-500/30 dark:bg-info-400/10">
+                                        <p class="text-sm font-semibold text-info-800 dark:text-info-200">Nota simulada ATS: {{ $this->atsScoreResult['score'] }}/10</p>
+                                        <p class="mt-1 text-sm text-info-700 dark:text-info-300">{{ $this->atsScoreResult['rationale'] }}</p>
+                                    </div>
+                                @endif
+
+                                <div class="flex flex-wrap gap-2">
+                                    <x-filament::button wire:click="simulateAtsScore" color="info" icon="heroicon-o-chart-bar" size="sm">Simular nota ATS</x-filament::button>
+                                    <x-filament::button wire:click="toggleAtsOptimization" color="gray" size="sm" icon="heroicon-o-x-mark" wire:confirm="Desativar a otimização? O bloco invisível será removido.">Desativar otimização</x-filament::button>
+                                    @if($this->adaptation()?->is_ats_optimized && $this->atsConsent)
+                                        <x-filament::button tag="a" :href="route('filament.admin.resume-pdf.download', $this->record)" target="_blank" color="success" icon="heroicon-o-arrow-down-tray" size="sm">Baixar PDF otimizado</x-filament::button>
+                                    @endif
+                                </div>
+                            </div>
+                        @else
+                            <div class="space-y-3">
+                                <p class="text-sm text-gray-600 dark:text-gray-300">Ative a otimização para gerar um bloco persuasivo oculto ao final do PDF. O bloco é determinístico, usa apenas palavras-chave já presentes no seu currículo e respeita os limites (300 caracteres, 15 palavras).</p>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">Desativado por padrão. Ao re-adequar com otimização ativa, o bloco é regenerado.</p>
+                                <div>
+                                    <x-filament::button wire:click="toggleAtsOptimization" color="primary" size="sm" icon="heroicon-o-cpu-chip">Otimizar para triagem IA</x-filament::button>
+                                </div>
+                            </div>
+                        @endif
+                    </x-filament::section>
+                @endif
             @else
                 <div class="max-w-2xl">
                     <x-filament::section

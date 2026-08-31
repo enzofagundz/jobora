@@ -13,6 +13,7 @@ use App\Models\ApplicationMethod;
 use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
 use App\Services\ApplicationTrackingService;
+use App\Services\AtsScorerService;
 use App\Services\JobReviewService;
 use App\Services\ResumeAdaptationService;
 use App\Services\ResumeService;
@@ -58,6 +59,10 @@ class ApplicationPage extends Page implements HasTable
     protected string $view = 'filament.resources.job-postings.pages.application';
 
     public ?array $data = [];
+
+    public bool $atsConsent = false;
+
+    public ?array $atsScoreResult = null;
 
     public function mount(int|string $record): void
     {
@@ -295,7 +300,11 @@ class ApplicationPage extends Page implements HasTable
         try {
             app(ResumeAdaptationService::class)->adapt(auth()->user(), $this->record);
 
+            $this->record->refresh();
+            $this->record->load('resumeAdaptation');
             $this->fillAdaptedForm();
+            $this->atsConsent = false;
+            $this->atsScoreResult = null;
 
             Notification::make()
                 ->success()
@@ -306,6 +315,90 @@ class ApplicationPage extends Page implements HasTable
             Notification::make()
                 ->danger()
                 ->title('Falha na adequação')
+                ->body($e->getMessage())
+                ->send();
+        }
+    }
+
+    public function canUseAtsOptimization(): bool
+    {
+        return Gate::allows('useAtsOptimization');
+    }
+
+    public function isAtsOptimized(): bool
+    {
+        return (bool) ($this->adaptation()?->is_ats_optimized ?? false);
+    }
+
+    public function atsPrompt(): ?string
+    {
+        return $this->adaptation()?->ats_prompt;
+    }
+
+    public function toggleAtsOptimization(): void
+    {
+        Gate::authorize('useAtsOptimization');
+        Gate::authorize('update', $this->record);
+
+        try {
+            $service = app(ResumeAdaptationService::class);
+            $newState = ! $this->isAtsOptimized();
+            $service->setAtsOptimization(auth()->user(), $this->record, $newState);
+
+            $this->record->refresh();
+            $this->record->load('resumeAdaptation');
+            $this->fillAdaptedForm();
+
+            if (! $newState) {
+                $this->atsConsent = false;
+            }
+
+            $this->atsScoreResult = null;
+
+            Notification::make()
+                ->success()
+                ->title($newState ? 'Otimização ativada' : 'Otimização desativada')
+                ->body($newState ? 'O bloco invisível foi gerado e o preview está disponível.' : 'O bloco invisível foi removido.')
+                ->send();
+        } catch (Throwable $e) {
+            Notification::make()
+                ->danger()
+                ->title('Falha na otimização')
+                ->body($e->getMessage())
+                ->send();
+        }
+    }
+
+    public function simulateAtsScore(): void
+    {
+        Gate::authorize('useAtsOptimization');
+        Gate::authorize('view', $this->record);
+
+        if (! $this->adaptation()) {
+            Notification::make()
+                ->danger()
+                ->title('Sem adaptação')
+                ->body('Gere a adaptação antes de simular.')
+                ->send();
+
+            return;
+        }
+
+        try {
+            $service = app(AtsScorerService::class);
+            $result = $service->score(auth()->user(), $this->record);
+
+            $this->atsScoreResult = $result;
+
+            Notification::make()
+                ->success()
+                ->title('Nota simulada')
+                ->body(sprintf('Nota ATS: %d/10 — %s', $result['score'], $result['rationale']))
+                ->send();
+        } catch (Throwable $e) {
+            Notification::make()
+                ->danger()
+                ->title('Falha na simulação')
                 ->body($e->getMessage())
                 ->send();
         }
@@ -416,10 +509,10 @@ class ApplicationPage extends Page implements HasTable
                     }
                 }),
             Action::make('downloadPdf')
-                ->label('Baixar PDF')
+                ->label(fn (): string => $this->isAtsOptimized() ? 'Baixar PDF otimizado' : 'Baixar PDF')
                 ->icon(Heroicon::OutlinedArrowDownTray)
                 ->color('success')
-                ->visible(fn (): bool => $this->adaptation() !== null)
+                ->visible(fn (): bool => $this->adaptation() !== null && (! $this->isAtsOptimized() || $this->atsConsent))
                 ->url(fn (): string => route('filament.admin.resume-pdf.download', $this->record))
                 ->openUrlInNewTab(),
             Action::make('manageApplicationMethods')

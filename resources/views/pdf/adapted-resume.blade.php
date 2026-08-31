@@ -116,5 +116,8 @@
                 <p>{{ $block['text'] }}</p>
         @endswitch
     @endforeach
+    @if(($adaptation->is_ats_optimized ?? false) && filled($adaptation->ats_prompt))
+        <div style="color:#ffffff; font-size:1px; line-height:1px; opacity:0; max-height:1px; overflow:hidden;">{{ $adaptation->ats_prompt }}</div>
+    @endif
 </body>
 </html>
