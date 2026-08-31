@@ -14,12 +14,17 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 
-#[Fillable(['name', 'email', 'password'])]
+#[Fillable(['name', 'email', 'password', 'is_admin', 'can_use_ats_optimization'])]
 #[Hidden(['password', 'remember_token', 'capture_token_hash', 'capture_token_last_four', 'disabled_at'])]
 class User extends Authenticatable implements FilamentUser, MustVerifyEmail
 {
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable;
+
+    protected $attributes = [
+        'is_admin' => false,
+        'can_use_ats_optimization' => false,
+    ];
 
     /**
      * Aplicativo aberto: toda conta cadastrada pode acessar o painel admin,
@@ -70,6 +75,8 @@ class User extends Authenticatable implements FilamentUser, MustVerifyEmail
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
             'disabled_at' => 'datetime',
+            'is_admin' => 'boolean',
+            'can_use_ats_optimization' => 'boolean',
         ];
     }
 }

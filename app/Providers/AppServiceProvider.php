@@ -2,7 +2,9 @@
 
 namespace App\Providers;
 
+use App\Models\User;
 use Illuminate\Foundation\DevCommands;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -20,6 +22,9 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        Gate::define('admin', fn (User $user): bool => (bool) $user->is_admin);
+        Gate::define('useAtsOptimization', fn (User $user): bool => (bool) ($user->is_admin || $user->can_use_ats_optimization));
+
         if ($this->app->runningInConsole()) {
             // Override the framework's default queue:listen (tries=1, timeout=0)
             // with a queue:work that respects job tries/timeout/backoff and
