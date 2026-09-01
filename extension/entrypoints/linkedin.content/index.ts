@@ -1,8 +1,10 @@
 import { ContentScriptContext, defineContentScript } from '#imports';
 import { isLinkedInRoute } from '@/sites/linkedin/extract';
+import { isLinkedInJobsRoute } from '@/sites/linkedin-jobs/extract';
 import { isCaptureReady } from '@/utils/capture-control';
 import { apiToken, captureEnabled } from '@/utils/storage';
 import { createLinkedInController } from '@/sites/linkedin/controller';
+import { createLinkedInJobsController } from '@/sites/linkedin-jobs/controller';
 import './panel.css';
 
 export default defineContentScript({
@@ -11,8 +13,10 @@ export default defineContentScript({
   cssInjectionMode: 'ui',
 
   async main(ctx: ContentScriptContext) {
-    const controller = createLinkedInController();
-    let active = false;
+    const publicationsController = createLinkedInController();
+    const jobsController = createLinkedInJobsController();
+    let activePublications = false;
+    let activeJobs = false;
 
     // Serializa sincronizações: mudanças de rota/storage durante uma leitura
     // apenas enfileiram a reavaliação; nenhuma transição concorrente.
@@ -35,18 +39,35 @@ export default defineContentScript({
     }
 
     async function syncRoute(): Promise<void> {
-      const shouldCapture = isLinkedInRoute(location) && (await isCaptureReady());
-      if (shouldCapture && !active) {
-        active = true; // marca antes do await: impede ativação concorrente
-        await controller.activate(ctx);
-        // Rota/token/flag podem ter ficado inválidos durante o activate.
+      const ready = await isCaptureReady();
+      const isPublicationsRoute = isLinkedInRoute(location);
+      const isJobsRoute = isLinkedInJobsRoute(location);
+
+      const shouldCapturePublications = isPublicationsRoute && ready;
+      const shouldCaptureJobs = isJobsRoute && ready;
+
+      if (shouldCapturePublications && !activePublications) {
+        activePublications = true;
+        await publicationsController.activate(ctx);
         if (!(isLinkedInRoute(location) && (await isCaptureReady()))) {
-          active = false;
-          controller.deactivate();
+          activePublications = false;
+          publicationsController.deactivate();
         }
-      } else if (!shouldCapture && active) {
-        active = false;
-        controller.deactivate();
+      } else if (!shouldCapturePublications && activePublications) {
+        activePublications = false;
+        publicationsController.deactivate();
+      }
+
+      if (shouldCaptureJobs && !activeJobs) {
+        activeJobs = true;
+        await jobsController.activate(ctx);
+        if (!(isLinkedInJobsRoute(location) && (await isCaptureReady()))) {
+          activeJobs = false;
+          jobsController.deactivate();
+        }
+      } else if (!shouldCaptureJobs && activeJobs) {
+        activeJobs = false;
+        jobsController.deactivate();
       }
     }
 
