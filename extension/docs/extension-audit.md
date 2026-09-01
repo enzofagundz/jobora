@@ -45,7 +45,7 @@ Fontes: `../vagas/userscripts/linkedin-job-capture.user.js` (0.1.0), `../vagas/u
 - Fixo canto inferior direito (`right/bottom:12px`, z-index 2147483647), título "Capturador de vagas", status "ativo", contadores `Encontradas`, `Enviadas`, `Duplicadas`, `Erros`, botão `✕` que apenas oculta (processamento continua).
 - Debug `window.__vagasCapture = { counters, CONFIG }` (linha 494) vaza o token → **removido** na migração.
 
-**Seletores a validar manualmente ao vivo** (fixture atual é simulação LinkedIn; não há fixture Indeed): `[role="listitem"]`, `a[href*="/feed/update/"]`, `[data-testid="expandable-text-box"]`, `a[href*="/in/"]`, botões "ver mais".
+**Seletores a validar manualmente ao vivo** (fixture atual é simulação LinkedIn publicações; fixture de vagas usa `.refs/`): `[role="listitem"]`, `a[href*="/feed/update/"]`, `[data-testid="expandable-text-box"]`, `a[href*="/in/"]`, botões "ver mais". Para vagas: `li[data-occludable-job-id]`, `div[data-job-id]`, `a.job-card-container__link[href*="/jobs/view/"]`, `.job-card-container__metadata-wrapper`, `.scaffold-layout__detail.jobs-search__job-details`, `#job-details`, `button[aria-expanded="false"]` com `/mais|more/i`.
 
 ## 2. Indeed — `indeed-job-capture.user.js`
 
@@ -148,6 +148,17 @@ Durante esta transição o token Bearer existente (`VAGAS_API_TOKEN`) permanece 
 
 Pontos futuros para autenticação por usuário (fora desta tarefa):
 `EnsureCaptureApiToken`, `ExtensionAuthController::validate`, `JobCaptureController`, `extension/utils/storage.ts` e `extension/entrypoints/background.ts`. Não foi criada autenticação paralela da extensão nem alterada a superfície `extension/api` ou content scripts nesta etapa.
+
+## 10. LinkedIn Vagas — aba /jobs/search/* (2026-09-01)
+
+Captura enriquecida da aba "Vagas" sem alterar backend (spec `linkedin-jobs-capture-spec.md`, discovery `linkedin-jobs-capture-discovery.md`, refs `.refs/closed-left-job-card.html` + `.refs/opened-right-job-panel.html`).
+
+- **Rotas:** `https://www.linkedin.com/jobs/search/*` (MVP); `/jobs/view/<id>/` isolado e `/jobs/collections/*` fora. `entrypoints/linkedin.content/index.ts:1-83` virou dispatcher single-entrypoint com `isLinkedInRoute` (publicações) e `isLinkedInJobsRoute` (`sites/linkedin-jobs/extract.ts:4-18`, `MatchPattern https://www.linkedin.com/jobs/search/*`) + dois controllers (`createLinkedInController` e `createLinkedInJobsController`), sem nova host permission (`wxt.config.ts:10` já cobre `https://www.linkedin.com/*`).
+- **Card (esquerda):** `li[data-occludable-job-id="4461568021"]` → `div[data-job-id="4461568021"]` (`closed-left-job-card.html:1,6`), título `a.job-card-container__link[href*="/jobs/view/"]` (`:31`), empresa `div.artdeco-entity-lockup__subtitle` (`:38`), local `ul.job-card-container__metadata-wrapper li span` (`:46`), link canônico `href="/jobs/view/<id>/?…"` limpo via `cleanHref`.
+- **Painel (direita):** `div.scaffold-layout__detail.jobs-search__job-details` → `#job-details` (`opened-right-job-panel.html:1,326`, `div.jobs-description__content`), título `div.job-details-jobs-unified-top-card__job-title h1 a`, empresa `div.job-details-jobs-unified-top-card__company-name`, descrição `toText(#job-details)` (sem HTML), botão `button.inline-show-more-text__button[aria-expanded="false"]` com `/mais|more/i` (até 2 tentativas, linha 560).
+- **Fluxo:** `sites/linkedin-jobs/controller.ts:1-120` — fila serial `scanRunning/rescanQueued` (painel único, como Indeed), `claim` **antes** do clique via `externalCaptureIdentity('linkedin','linkedin:job:<id>')` (`utils/capture-identity.ts:13`), `waitForJobsPane` (polling 150ms/12s, `currentJobId` OU `titleMatch` + `#job-details` com texto), `expandJobsPane`, `extractLinkedInJob`, `buildJobsPayload` (`source:'linkedin'`, `external_id:'linkedin:job:<id>'`, `url:'https://www.linkedin.com/jobs/view/<id>'`, `search_url` congelada removendo `currentJobId/position/pageNum` via `URLSearchParams`, `author:null`), `browser.runtime.sendMessage` → background.
+- **Dedup:** `JobCaptureService.php:26` `ext:linkedin:job:<id>` (sem migration), `source='linkedin'` inalterado, `JobCaptureController.php:14` já aceita `title/company/location`.
+- **Testes:** `sites/linkedin-jobs/extract.test.ts:1-130` (fixture `tests/fixtures/linkedin-jobs.html` derivada de `.refs/`) cobre `isLinkedInJobsRoute`, `isJobCard`, `jobIdFromCard` prioridade `data-job-id` > `occludable` > `href`, `frozenSearchUrl`, `extractLinkedInJob`, `buildJobsPayload`; `tests/linkedin-jobs-controller.test.ts:1-140` (5 cards, recriação, novo item, geração) espelha `tests/linkedin-controller.test.ts` e `tests/indeed-controller.test.ts`. `bun run build` gera `content-scripts/linkedin.js` com ambos os controllers.
 
 ## 9. Autenticação por usuário — credencial individual (2026-08-27)
 

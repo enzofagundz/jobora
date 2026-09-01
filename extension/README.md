@@ -47,7 +47,8 @@ O popup mostra conexão, último resultado da API (enviada/duplicada/auth/invali
 
 Pré-requisitos: backend no ar, token válido configurado no popup **e** "Ativar captura" marcado; sessão ativa no LinkedIn (o Indeed não exige login).
 
-- **LinkedIn**: abra `https://www.linkedin.com/search/results/content/?keywords=vaga%20php`. O painel aparece no canto inferior direito com contadores `Encontradas/Enviadas/Duplicadas/Erros`. Posts existentes e de infinite scroll são expandidos ("ver mais"), extraídos e enviados. Navegação SPA entra/sai da rota sem duplicar painel ou observers.
+- **LinkedIn Publicações**: abra `https://www.linkedin.com/search/results/content/?keywords=vaga%20php`. O painel aparece no canto inferior direito com contadores `Encontradas/Enviadas/Duplicadas/Erros`. Posts existentes e de infinite scroll são expandidos ("ver mais"), extraídos e enviados. Navegação SPA entra/sai da rota sem duplicar painel ou observers.
+- **LinkedIn Vagas**: abra `https://www.linkedin.com/jobs/search/?keywords=Laravel&f_WT=2`. Cada vaga da lista esquerda é clicada uma por vez (painel direito é estado compartilhado, como no Indeed), a descrição em `#job-details` é extraída e enviada com `title/company/location` preenchidos (`external_id=linkedin:job:<id>`, `url=/jobs/view/<id>`). Sem `currentJobId` em `search_url`. Também testado com `https://www.linkedin.com/jobs/search/?keywords=PHP`.
 - **Indeed**: abra `https://br.indeed.com/jobs?q=php&l=Remoto`. Cada card é aberto um por vez (painel lateral é estado compartilhado), a descrição é extraída do painel e enviada. Sem descrição não há envio.
 - Estados: token inválido → erro `auth` (401); API parada → `network`; API sem `VAGAS_API_TOKEN` → 503 (`http`); payload rejeitado → `invalid`.
 - Fechar o painel (✕) oculta apenas a UI — a captura continua.
@@ -75,18 +76,20 @@ Sem `<all_urls>`, sem `tabs`/`activeTab`/`scripting` no manifest de produção (
 entrypoints/
   background.ts          service worker: valida mensagem capture:submit,
                          lê token do storage, faz fetch, grava lastApiStatus
-  linkedin.content/      ciclo WXT/UI do LinkedIn (rota SPA, Shadow Root UI)
+  linkedin.content/      dispatcher WXT/UI do LinkedIn — duas rotas SPA:
+                         /search/results/content/* (publicações) e /jobs/search/* (vagas)
   indeed.content/        idem para o Indeed (/jobs)
   popup/                 popup Vue de configuração
 sites/
-  linkedin/              extract.ts (seletores/payload) + controller.ts
+  linkedin/              extract.ts (publicações) + controller.ts
+  linkedin-jobs/         extract.ts (seletores vagas: data-job-id, #job-details) + controller.ts (fila serial)
   indeed/                extract.ts (painel lateral serial) + controller.ts
 components/CapturePanel.vue   painel compartilhado (Shadow Root, px)
 utils/                  toText (serializer), capture-session (WeakSet/Set/counters), storage
 api/captures.ts         cliente POST /api/job-captures (timeout 10 s, classificação de status)
 types/capture.ts        contrato do payload/resultados
 docs/extension-audit.md auditoria funcional completa (contrato de migração)
-tests/fixtures/         fixtures LinkedIn (da pasta userscripts) e Indeed
+tests/fixtures/         fixtures LinkedIn publicações, LinkedIn vagas (.refs/) e Indeed
 ```
 
 Fluxo: content script extrai DOM → `browser.runtime.sendMessage({type:'capture:submit', payload})` → background lê `apiBaseUrl`+`apiToken` do storage → `fetch` com Bearer → resultado classificado volta ao content script e alimenta o painel. O token nunca sai do storage/background (não vai em mensagens, DOM ou logs).
