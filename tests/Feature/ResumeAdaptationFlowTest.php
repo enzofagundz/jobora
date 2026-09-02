@@ -74,6 +74,36 @@ it('generates and persists the last adaptation per posting (UPSERT)', function (
         ->and($second->adapted_content)->toBe('Nova versão da adaptação.');
 });
 
+it('invalidates a previous ATS score when an adaptation is regenerated', function () {
+    ResumeAdaptationAgent::fake([
+        validAdaptationResponse(),
+        [
+            'adapted_resume' => 'Nova versão da adaptação.',
+            'changes' => [],
+            'covered_keywords' => ['Python'],
+            'missing_requirements' => ['React'],
+            'alerts' => [],
+        ],
+    ]);
+
+    $user = User::factory()->create();
+    $posting = adaptationPosting($user);
+    adaptationResume($user);
+
+    $adaptation = app(ResumeAdaptationService::class)->adapt($user, $posting);
+    $adaptation->update([
+        'ats_score' => 8,
+        'ats_rationale' => 'Nota anterior.',
+        'ats_source_fingerprint' => str_repeat('a', 64),
+    ]);
+
+    app(ResumeAdaptationService::class)->adapt($user, $posting->fresh());
+
+    expect($adaptation->refresh()->ats_score)->toBeNull()
+        ->and($adaptation->ats_rationale)->toBeNull()
+        ->and($adaptation->ats_source_fingerprint)->toBeNull();
+});
+
 it('never alters the original resume', function () {
     ResumeAdaptationAgent::fake([validAdaptationResponse()]);
 

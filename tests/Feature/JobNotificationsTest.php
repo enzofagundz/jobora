@@ -11,6 +11,7 @@ use App\Models\JobPosting;
 use App\Models\User;
 use App\Services\JobAnalysisService;
 use App\Services\JobTriageService;
+use Filament\Facades\Filament;
 use Filament\Livewire\DatabaseNotifications;
 use Filament\Notifications\Events\DatabaseNotificationsSent;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -244,4 +245,8 @@ it('renderiza o listener de broadcast mesmo com estado vazio', function () {
 
     expect($html)->toContain('.database-notifications.sent')
         ->and($html)->toContain('EchoLoaded');
+});
+
+it('mantém polling de fallback para notificações persistentes', function () {
+    expect(Filament::getPanel('admin')->getDatabaseNotificationsPollingInterval())->toBe('30s');
 });

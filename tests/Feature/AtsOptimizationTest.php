@@ -3,6 +3,7 @@
 use App\Agents\AtsScorerAgent;
 use App\Agents\ResumeAdaptationAgent;
 use App\Filament\Pages\ManageAtsUsers;
+use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Filament\Resources\JobPostings\Pages\ApplicationPage;
 use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
@@ -16,6 +17,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Livewire;
 use Spatie\LaravelPdf\Facades\Pdf;
+use Spatie\LaravelPdf\PdfBuilder;
 
 uses(RefreshDatabase::class);
 
@@ -292,6 +294,44 @@ it('scores ats compatibility on demand for authorized user', function () {
         ->and($result['rationale'])->toBe('Boa compatibilidade');
 });
 
+it('restores persisted ATS state after a comparison', function () {
+    AtsScorerAgent::fake([
+        ['score' => 4, 'rationale' => 'Sem otimização'],
+        ['score' => 9, 'rationale' => 'Com otimização'],
+    ]);
+
+    $user = User::factory()->create(['is_admin' => true]);
+    $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create([
+        'description' => 'Vaga PHP',
+        'role' => 'Dev PHP',
+    ]);
+    $posting->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
+    app(ResumeService::class)->save($user, 'Experiencia PHP');
+
+    $adaptation = ResumeAdaptation::create([
+        'job_posting_id' => $posting->id,
+        'adapted_content' => 'Curriculo PHP',
+        'changes' => [],
+        'covered_keywords' => ['PHP'],
+        'missing_requirements' => [],
+        'alerts' => [],
+        'ats_score' => 6,
+        'ats_rationale' => 'Nota anterior.',
+        'ats_source_fingerprint' => str_repeat('a', 64),
+    ]);
+
+    $result = app(AtsScorerService::class)->scoreComparison($user, $posting->fresh());
+    $adaptation->refresh();
+
+    expect($result['without']['score'])->toBe(4)
+        ->and($result['with']['score'])->toBe(9)
+        ->and($adaptation->is_ats_optimized)->toBeFalse()
+        ->and($adaptation->ats_prompt)->toBeNull()
+        ->and($adaptation->ats_score)->toBe(6)
+        ->and($adaptation->ats_rationale)->toBe('Nota anterior.')
+        ->and($adaptation->ats_source_fingerprint)->toBe(str_repeat('a', 64));
+});
+
 it('prevents unauthorized user from scoring', function () {
     $owner = User::factory()->create();
     $posting = JobPosting::factory()->for($owner, 'user')->confirmed()->create();
@@ -461,5 +501,63 @@ it('requires consent before downloading optimized pdf', function () {
         ->assertActionHidden('downloadPdf');
 
     $component->set('atsConsent', true)
-        ->assertActionVisible('downloadPdf');
+        ->assertActionVisible('downloadPdf')
+        ->assertActionHasUrl('downloadPdf', route('filament.admin.resume-pdf.download', [
+            'posting' => $posting,
+            'ats_consent' => '1',
+        ]));
+});
+
+it('enforces consent and current ATS data on the PDF route', function () {
+    Pdf::fake();
+
+    $user = User::factory()->create(['is_admin' => true]);
+    $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
+    $adaptation = ResumeAdaptation::create([
+        'job_posting_id' => $posting->id,
+        'adapted_content' => 'Curriculo',
+        'changes' => [],
+        'covered_keywords' => [],
+        'missing_requirements' => [],
+        'alerts' => [],
+        'is_ats_optimized' => true,
+        'ats_prompt' => 'Perfil altamente compatível com PHP',
+    ]);
+
+    $this->actingAs($user)
+        ->get(route('filament.admin.resume-pdf.download', $posting))
+        ->assertRedirect(JobPostingResource::getUrl('application', ['record' => $posting]));
+
+    $this->get(route('filament.admin.resume-pdf.download', [
+        'posting' => $posting,
+        'ats_consent' => '1',
+    ]))->assertOk();
+
+    Pdf::assertRespondedWithPdf(fn (PdfBuilder $pdf): bool => $pdf->viewData['adaptation']->is($adaptation));
+});
+
+it('rejects an optimized PDF when the adapted source is stale', function () {
+    Pdf::fake();
+
+    $user = User::factory()->create(['is_admin' => true]);
+    $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
+    app(ResumeService::class)->save($user, 'PHP');
+    ResumeAdaptation::create([
+        'job_posting_id' => $posting->id,
+        'adapted_content' => 'Curriculo',
+        'changes' => [],
+        'covered_keywords' => [],
+        'missing_requirements' => [],
+        'alerts' => [],
+        'source_fingerprint' => str_repeat('0', 64),
+        'is_ats_optimized' => true,
+        'ats_prompt' => 'Perfil altamente compatível com PHP',
+    ]);
+
+    $this->actingAs($user)
+        ->get(route('filament.admin.resume-pdf.download', [
+            'posting' => $posting,
+            'ats_consent' => '1',
+        ]))
+        ->assertRedirect(JobPostingResource::getUrl('application', ['record' => $posting]));
 });
