@@ -2,21 +2,23 @@
 
 namespace App\Filament\Resources\JobPostings\Pages;
 
+use App\Enums\AiOperationType;
 use App\Enums\ApplicationMethodType;
 use App\Enums\ApplicationStatus;
 use App\Enums\JobPostingStatus;
 use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Filament\Resources\JobPostings\Schemas\ApplicationMethodForm;
+use App\Models\AiOperation;
 use App\Models\Application;
 use App\Models\ApplicationEvent;
 use App\Models\ApplicationMethod;
 use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
+use App\Services\AiOperationService;
 use App\Services\ApplicationTrackingService;
-use App\Services\AtsScorerService;
 use App\Services\JobReviewService;
-use App\Services\ResumeAdaptationService;
 use App\Services\ResumeService;
+use App\Support\Staleness;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Repeater;
@@ -64,6 +66,8 @@ class ApplicationPage extends Page implements HasTable
 
     public ?array $atsScoreResult = null;
 
+    public ?string $atsConsentMarker = null;
+
     public function mount(int|string $record): void
     {
         $this->record = $this->resolveRecord($record);
@@ -79,6 +83,7 @@ class ApplicationPage extends Page implements HasTable
         ]);
 
         $this->fillAdaptedForm();
+        $this->refreshAiOperation();
     }
 
     public function form(Schema $schema): Schema
@@ -133,6 +138,80 @@ class ApplicationPage extends Page implements HasTable
     public function adaptation(): ?ResumeAdaptation
     {
         return $this->record->resumeAdaptation;
+    }
+
+    public function activeAiOperation(): ?AiOperation
+    {
+        return AiOperation::query()
+            ->where('user_id', auth()->id())
+            ->where('job_posting_id', $this->record->getKey())
+            ->active()
+            ->latest('queued_at')
+            ->first();
+    }
+
+    public function hasActiveAiOperation(): bool
+    {
+        return $this->activeAiOperation() !== null;
+    }
+
+    public function aiOperationLabel(AiOperation $operation): string
+    {
+        return match ($operation->operation_type) {
+            AiOperationType::ResumeAdaptation => 'Adequação do currículo',
+            AiOperationType::AtsOptimization => 'Otimização ATS',
+            AiOperationType::AtsScore => 'Simulação ATS',
+            AiOperationType::StrategicCompetencyClassification => 'Classificação estratégica',
+        };
+    }
+
+    public function refreshAiOperation(): void
+    {
+        $this->record->refresh();
+        $this->record->load('resumeAdaptation');
+        $this->fillAdaptedForm();
+
+        $adaptation = $this->adaptation();
+        $currentConsentMarker = $this->atsConsentMarker($adaptation);
+
+        if ($this->atsConsentMarker !== null && $this->atsConsentMarker !== $currentConsentMarker) {
+            $this->atsConsent = false;
+        }
+
+        $this->atsConsentMarker = $currentConsentMarker;
+        $this->atsScoreResult = $adaptation?->ats_score === null
+            ? null
+            : [
+                'score' => $adaptation->ats_score,
+                'rationale' => $adaptation->ats_rationale ?? '',
+            ];
+    }
+
+    public function atsScoreIsStale(): bool
+    {
+        $adaptation = $this->adaptation();
+
+        return $adaptation !== null && Staleness::isAtsScoreStale($adaptation);
+    }
+
+    public function atsPromptIsStale(): bool
+    {
+        $adaptation = $this->adaptation();
+
+        return $adaptation !== null && Staleness::isAtsPromptStale($adaptation);
+    }
+
+    private function atsConsentMarker(?ResumeAdaptation $adaptation): string
+    {
+        if ($adaptation === null) {
+            return '';
+        }
+
+        return implode('|', [
+            $adaptation->source_fingerprint ?? '',
+            $adaptation->ats_prompt_fingerprint ?? hash('sha256', (string) $adaptation->ats_prompt),
+            $adaptation->is_ats_optimized ? '1' : '0',
+        ]);
     }
 
     public function applicationMethods(): Collection
@@ -296,20 +375,16 @@ class ApplicationPage extends Page implements HasTable
     public function adapt(): void
     {
         Gate::authorize('update', $this->record);
+        $this->atsConsent = false;
 
         try {
-            app(ResumeAdaptationService::class)->adapt(auth()->user(), $this->record);
-
-            $this->record->refresh();
-            $this->record->load('resumeAdaptation');
-            $this->fillAdaptedForm();
-            $this->atsConsent = false;
-            $this->atsScoreResult = null;
+            app(AiOperationService::class)->enqueueResumeAdaptation(auth()->user(), $this->record);
+            $this->refreshAiOperation();
 
             Notification::make()
-                ->success()
-                ->title('Currículo adequado')
-                ->body('A versão adaptada para esta vaga foi gerada.')
+                ->info()
+                ->title('Adequação em andamento')
+                ->body('A versão adaptada será atualizada quando o processamento terminar.')
                 ->send();
         } catch (Throwable $e) {
             Notification::make()
@@ -339,26 +414,17 @@ class ApplicationPage extends Page implements HasTable
     {
         Gate::authorize('useAtsOptimization');
         Gate::authorize('update', $this->record);
+        $this->atsConsent = false;
 
         try {
-            $service = app(ResumeAdaptationService::class);
             $newState = ! $this->isAtsOptimized();
-            $service->setAtsOptimization(auth()->user(), $this->record, $newState);
-
-            $this->record->refresh();
-            $this->record->load('resumeAdaptation');
-            $this->fillAdaptedForm();
-
-            if (! $newState) {
-                $this->atsConsent = false;
-            }
-
-            $this->atsScoreResult = null;
+            app(AiOperationService::class)->enqueueAtsOptimization(auth()->user(), $this->record, $newState);
+            $this->refreshAiOperation();
 
             Notification::make()
-                ->success()
-                ->title($newState ? 'Otimização ativada' : 'Otimização desativada')
-                ->body($newState ? 'O bloco invisível foi gerado e o preview está disponível.' : 'O bloco invisível foi removido.')
+                ->info()
+                ->title('Atualização da otimização ATS em andamento')
+                ->body('A configuração será atualizada quando o processamento terminar.')
                 ->send();
         } catch (Throwable $e) {
             Notification::make()
@@ -385,15 +451,13 @@ class ApplicationPage extends Page implements HasTable
         }
 
         try {
-            $service = app(AtsScorerService::class);
-            $result = $service->score(auth()->user(), $this->record);
-
-            $this->atsScoreResult = $result;
+            app(AiOperationService::class)->enqueueAtsScore(auth()->user(), $this->record);
+            $this->refreshAiOperation();
 
             Notification::make()
-                ->success()
-                ->title('Nota simulada')
-                ->body(sprintf('Nota ATS: %d/10 — %s', $result['score'], $result['rationale']))
+                ->info()
+                ->title('Simulação ATS em andamento')
+                ->body('A nota será atualizada quando o processamento terminar.')
                 ->send();
         } catch (Throwable $e) {
             Notification::make()
@@ -411,6 +475,7 @@ class ApplicationPage extends Page implements HasTable
                 ->label(fn (): string => $this->adaptation() === null ? 'Adequar currículo' : 'Adequar novamente')
                 ->icon(Heroicon::OutlinedSparkles)
                 ->color('primary')
+                ->disabled(fn (): bool => $this->hasActiveAiOperation())
                 ->action(fn () => $this->adapt()),
             Action::make('startTracking')
                 ->label('Iniciar acompanhamento')
@@ -513,7 +578,12 @@ class ApplicationPage extends Page implements HasTable
                 ->icon(Heroicon::OutlinedArrowDownTray)
                 ->color('success')
                 ->visible(fn (): bool => $this->adaptation() !== null && (! $this->isAtsOptimized() || $this->atsConsent))
-                ->url(fn (): string => route('filament.admin.resume-pdf.download', $this->record))
+                ->url(fn (): string => $this->isAtsOptimized()
+                    ? route('filament.admin.resume-pdf.download', [
+                        'posting' => $this->record,
+                        'ats_consent' => '1',
+                    ])
+                    : route('filament.admin.resume-pdf.download', $this->record))
                 ->openUrlInNewTab(),
             Action::make('manageApplicationMethods')
                 ->label('Gerenciar métodos')

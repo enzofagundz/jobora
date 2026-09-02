@@ -10,6 +10,7 @@ use App\Models\ResumeAdaptation;
 use App\Models\User;
 use App\Support\Ai\AiRequestGate;
 use App\Support\Ai\AiUsageHelper;
+use Closure;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
@@ -22,6 +23,7 @@ class ResumeAdaptationService
         private readonly ConceptNormalizer $normalizer,
         private readonly ResumeAnalyzer $resumeAnalyzer,
         private readonly ResumeService $resumeService,
+        private readonly AiInputSnapshotService $snapshots,
         private readonly ?AiRequestGate $gate = null,
         private readonly ?AtsPromptBuilder $atsBuilder = null,
     ) {}
@@ -35,6 +37,52 @@ class ResumeAdaptationService
         }
 
         $this->assertEligible($user, $posting);
+
+        $payload = $this->buildPayload($user, $posting);
+
+        return $this->adaptPayload($user, $posting, $payload, $this->snapshots->fingerprint($payload));
+    }
+
+    /**
+     * Execute an adaptation using the immutable payload captured when the
+     * background operation was queued.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public function adaptFromSnapshot(
+        User $user,
+        JobPosting $posting,
+        array $payload,
+        string $fingerprint,
+        ?Closure $persistWithinAttempt = null,
+    ): ResumeAdaptation {
+        Gate::forUser($user)->authorize('update', $posting);
+
+        if ($posting->user_id !== $user->id) {
+            throw new \LogicException('Vaga não pertence ao usuário.');
+        }
+
+        if ($posting->status !== JobPostingStatus::Confirmed) {
+            throw new \LogicException('A adequação exige uma vaga confirmada.');
+        }
+
+        if (blank($payload['resume'] ?? null)) {
+            throw new \LogicException('O snapshot da adequação não contém currículo.');
+        }
+
+        return $this->adaptPayload($user, $posting, $payload, $fingerprint, $persistWithinAttempt);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function adaptPayload(
+        User $user,
+        JobPosting $posting,
+        array $payload,
+        string $fingerprint,
+        ?Closure $persistWithinAttempt = null,
+    ): ResumeAdaptation {
 
         $started = microtime(true);
         $inputChars = 0;
@@ -54,7 +102,6 @@ class ResumeAdaptationService
         }
 
         try {
-            $payload = $this->buildPayload($user, $posting);
             $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
             $inputChars = mb_strlen($jsonPayload);
 
@@ -74,36 +121,66 @@ class ResumeAdaptationService
 
             $result = ResumeAdaptationResult::fromStructured($data);
 
-            $this->assertIntegrity($user, $result, $posting);
+            $this->assertIntegrity($result, (string) $payload['resume']);
 
             $existingAdaptation = ResumeAdaptation::where('job_posting_id', $posting->id)->first();
             $wasOptimized = (bool) ($existingAdaptation?->is_ats_optimized ?? false);
 
-            $adaptation = ResumeAdaptation::updateOrCreate(
-                ['job_posting_id' => $posting->id],
-                [
-                    'adapted_content' => $result->adaptedResume,
-                    'changes' => $result->changes,
-                    'covered_keywords' => $result->coveredKeywords,
-                    'missing_requirements' => $result->missingRequirements,
-                    'alerts' => $result->alerts,
-                ],
-            );
+            $prompt = '';
+            $promptFingerprint = null;
 
             if ($wasOptimized) {
-                $resumeContent = $this->resumeService->content($user) ?? '';
                 $builder = $this->atsBuilder ?? app(AtsPromptBuilder::class);
-                $freshPosting = $posting->fresh()->load('items');
-                $prompt = $builder->build($freshPosting, ResumeService::plainText($resumeContent));
-                $adaptation->forceFill([
-                    'ats_prompt' => $prompt !== '' ? $prompt : null,
-                    'is_ats_optimized' => true,
-                ])->save();
+                $positioning = $payload['positioning'] ?? [];
+                $prompt = is_array($positioning)
+                    ? $builder->buildFromSnapshot(
+                        (string) ($payload['job_role'] ?? ''),
+                        is_string($payload['job_company'] ?? null) ? $payload['job_company'] : null,
+                        (string) ($payload['resume'] ?? ''),
+                        $positioning,
+                    )
+                    : '';
+                $promptFingerprint = $prompt !== ''
+                    ? $this->atsPromptFingerprint($payload, $prompt)
+                    : null;
+            }
 
+            $persist = function () use ($fingerprint, $posting, $prompt, $promptFingerprint, $result, $wasOptimized): ResumeAdaptation {
+                $adaptation = ResumeAdaptation::updateOrCreate(
+                    ['job_posting_id' => $posting->id],
+                    [
+                        'adapted_content' => $result->adaptedResume,
+                        'changes' => $result->changes,
+                        'covered_keywords' => $result->coveredKeywords,
+                        'missing_requirements' => $result->missingRequirements,
+                        'alerts' => $result->alerts,
+                        'source_fingerprint' => $fingerprint,
+                        'ats_score' => null,
+                        'ats_rationale' => null,
+                        'ats_source_fingerprint' => null,
+                    ],
+                );
+
+                if ($wasOptimized) {
+                    $adaptation->forceFill([
+                        'ats_prompt' => $prompt !== '' ? $prompt : null,
+                        'ats_prompt_fingerprint' => $promptFingerprint,
+                        'is_ats_optimized' => $prompt !== '',
+                    ])->save();
+                }
+
+                return $adaptation;
+            };
+
+            $adaptation = $persistWithinAttempt !== null
+                ? $persistWithinAttempt($persist)
+                : $persist();
+
+            if ($wasOptimized) {
                 Log::channel('ai')->info('ATS optimization regenerated after adaptation.', [
                     'job_posting_id' => $posting->id,
                     'operation' => 'ats_optimization_regenerated',
-                    'is_ats_optimized' => true,
+                    'is_ats_optimized' => $prompt !== '',
                     'ats_prompt_chars' => $prompt !== '' ? mb_strlen($prompt) : 0,
                 ]);
             }
@@ -173,11 +250,23 @@ class ResumeAdaptationService
         }
 
         try {
+            $snapshot = $this->snapshots->atsOptimization(
+                $user,
+                $posting->fresh()->load(['items', 'resumeAdaptation']),
+                $enabled,
+            );
+            $prompt = $snapshot['payload']['ats_prompt'];
+
+            if ($enabled && blank($prompt)) {
+                throw new \LogicException('Não há palavras-chave do currículo para otimizar esta vaga.');
+            }
+
+            if (! is_string($prompt) && $prompt !== null) {
+                throw new \LogicException('O bloco de otimização ATS é inválido.');
+            }
+
             if (! $enabled) {
-                $adaptation->forceFill([
-                    'is_ats_optimized' => false,
-                    'ats_prompt' => null,
-                ])->save();
+                $this->persistAtsOptimization($adaptation, false, null, null);
 
                 Log::channel('ai')->info('ATS optimization disabled.', [
                     'job_posting_id' => $posting->id,
@@ -189,25 +278,7 @@ class ResumeAdaptationService
                 return $adaptation->fresh();
             }
 
-            $resumeContent = $this->resumeService->content($user);
-
-            if (blank($resumeContent)) {
-                throw new \LogicException('Cadastre o currículo antes de otimizar para ATS.');
-            }
-
-            $builder = $this->atsBuilder ?? app(AtsPromptBuilder::class);
-            $freshPosting = $posting->fresh()->load('items');
-            $prompt = $builder->build($freshPosting, ResumeService::plainText($resumeContent));
-
-            if (mb_strlen($prompt) > AtsPromptBuilder::MAX_LENGTH) {
-                $prompt = mb_substr($prompt, 0, AtsPromptBuilder::MAX_LENGTH);
-            }
-
-            // Guardrail: prompt must only contain present keywords — builder already enforces
-            $adaptation->forceFill([
-                'is_ats_optimized' => true,
-                'ats_prompt' => $prompt !== '' ? $prompt : null,
-            ])->save();
+            $this->persistAtsOptimization($adaptation, true, $prompt, $snapshot['fingerprint']);
 
             Log::channel('ai')->info('ATS optimization enabled.', [
                 'job_posting_id' => $posting->id,
@@ -227,6 +298,119 @@ class ResumeAdaptationService
         }
     }
 
+    /**
+     * Apply an ATS toggle from the immutable payload captured at enqueue time.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public function setAtsOptimizationFromSnapshot(
+        User $user,
+        JobPosting $posting,
+        array $payload,
+        string $fingerprint,
+        ?Closure $persistWithinAttempt = null,
+    ): ResumeAdaptation {
+        Gate::forUser($user)->authorize('useAtsOptimization');
+        Gate::forUser($user)->authorize('update', $posting);
+
+        if ($posting->user_id !== $user->id) {
+            throw new \LogicException('Vaga não pertence ao usuário.');
+        }
+
+        if ($posting->status !== JobPostingStatus::Confirmed) {
+            throw new \LogicException('A otimização exige uma vaga confirmada.');
+        }
+
+        if (! is_bool($payload['enabled'] ?? null)) {
+            throw new \LogicException('O snapshot da otimização ATS não informa o estado solicitado.');
+        }
+
+        $adaptation = $posting->resumeAdaptation()->first();
+
+        if (! $adaptation) {
+            throw new \LogicException('Gere a adaptação do currículo antes de otimizar para ATS.');
+        }
+
+        $prompt = null;
+
+        if ($payload['enabled']) {
+            if (! is_string($payload['ats_prompt'] ?? null) || blank($payload['ats_prompt'])) {
+                throw new \LogicException('O snapshot da otimização ATS não contém o bloco calculado.');
+            }
+
+            $prompt = $payload['ats_prompt'] !== '' ? $payload['ats_prompt'] : null;
+        }
+
+        $store = config('cache.lock_store', config('cache.default', 'file'));
+        $stores = config('cache.stores', []);
+
+        if (! isset($stores[$store])) {
+            $store = 'file';
+        }
+
+        $lock = Cache::store($store)->lock("ats:posting:{$posting->id}", 10);
+
+        if (! $lock->get()) {
+            throw new \RuntimeException('Operação de otimização já em andamento para esta vaga.');
+        }
+
+        try {
+            $persist = fn (): ResumeAdaptation => $this->persistAtsOptimization(
+                $adaptation,
+                $payload['enabled'],
+                $prompt,
+                $payload['enabled'] ? $fingerprint : null,
+            );
+
+            return $persistWithinAttempt !== null
+                ? $persistWithinAttempt($persist)
+                : $persist();
+        } finally {
+            try {
+                $lock->release();
+            } catch (Throwable) {
+            }
+        }
+    }
+
+    private function persistAtsOptimization(ResumeAdaptation $adaptation, bool $enabled, ?string $prompt, ?string $fingerprint): ResumeAdaptation
+    {
+        $adaptation->forceFill([
+            'is_ats_optimized' => $enabled,
+            'ats_prompt' => $prompt,
+            'ats_prompt_fingerprint' => $fingerprint,
+            'ats_score' => null,
+            'ats_rationale' => null,
+            'ats_source_fingerprint' => null,
+        ])->save();
+
+        return $adaptation->fresh();
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function atsPromptFingerprint(array $payload, string $prompt): string
+    {
+        $items = collect($payload['positioning'] ?? [])
+            ->filter(fn (mixed $item): bool => is_array($item))
+            ->map(fn (array $item): array => [
+                'name' => $item['name'] ?? null,
+                'category' => $item['category'] ?? null,
+            ])
+            ->values()
+            ->all();
+
+        return $this->snapshots->fingerprint([
+            'enabled' => true,
+            'resume' => $payload['resume'] ?? '',
+            'job_role' => $payload['job_role'] ?? null,
+            'job_company' => $payload['job_company'] ?? null,
+            'items' => $items,
+            'ats_prompt' => $prompt,
+        ]);
+    }
+
     private function assertEligible(User $user, JobPosting $posting): void
     {
         if ($posting->status !== JobPostingStatus::Confirmed) {
@@ -244,6 +428,7 @@ class ResumeAdaptationService
         $description = ResumeService::plainText($posting->description);
 
         $positioning = $posting->items
+            ->sortBy(fn ($item): string => mb_strtolower($item->category->value.'|'.$item->name))
             ->map(fn ($item): array => [
                 'name' => $item->name,
                 'category' => $item->category->value,
@@ -261,9 +446,8 @@ class ResumeAdaptationService
         ];
     }
 
-    private function assertIntegrity(User $user, ResumeAdaptationResult $result, JobPosting $posting): void
+    private function assertIntegrity(ResumeAdaptationResult $result, string $resume): void
     {
-        $resume = $this->resumeService->content($user);
         $originalConcepts = $this->resumeAnalyzer->conceptsIn($resume);
         $adaptedConcepts = $this->resumeAnalyzer->conceptsIn($result->adaptedResume);
 

@@ -2,8 +2,11 @@
 
 namespace App\Filament\Pages;
 
+use App\Enums\AiOperationType;
 use App\Enums\ProfessionalCompetencySource;
 use App\Enums\StrategicRole;
+use App\Models\AiOperation;
+use App\Services\AiOperationService;
 use App\Services\ResumeService;
 use App\Services\StrategicCompetencyService;
 use Filament\Actions\Action;
@@ -123,6 +126,18 @@ class ProfessionalCompetenciesPage extends Page implements HasSchemas, HasTable
             ->emptyStateDescription('Classifique com IA ou adicione manualmente para definir o papel estratégico das suas competências.');
     }
 
+    public function activeAiOperation(): ?AiOperation
+    {
+        return AiOperation::query()
+            ->where('user_id', auth()->id())
+            ->where('operation_type', AiOperationType::StrategicCompetencyClassification)
+            ->active()
+            ->latest('queued_at')
+            ->first();
+    }
+
+    public function refreshAiOperation(): void {}
+
     /**
      * Select com opções de enum devolve o estado já como StrategicRole
      * (EnumStateCast); aceita a string crua como fallback defensivo.
@@ -141,16 +156,16 @@ class ProfessionalCompetenciesPage extends Page implements HasSchemas, HasTable
                 ->requiresConfirmation()
                 ->modalHeading('Classificar com IA')
                 ->modalDescription('O currículo e os itens do mercado confirmado serão enviados ao modelo de linguagem. Custo de uma chamada de IA por execução. Classificações manuais não são alteradas.')
-                ->disabled(fn (): bool => blank(app(ResumeService::class)->content(auth()->user())))
+                ->disabled(fn (): bool => blank(app(ResumeService::class)->content(auth()->user())) || $this->activeAiOperation() !== null)
                 ->tooltip('Cadastre o currículo antes de classificar com IA.')
                 ->action(function (): void {
                     try {
-                        $count = app(StrategicCompetencyService::class)->classify(auth()->user());
+                        app(AiOperationService::class)->enqueueStrategicCompetencyClassification(auth()->user());
 
                         Notification::make()
-                            ->success()
-                            ->title('Classificação com IA concluída')
-                            ->body(sprintf('%d competência(s) classificada(s).', $count))
+                            ->info()
+                            ->title('Classificação com IA em andamento')
+                            ->body('As competências serão atualizadas quando o processamento terminar.')
                             ->send();
                     } catch (Throwable $e) {
                         Notification::make()

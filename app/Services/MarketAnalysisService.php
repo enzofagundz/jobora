@@ -23,6 +23,7 @@ class MarketAnalysisService
             ->selectRaw('i.category, i.name, COUNT(DISTINCT i.job_posting_id) AS total')
             ->groupBy('i.category', 'i.name')
             ->orderByDesc('total')
+            ->orderBy('i.category')
             ->orderBy('i.name')
             ->get()
             ->map(fn ($row) => [

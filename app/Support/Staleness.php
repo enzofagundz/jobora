@@ -7,11 +7,13 @@ use App\Models\JobPosting;
 use App\Models\ProfessionalCompetency;
 use App\Models\ResumeAdaptation;
 use App\Models\ScreeningPreference;
+use App\Services\AiInputSnapshotService;
 use Illuminate\Support\Facades\DB;
 
 /**
  * Checks if derived AI results are stale relative to their inputs.
- * Uses updated_at timestamps — simple and robust, no extra version column needed.
+ * Uses input fingerprints for asynchronous results and timestamps as a legacy
+ * fallback for results created before fingerprints were introduced.
  */
 final class Staleness
 {
@@ -21,14 +23,27 @@ final class Staleness
      */
     public static function isAdaptationStale(ResumeAdaptation $adaptation): bool
     {
-        $resume = $adaptation->jobPosting?->user?->resume()->first();
+        $posting = $adaptation->jobPosting;
+        $user = $posting?->user;
+
+        if (filled($adaptation->source_fingerprint) && $posting !== null && $user !== null) {
+            try {
+                $current = app(AiInputSnapshotService::class)->resumeAdaptation($user, $posting);
+
+                return ! hash_equals($adaptation->source_fingerprint, $current['fingerprint']);
+            } catch (\Throwable) {
+                return true;
+            }
+        }
+
+        $resume = $user?->resume()->first();
 
         // Fallback: if adaptation has no posting/user, fallback to null check
         if ($resume !== null && $adaptation->updated_at->lt($resume->updated_at)) {
             return true;
         }
 
-        $latestItem = $adaptation->jobPosting?->items()->max('updated_at');
+        $latestItem = $posting?->items()->max('updated_at');
 
         if ($latestItem !== null && $adaptation->updated_at->lt($latestItem)) {
             return true;
@@ -43,7 +58,19 @@ final class Staleness
      */
     public static function isCompetencyStale(ProfessionalCompetency $competency): bool
     {
-        $resume = $competency->user?->resume()->first();
+        $user = $competency->user;
+
+        if (filled($competency->source_fingerprint) && $user !== null) {
+            try {
+                $current = app(AiInputSnapshotService::class)->strategicCompetency($user);
+
+                return ! hash_equals($competency->source_fingerprint, $current['fingerprint']);
+            } catch (\Throwable) {
+                return true;
+            }
+        }
+
+        $resume = $user?->resume()->first();
 
         if ($resume !== null && $competency->updated_at->lt($resume->updated_at)) {
             return true;
@@ -69,6 +96,77 @@ final class Staleness
         }
 
         return false;
+    }
+
+    public static function isAtsScoreStale(ResumeAdaptation $adaptation): bool
+    {
+        if ($adaptation->ats_score === null) {
+            return false;
+        }
+
+        $posting = $adaptation->jobPosting;
+
+        if (filled($adaptation->ats_source_fingerprint) && $posting !== null) {
+            try {
+                $current = app(AiInputSnapshotService::class)->atsScore($posting);
+
+                return ! hash_equals($adaptation->ats_source_fingerprint, $current['fingerprint']);
+            } catch (\Throwable) {
+                return true;
+            }
+        }
+
+        return self::isLegacyAtsResultStale($adaptation);
+    }
+
+    public static function isAtsPromptStale(ResumeAdaptation $adaptation): bool
+    {
+        if (! $adaptation->is_ats_optimized || blank($adaptation->ats_prompt)) {
+            return false;
+        }
+
+        $posting = $adaptation->jobPosting;
+        $user = $posting?->user;
+
+        if ($posting === null || $user === null) {
+            return true;
+        }
+
+        if (filled($adaptation->ats_prompt_fingerprint)) {
+            try {
+                $current = app(AiInputSnapshotService::class)->atsOptimization($user, $posting, true);
+
+                return ! hash_equals($adaptation->ats_prompt_fingerprint, $current['fingerprint']);
+            } catch (\Throwable) {
+                return true;
+            }
+        }
+
+        return self::isLegacyAtsResultStale($adaptation);
+    }
+
+    private static function isLegacyAtsResultStale(ResumeAdaptation $adaptation): bool
+    {
+        $posting = $adaptation->jobPosting;
+        $user = $posting?->user;
+
+        if ($posting === null || $user === null) {
+            return true;
+        }
+
+        $resume = $user->resume()->first();
+
+        if ($resume !== null && $adaptation->updated_at->lt($resume->updated_at)) {
+            return true;
+        }
+
+        if ($adaptation->updated_at->lt($posting->updated_at)) {
+            return true;
+        }
+
+        $latestItem = $posting->items()->max('updated_at');
+
+        return $latestItem !== null && $adaptation->updated_at->lt($latestItem);
     }
 
     /**

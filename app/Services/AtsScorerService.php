@@ -4,9 +4,11 @@ namespace App\Services;
 
 use App\Agents\AtsScorerAgent;
 use App\Models\JobPosting;
+use App\Models\ResumeAdaptation;
 use App\Models\User;
 use App\Support\Ai\AiRequestGate;
 use App\Support\Ai\AiUsageHelper;
+use Closure;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -16,6 +18,7 @@ class AtsScorerService
     public function __construct(
         private readonly AtsScorerAgent $agent,
         private readonly ResumeService $resumeService,
+        private readonly AiInputSnapshotService $snapshots,
         private readonly ?AiRequestGate $gate = null,
     ) {}
 
@@ -24,38 +27,62 @@ class AtsScorerService
      */
     public function score(User $user, JobPosting $posting): array
     {
+        $this->assertAccess($user, $posting);
+        $snapshot = $this->snapshots->atsScore($posting->fresh()->load(['items', 'resumeAdaptation']));
+
+        return $this->scorePayload($user, $posting, $snapshot['payload'], $snapshot['fingerprint']);
+    }
+
+    /**
+     * Score the immutable payload captured when the operation was queued.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array{score: int, rationale: string}
+     */
+    public function scoreFromSnapshot(
+        User $user,
+        JobPosting $posting,
+        array $payload,
+        string $fingerprint,
+        ?Closure $persistWithinAttempt = null,
+    ): array {
+        $this->assertAccess($user, $posting);
+
+        if (! is_string($payload['resume'] ?? null) || blank($payload['resume'])) {
+            throw new \LogicException('O snapshot da simulação ATS não contém currículo adaptado.');
+        }
+
+        if (! is_array($payload['items'] ?? null)) {
+            throw new \LogicException('O snapshot da simulação ATS não contém itens da vaga.');
+        }
+
+        return $this->scorePayload($user, $posting, $payload, $fingerprint, $persistWithinAttempt);
+    }
+
+    private function assertAccess(User $user, JobPosting $posting): void
+    {
         Gate::forUser($user)->authorize('useAtsOptimization');
         Gate::forUser($user)->authorize('view', $posting);
 
         if ($posting->user_id !== $user->id) {
             throw new \LogicException('Vaga não pertence ao usuário.');
         }
+    }
 
-        $adaptation = $posting->resumeAdaptation()->first();
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array{score: int, rationale: string}
+     */
+    private function scorePayload(
+        User $user,
+        JobPosting $posting,
+        array $payload,
+        string $fingerprint,
+        ?Closure $persistWithinAttempt = null,
+        bool $persistResult = true,
+    ): array {
 
-        if (! $adaptation) {
-            throw new \LogicException('Gere a adaptação do currículo antes de simular a nota.');
-        }
-
-        $resume = $adaptation->adapted_content;
-
-        // Include hidden prompt in scoring if optimized (simulates ATS extraction)
-        if ($adaptation->is_ats_optimized && filled($adaptation->ats_prompt)) {
-            $resume .= "\n\n".$adaptation->ats_prompt;
-        }
-
-        $payload = [
-            'resume' => ResumeService::plainText($resume),
-            'job_description' => ResumeService::plainText($posting->description),
-            'job_role' => $posting->role,
-            'job_company' => $posting->company,
-            'items' => $posting->items->map(fn ($item): array => [
-                'name' => $item->name,
-                'category' => $item->category->value,
-            ])->values()->all(),
-        ];
-
-        $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
+        $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
         $started = microtime(true);
         $usage = null;
 
@@ -94,6 +121,28 @@ class AtsScorerService
 
             $rationale = trim(mb_substr($rationale, 0, 200));
 
+            if ($persistResult) {
+                $adaptation = $posting->resumeAdaptation()->first();
+
+                if (! $adaptation) {
+                    throw new \LogicException('Gere a adaptação do currículo antes de simular a nota.');
+                }
+
+                $persist = function () use ($adaptation, $fingerprint, $rationale, $score): void {
+                    $adaptation->forceFill([
+                        'ats_score' => $score,
+                        'ats_rationale' => $rationale,
+                        'ats_source_fingerprint' => $fingerprint,
+                    ])->save();
+                };
+
+                if ($persistWithinAttempt !== null) {
+                    $persistWithinAttempt($persist);
+                } else {
+                    $persist();
+                }
+            }
+
             Log::channel('ai')->info('ATS score simulated.', array_merge([
                 'job_posting_id' => $posting->id,
                 'operation' => 'ats_scorer',
@@ -129,43 +178,52 @@ class AtsScorerService
         Gate::forUser($user)->authorize('useAtsOptimization');
         Gate::forUser($user)->authorize('view', $posting);
 
-        $adaptation = $posting->resumeAdaptation()->first();
+        $posting = $posting->fresh()->load(['items', 'resumeAdaptation']);
+        $adaptation = $posting->resumeAdaptation;
 
         if (! $adaptation) {
             throw new \LogicException('Gere a adaptação antes de comparar.');
         }
 
-        $originalPrompt = $adaptation->ats_prompt;
-        $originalFlag = $adaptation->is_ats_optimized;
-
-        // Score without
-        $adaptation->forceFill(['is_ats_optimized' => false])->save();
-        $without = $this->score($user, $posting->fresh()->load(['items', 'resumeAdaptation']));
-
-        // Score with (if had prompt, restore)
-        if ($originalFlag && filled($originalPrompt)) {
-            $adaptation->forceFill(['is_ats_optimized' => true, 'ats_prompt' => $originalPrompt])->save();
-            $with = $this->score($user, $posting->fresh()->load(['items', 'resumeAdaptation']));
-        } else {
-            // Build temporary prompt for comparison if not yet optimized
-            $builder = app(AtsPromptBuilder::class);
-            $resumeContent = $this->resumeService->content($user) ?? '';
-            $prompt = $builder->build($posting->fresh()->load('items'), ResumeService::plainText($resumeContent));
-            $adaptation->forceFill(['is_ats_optimized' => true, 'ats_prompt' => $prompt !== '' ? $prompt : null])->save();
-            $with = $this->score($user, $posting->fresh()->load(['items', 'resumeAdaptation']));
-
-            // Restore original
-            $adaptation->forceFill(['is_ats_optimized' => $originalFlag, 'ats_prompt' => $originalPrompt])->save();
-        }
-
-        // Ensure original state restored
-        if ($adaptation->is_ats_optimized !== $originalFlag || $adaptation->ats_prompt !== $originalPrompt) {
-            $adaptation->forceFill(['is_ats_optimized' => $originalFlag, 'ats_prompt' => $originalPrompt])->save();
-        }
+        $prompt = $adaptation->is_ats_optimized && filled($adaptation->ats_prompt)
+            ? $adaptation->ats_prompt
+            : app(AtsPromptBuilder::class)->build(
+                $posting,
+                ResumeService::plainText($this->resumeService->content($user) ?? ''),
+            );
 
         return [
-            'without' => $without,
-            'with' => $with,
+            'without' => $this->scoreVariant($user, $posting, $adaptation, false, null),
+            'with' => $this->scoreVariant($user, $posting, $adaptation, true, $prompt !== '' ? $prompt : null),
         ];
+    }
+
+    /**
+     * @return array{score: int, rationale: string}
+     */
+    private function scoreVariant(
+        User $user,
+        JobPosting $posting,
+        ResumeAdaptation $adaptation,
+        bool $optimized,
+        ?string $prompt,
+    ): array {
+        $variantAdaptation = clone $adaptation;
+        $variantAdaptation->forceFill([
+            'is_ats_optimized' => $optimized,
+            'ats_prompt' => $optimized ? $prompt : null,
+        ]);
+
+        $variantPosting = clone $posting;
+        $variantPosting->setRelation('resumeAdaptation', $variantAdaptation);
+        $snapshot = $this->snapshots->atsScore($variantPosting);
+
+        return $this->scorePayload(
+            $user,
+            $posting,
+            $snapshot['payload'],
+            $snapshot['fingerprint'],
+            persistResult: false,
+        );
     }
 }

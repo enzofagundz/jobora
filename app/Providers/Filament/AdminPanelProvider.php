@@ -5,6 +5,7 @@ namespace App\Providers\Filament;
 use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Models\JobPosting;
 use App\Services\ResumePdfService;
+use App\Support\Staleness;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -77,7 +78,7 @@ class AdminPanelProvider extends PanelProvider
                 Authenticate::class,
             ])
             ->databaseNotifications()
-            ->databaseNotificationsPolling(null)
+            ->databaseNotificationsPolling('30s')
             // Download do PDF da versão adaptada (F6) — rota GET dedicada:
             // respostas de arquivo não podem ser retornadas de ações Livewire
             // (o valor retornado é serializado no snapshot JSON e bytes
@@ -88,6 +89,34 @@ class AdminPanelProvider extends PanelProvider
                     Gate::authorize('view', $posting);
 
                     $adaptation = $posting->resumeAdaptation()->firstOrFail();
+
+                    if ($adaptation->is_ats_optimized) {
+                        Gate::authorize('useAtsOptimization');
+
+                        if (! request()->boolean('ats_consent')) {
+                            Notification::make()
+                                ->danger()
+                                ->title('Confirme o download otimizado')
+                                ->body('Marque o consentimento de risco antes de baixar o PDF otimizado.')
+                                ->send();
+
+                            return redirect()->to(JobPostingResource::getUrl('application', ['record' => $posting]));
+                        }
+
+                        if (
+                            blank($adaptation->ats_prompt)
+                            || Staleness::isAtsPromptStale($adaptation)
+                            || Staleness::isAdaptationStale($adaptation)
+                        ) {
+                            Notification::make()
+                                ->danger()
+                                ->title('Otimização ATS desatualizada')
+                                ->body('Atualize a otimização ATS antes de baixar o PDF otimizado.')
+                                ->send();
+
+                            return redirect()->to(JobPostingResource::getUrl('application', ['record' => $posting]));
+                        }
+                    }
 
                     try {
                         // toResponse gera o conteúdo (chamada real ao driver);

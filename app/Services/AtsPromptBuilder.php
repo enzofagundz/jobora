@@ -23,14 +23,40 @@ class AtsPromptBuilder
             return '';
         }
 
-        $items = $posting->relationLoaded('items') ? $posting->items : $posting->items()->get();
+        $items = ($posting->relationLoaded('items') ? $posting->items : $posting->items()->get())
+            ->sortBy(fn ($item): string => mb_strtolower($item->category->value.'|'.$item->name));
+
+        return $this->buildFromSnapshot(
+            (string) $posting->role,
+            $posting->company,
+            $resumeContent,
+            $items->map(fn ($item): array => [
+                'name' => $item->name,
+                'present_in_resume' => $this->analyzer->hasConcept($resumeContent, $item->name)
+                    || $this->analyzer->contains($resumeContent, $item->name),
+            ])->all(),
+        );
+    }
+
+    /**
+     * Build the deterministic ATS block from a captured input snapshot.
+     *
+     * @param  array<int, array<string, mixed>>  $items
+     */
+    public function buildFromSnapshot(string $role, ?string $company, string $resumeContent, array $items): string
+    {
+        if (blank(trim($resumeContent))) {
+            return '';
+        }
 
         $present = [];
 
         foreach ($items as $item) {
-            if ($this->analyzer->hasConcept($resumeContent, $item->name) || $this->analyzer->contains($resumeContent, $item->name)) {
-                $present[] = $item->name;
+            if (! is_string($item['name'] ?? null) || ($item['present_in_resume'] ?? false) !== true) {
+                continue;
             }
+
+            $present[] = $item['name'];
 
             if (count($present) >= self::MAX_KEYWORDS) {
                 break;
@@ -45,8 +71,8 @@ class AtsPromptBuilder
 
         // Ensure no fabrication: already filtered to present only.
         // Build template.
-        $role = trim((string) $posting->role);
-        $company = trim((string) $posting->company);
+        $role = trim($role);
+        $company = trim((string) $company);
 
         $keywordsPart = implode(', ', array_slice($present, 0, self::MAX_KEYWORDS));
 

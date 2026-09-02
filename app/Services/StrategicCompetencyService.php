@@ -10,6 +10,7 @@ use App\Models\ProfessionalCompetency;
 use App\Models\User;
 use App\Support\Ai\AiRequestGate;
 use App\Support\Ai\AiUsageHelper;
+use Closure;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -36,6 +37,7 @@ class StrategicCompetencyService
         private readonly ResumeAnalyzer $resumeAnalyzer,
         private readonly ResumeService $resumeService,
         private readonly MarketAnalysisService $marketAnalysis,
+        private readonly AiInputSnapshotService $snapshots,
         private readonly ?AiRequestGate $gate = null,
     ) {}
 
@@ -50,11 +52,46 @@ class StrategicCompetencyService
             throw new LogicException('Cadastre o currículo antes de classificar as competências.');
         }
 
-        $payload = $this->buildPayload($user, $resume);
+        $snapshot = $this->snapshots->strategicCompetency($user);
+
+        if ($snapshot['payload']['candidate_concepts'] === []) {
+            return 0;
+        }
+
+        return $this->classifyPayload($user, $snapshot['payload'], $snapshot['fingerprint']);
+    }
+
+    /**
+     * Execute classification using the immutable payload captured at enqueue.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public function classifyFromSnapshot(
+        User $user,
+        array $payload,
+        string $fingerprint,
+        ?Closure $persistWithinAttempt = null,
+    ): int {
+        if (blank($payload['resume'] ?? null)) {
+            throw new LogicException('O snapshot da classificação não contém currículo.');
+        }
 
         if ($payload['candidate_concepts'] === []) {
             return 0;
         }
+
+        return $this->classifyPayload($user, $payload, $fingerprint, $persistWithinAttempt);
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     */
+    private function classifyPayload(
+        User $user,
+        array $payload,
+        string $fingerprint,
+        ?Closure $persistWithinAttempt = null,
+    ): int {
 
         $store = config('cache.lock_store', config('cache.default', 'file'));
         $stores = config('cache.stores', []);
@@ -95,7 +132,7 @@ class StrategicCompetencyService
                 fn (array $competency): bool => in_array($competency['concept'], $payload['candidate_concepts'], true),
             ));
 
-            $this->persistAi($user, $accepted);
+            $this->persistAi($user, $accepted, $fingerprint, $persistWithinAttempt);
 
             Log::channel('ai')->info('Strategic classification generated.', array_merge([
                 'user_id' => $user->id,
@@ -152,7 +189,11 @@ class StrategicCompetencyService
 
         return ProfessionalCompetency::updateOrCreate(
             ['user_id' => $user->id, 'concept' => $normalized],
-            ['strategic_role' => $role, 'source' => ProfessionalCompetencySource::Manual],
+            [
+                'strategic_role' => $role,
+                'source' => ProfessionalCompetencySource::Manual,
+                'source_fingerprint' => null,
+            ],
         );
     }
 
@@ -268,31 +309,49 @@ class StrategicCompetencyService
      *
      * @param  array<int, array{concept: string, strategic_role: StrategicRole}>  $accepted
      */
-    private function persistAi(User $user, array $accepted): void
-    {
-        DB::transaction(function () use ($user, $accepted): void {
-            $manualConcepts = $user->professionalCompetencies()
-                ->where('source', ProfessionalCompetencySource::Manual)
-                ->pluck('concept')
-                ->all();
+    private function persistAi(
+        User $user,
+        array $accepted,
+        string $fingerprint,
+        ?Closure $persistWithinAttempt = null,
+    ): void {
+        $persist = function () use ($user, $accepted, $fingerprint): void {
+            DB::transaction(function () use ($user, $accepted, $fingerprint): void {
+                $manualConcepts = $user->professionalCompetencies()
+                    ->where('source', ProfessionalCompetencySource::Manual)
+                    ->pluck('concept')
+                    ->all();
 
-            foreach ($accepted as $competency) {
-                if (in_array($competency['concept'], $manualConcepts, true)) {
-                    continue;
+                foreach ($accepted as $competency) {
+                    if (in_array($competency['concept'], $manualConcepts, true)) {
+                        continue;
+                    }
+
+                    ProfessionalCompetency::updateOrCreate(
+                        ['user_id' => $user->id, 'concept' => $competency['concept']],
+                        [
+                            'strategic_role' => $competency['strategic_role'],
+                            'source' => ProfessionalCompetencySource::Ai,
+                            'source_fingerprint' => $fingerprint,
+                        ],
+                    );
                 }
 
-                ProfessionalCompetency::updateOrCreate(
-                    ['user_id' => $user->id, 'concept' => $competency['concept']],
-                    ['strategic_role' => $competency['strategic_role'], 'source' => ProfessionalCompetencySource::Ai],
-                );
-            }
+                $acceptedConcepts = array_column($accepted, 'concept');
 
-            $acceptedConcepts = array_column($accepted, 'concept');
+                $user->professionalCompetencies()
+                    ->where('source', ProfessionalCompetencySource::Ai)
+                    ->whereNotIn('concept', $acceptedConcepts)
+                    ->delete();
+            });
+        };
 
-            $user->professionalCompetencies()
-                ->where('source', ProfessionalCompetencySource::Ai)
-                ->whereNotIn('concept', $acceptedConcepts)
-                ->delete();
-        });
+        if ($persistWithinAttempt !== null) {
+            $persistWithinAttempt($persist);
+
+            return;
+        }
+
+        $persist();
     }
 }

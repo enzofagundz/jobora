@@ -17,8 +17,13 @@ class ResumeAdaptation extends Model
         'covered_keywords',
         'missing_requirements',
         'alerts',
+        'source_fingerprint',
         'ats_prompt',
+        'ats_prompt_fingerprint',
         'is_ats_optimized',
+        'ats_score',
+        'ats_rationale',
+        'ats_source_fingerprint',
     ];
 
     protected $attributes = [
@@ -33,6 +38,7 @@ class ResumeAdaptation extends Model
             'missing_requirements' => 'array',
             'alerts' => 'array',
             'is_ats_optimized' => 'boolean',
+            'ats_score' => 'integer',
         ];
     }
 

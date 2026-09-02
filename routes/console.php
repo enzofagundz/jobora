@@ -12,4 +12,8 @@ Schedule::command('job-posting-items:normalize')
     ->daily()
     ->withoutOverlapping();
 
+Schedule::command('ai-operations:expire')
+    ->everyMinute()
+    ->withoutOverlapping();
+
 Schedule::command('auth:clear-resets')->everyFifteenMinutes();

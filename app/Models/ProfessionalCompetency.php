@@ -27,6 +27,7 @@ class ProfessionalCompetency extends Model
         'concept',
         'strategic_role',
         'source',
+        'source_fingerprint',
     ];
 
     protected function casts(): array

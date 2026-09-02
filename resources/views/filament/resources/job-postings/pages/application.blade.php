@@ -2,11 +2,34 @@
     @php
         $originalResume = $this->originalResume();
         $adaptation = $this->adaptation();
+        $activeOperation = $this->activeAiOperation();
         $methods = $this->applicationMethods();
         $sourceUrl = \App\Filament\Resources\JobPostings\Pages\ApplicationPage::safeHttpUrl($this->record->source_url);
     @endphp
 
-    <div class="space-y-6">
+    <div
+        class="space-y-6"
+        @if ($activeOperation) wire:poll.5s="refreshAiOperation" @endif
+    >
+        @if ($activeOperation)
+            <div
+                class="rounded-xl border border-info-200 bg-info-50 p-4 dark:border-info-500/30 dark:bg-info-400/10"
+                role="status"
+            >
+                <div class="flex items-start gap-3">
+                    <x-filament::icon icon="heroicon-o-arrow-path" class="mt-0.5 size-5 shrink-0 text-info-600 dark:text-info-400" />
+                    <div>
+                        <p class="text-sm font-semibold text-info-800 dark:text-info-200">
+                            {{ $this->aiOperationLabel($activeOperation) }} em andamento
+                        </p>
+                        <p class="mt-1 text-sm text-info-700 dark:text-info-300">
+                            O resultado será atualizado automaticamente quando o processamento terminar.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        @endif
+
         {{-- Vaga: cargo, empresa, status contextual, link externo validado --}}
         <x-filament::section divided icon="heroicon-o-briefcase" heading="Vaga">
             <div class="flex flex-col gap-2">
@@ -165,6 +188,9 @@
                                         <p class="font-mono text-xs text-gray-800 dark:text-gray-200">{{ $adaptation->ats_prompt }}</p>
                                         <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Invisível no PDF — extraído por parsers de texto. Máx 300 caracteres, máx 15 palavras-chave.</p>
                                     </div>
+                                    @if ($this->atsPromptIsStale())
+                                        <p class="mt-2 text-xs font-medium text-warning-700 dark:text-warning-300">Este bloco foi gerado com uma versão anterior do currículo ou da vaga.</p>
+                                    @endif
                                 </div>
 
                                 <div class="flex items-center gap-2">
@@ -176,14 +202,17 @@
                                     <div class="rounded-lg border border-info-200 bg-info-50 p-3 dark:border-info-500/30 dark:bg-info-400/10">
                                         <p class="text-sm font-semibold text-info-800 dark:text-info-200">Nota simulada ATS: {{ $this->atsScoreResult['score'] }}/10</p>
                                         <p class="mt-1 text-sm text-info-700 dark:text-info-300">{{ $this->atsScoreResult['rationale'] }}</p>
+                                        @if ($this->atsScoreIsStale())
+                                            <p class="mt-2 text-xs font-medium text-warning-700 dark:text-warning-300">Nota desatualizada em relação à versão atual da adaptação.</p>
+                                        @endif
                                     </div>
                                 @endif
 
                                 <div class="flex flex-wrap gap-2">
-                                    <x-filament::button wire:click="simulateAtsScore" color="info" icon="heroicon-o-chart-bar" size="sm">Simular nota ATS</x-filament::button>
-                                    <x-filament::button wire:click="toggleAtsOptimization" color="gray" size="sm" icon="heroicon-o-x-mark" wire:confirm="Desativar a otimização? O bloco invisível será removido.">Desativar otimização</x-filament::button>
+                                    <x-filament::button wire:click="simulateAtsScore" color="info" icon="heroicon-o-chart-bar" size="sm" :disabled="$this->hasActiveAiOperation()">Simular nota ATS</x-filament::button>
+                                    <x-filament::button wire:click="toggleAtsOptimization" color="gray" size="sm" icon="heroicon-o-x-mark" wire:confirm="Desativar a otimização? O bloco invisível será removido." :disabled="$this->hasActiveAiOperation()">Desativar otimização</x-filament::button>
                                     @if($this->adaptation()?->is_ats_optimized && $this->atsConsent)
-                                        <x-filament::button tag="a" :href="route('filament.admin.resume-pdf.download', $this->record)" target="_blank" color="success" icon="heroicon-o-arrow-down-tray" size="sm">Baixar PDF otimizado</x-filament::button>
+                                        <x-filament::button tag="a" :href="route('filament.admin.resume-pdf.download', ['posting' => $this->record, 'ats_consent' => '1'])" target="_blank" color="success" icon="heroicon-o-arrow-down-tray" size="sm">Baixar PDF otimizado</x-filament::button>
                                     @endif
                                 </div>
                             </div>
@@ -192,7 +221,7 @@
                                 <p class="text-sm text-gray-600 dark:text-gray-300">Ative a otimização para gerar um bloco persuasivo oculto ao final do PDF. O bloco é determinístico, usa apenas palavras-chave já presentes no seu currículo e respeita os limites (300 caracteres, 15 palavras).</p>
                                 <p class="text-xs text-gray-500 dark:text-gray-400">Desativado por padrão. Ao re-adequar com otimização ativa, o bloco é regenerado.</p>
                                 <div>
-                                    <x-filament::button wire:click="toggleAtsOptimization" color="primary" size="sm" icon="heroicon-o-cpu-chip">Otimizar para triagem IA</x-filament::button>
+                                    <x-filament::button wire:click="toggleAtsOptimization" color="primary" size="sm" icon="heroicon-o-cpu-chip" :disabled="$this->hasActiveAiOperation()">Otimizar para triagem IA</x-filament::button>
                                 </div>
                             </div>
                         @endif
