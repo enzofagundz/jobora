@@ -84,8 +84,9 @@ it('marks the posting failed when the agent throws', function () {
     $posting->refresh();
 
     expect($posting->status)->toBe(JobPostingStatus::Failed)
-        ->and($posting->error_message)->toContain('Provider indisponível')
-        ->and($posting->suggested_data)->toBeNull();
+        ->and($posting->error_message)->toBe('Não foi possível concluir a análise com IA. Tente novamente.')
+        ->and($posting->suggested_data)->toBeNull()
+        ->and($posting->attempts()->first()?->error_message)->toContain('Provider indisponível');
 });
 
 it('keeps the posting pending on a transient provider error', function () {
@@ -141,7 +142,8 @@ it('marks the posting failed on structurally invalid output', function () {
     $posting->refresh();
 
     expect($posting->status)->toBe(JobPostingStatus::Failed)
-        ->and($posting->error_message)->toContain('deve ser uma lista de strings');
+        ->and($posting->error_message)->toBe('Não foi possível concluir a análise com IA. Tente novamente.')
+        ->and($posting->attempts()->first()?->error_message)->toContain('deve ser uma lista de strings');
 });
 
 it('marks the posting failed when the response is not valid JSON', function () {
@@ -154,7 +156,8 @@ it('marks the posting failed when the response is not valid JSON', function () {
     $posting->refresh();
 
     expect($posting->status)->toBe(JobPostingStatus::Failed)
-        ->and($posting->error_message)->toContain('JSON válido');
+        ->and($posting->error_message)->toBe('Não conseguimos analisar esta vaga porque a IA devolveu um formato inválido. Tente novamente — se persistir, revise a descrição.')
+        ->and($posting->attempts()->first()?->error_message)->toContain('JSON válido');
 });
 
 it('marks the posting failed when the description is out of bounds', function () {
@@ -167,7 +170,8 @@ it('marks the posting failed when the description is out of bounds', function ()
     $posting->refresh();
 
     expect($posting->status)->toBe(JobPostingStatus::Failed)
-        ->and($posting->error_message)->toContain('entre 20 e 100000 caracteres');
+        ->and($posting->error_message)->toBe('Não foi possível concluir a análise com IA. Tente novamente.')
+        ->and($posting->attempts()->first()?->error_message)->toContain('entre 20 e 100000 caracteres');
 });
 
 it('recovers owner categories end to end from misclassified output', function () {

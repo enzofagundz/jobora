@@ -236,9 +236,10 @@ it('AnalyzeJobPosting failed notification has Ver vaga link', function () {
     $notification = $user->notifications()->sole();
 
     expect($notification->data['title'])->toBe('Falha na análise da vaga')
-        ->and($notification->data['actions'])->toHaveCount(1)
-        ->and($notification->data['actions'][0]['label'])->toBe('Ver vaga')
-        ->and($notification->data['actions'][0]['url'])->toContain((string) $posting->id);
+        ->and($notification->data['actions'])->toHaveCount(2)
+        ->and($notification->data['actions'][0]['label'])->toBe('Ver detalhes')
+        ->and($notification->data['actions'][0]['url'])->toContain((string) $posting->id)
+        ->and($notification->data['actions'][1]['label'])->toBe('Tentar novamente');
 });
 
 it('TriageJobCaptures success notification has Ver capturas link', function () {
@@ -365,9 +366,10 @@ it('AnalyzeJobPosting failed() via job failure has Ver vaga link', function () {
     $notification = $user->notifications()->sole();
 
     expect($notification->data['title'])->toBe('Falha na análise da vaga')
-        ->and($notification->data['actions'])->toHaveCount(1)
-        ->and($notification->data['actions'][0]['label'])->toBe('Ver vaga')
-        ->and($notification->data['actions'][0]['url'])->toContain((string) $posting->id);
+        ->and($notification->data['actions'])->toHaveCount(2)
+        ->and($notification->data['actions'][0]['label'])->toBe('Ver detalhes')
+        ->and($notification->data['actions'][0]['url'])->toContain((string) $posting->id)
+        ->and($notification->data['actions'][1]['label'])->toBe('Tentar novamente');
 });
 
 it('TriageJobCaptures failed() has Ver capturas link', function () {

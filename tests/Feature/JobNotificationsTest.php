@@ -105,7 +105,8 @@ it('notifica falha terminal de análise sem criar sucesso', function () {
     expect($notification)->not->toBeNull()
         ->and($notification->data['format'])->toBe('filament')
         ->and($notification->data['title'])->toBe('Falha na análise da vaga')
-        ->and($notification->data['body'])->toBe('A análise não foi concluída. Abra a vaga para tentar novamente.');
+        ->and($notification->data['body'])->toContain('Não foi possível concluir')
+        ->and($notification->data['body'])->toContain('Tentativa');
 
     $titles = $userA->notifications()->pluck('data')->map(fn ($d) => $d['title'] ?? null)->all();
     expect($titles)->not->toContain('Análise de vaga concluída');
@@ -125,7 +126,8 @@ it('AnalyzeJobPosting failed() persiste falha e notifica erro apenas uma vez', f
 
     $posting->refresh();
     expect($posting->status)->toBe(JobPostingStatus::Failed)
-        ->and($posting->error_message)->toContain('timeout');
+        ->and($posting->error_message)->toContain('demorou demais')
+        ->and($posting->attempts()->first()?->error_message)->toContain('timeout');
 
     $notification = $user->notifications()->first();
     expect($notification)->not->toBeNull()

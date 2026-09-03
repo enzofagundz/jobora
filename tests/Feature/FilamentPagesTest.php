@@ -173,18 +173,18 @@ it('ações da listagem mudam o estado da vaga', function () {
         'skills' => ['Python'],
     ]]);
 
-    $posting = JobPosting::factory()->for(auth()->user(), 'user')->create(['description' => longDescription()]);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->failed()->create(['description' => longDescription()]);
 
     Livewire::test(ListJobPostings::class)
         ->callTableAction('analyze', $posting);
 
-    Queue::assertPushed(AnalyzeJobPosting::class, fn (AnalyzeJobPosting $job) => $job->posting->is($posting) && $job->userId === auth()->id());
+    Queue::assertPushed(AnalyzeJobPosting::class, fn (AnalyzeJobPosting $job) => $job->posting->is($posting) && $job->userId === auth()->id() && $job->trigger === 'manual_retry');
 
     // A análise roda em segundo plano; o estado só muda quando o job executa.
     $posting->refresh();
-    expect($posting->status)->toBe(JobPostingStatus::Pending);
+    expect($posting->status)->toBe(JobPostingStatus::Failed);
 
-    (new AnalyzeJobPosting($posting, auth()->id()))->handle(app(JobAnalysisService::class));
+    (new AnalyzeJobPosting($posting, auth()->id(), 'manual_retry'))->handle(app(JobAnalysisService::class));
 
     $posting->refresh();
 
@@ -192,14 +192,14 @@ it('ações da listagem mudam o estado da vaga', function () {
         ->and($posting->suggested_data)->not->toBeNull();
 });
 
-it('mostra a análise com IA somente em vagas pendentes ou com falha', function () {
+it('mostra a tentativa novamente somente em vagas com falha', function () {
     $pending = JobPosting::factory()->for(auth()->user(), 'user')->create(['description' => longDescription()]);
     $confirmed = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
     $needsReview = JobPosting::factory()->for(auth()->user(), 'user')->needsReview()->create(['description' => longDescription()]);
     $failed = JobPosting::factory()->for(auth()->user(), 'user')->failed()->create(['description' => longDescription()]);
 
     Livewire::test(ListJobPostings::class)
-        ->assertTableActionVisible('analyze', $pending)
+        ->assertTableActionHidden('analyze', $pending)
         ->assertTableActionVisible('analyze', $failed)
         ->assertTableActionHidden('analyze', $confirmed)
         ->assertTableActionHidden('analyze', $needsReview);
@@ -538,15 +538,19 @@ it('ApplicationPage abre uma vaga confirmada sem afetar currículo ou métodos e
         ->and($confirmed->resumeAdaptation?->adapted_content)->toBe('Versão adaptada preservada.');
 });
 
-it('redireciona para a listagem ao abrir a view de vaga não visualizável', function () {
+it('permite visualizar vaga aguardando revisão no detalhe', function () {
     $needsReview = JobPosting::factory()->for(auth()->user(), 'user')->needsReview()->create(['description' => longDescription()]);
-    $failed = JobPosting::factory()->for(auth()->user(), 'user')->failed()->create(['description' => longDescription()]);
 
     Livewire::test(ViewJobPosting::class, ['record' => $needsReview->id])
-        ->assertRedirect(ListJobPostings::getUrl());
+        ->assertSuccessful();
+});
+
+it('permite visualizar vaga com falha para diagnóstico', function () {
+    $failed = JobPosting::factory()->for(auth()->user(), 'user')->failed()->create(['description' => longDescription()]);
 
     Livewire::test(ViewJobPosting::class, ['record' => $failed->id])
-        ->assertRedirect(ListJobPostings::getUrl());
+        ->assertSuccessful()
+        ->assertSee('Falha simulada');
 });
 
 it('permite visualizar vagas pendentes e confirmadas', function () {

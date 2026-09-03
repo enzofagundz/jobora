@@ -237,8 +237,9 @@ it('falha, registra error_message e permite nova análise com sucesso', function
 
     $posting->refresh();
     expect($posting->status)->toBe(JobPostingStatus::Failed)
-        ->and($posting->error_message)->toContain('Serviço indisponível')
-        ->and($posting->suggested_data)->toBeNull();
+        ->and($posting->error_message)->toBe('Não foi possível concluir a análise com IA. Tente novamente.')
+        ->and($posting->suggested_data)->toBeNull()
+        ->and($posting->attempts()->first()?->error_message)->toContain('Serviço indisponível');
 
     $service->analyze($user, $posting->refresh());
 
