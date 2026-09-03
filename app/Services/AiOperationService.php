@@ -5,11 +5,14 @@ namespace App\Services;
 use App\Enums\AiOperationStatus;
 use App\Enums\AiOperationType;
 use App\Enums\JobPostingStatus;
+use App\Filament\Pages\ProfessionalCompetenciesPage;
+use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Jobs\ProcessAiOperation;
 use App\Models\AiOperation;
 use App\Models\JobPosting;
 use App\Models\User;
 use Closure;
+use Filament\Actions\Action;
 use Filament\Notifications\Events\DatabaseNotificationsSent;
 use Filament\Notifications\Notification;
 use Illuminate\Queue\TimeoutExceededException;
@@ -745,6 +748,13 @@ class AiOperationService
                     $notification->danger();
                 }
 
+                [$linkUrl, $linkLabel] = $this->notificationLinkFor($current);
+                if (filled($linkUrl) && filled($linkLabel)) {
+                    $notification->actions([
+                        Action::make('view')->label($linkLabel)->url($linkUrl)->markAsRead(),
+                    ]);
+                }
+
                 // Filament queues its database notification; insert it directly so
                 // the durable notification and terminal marker commit together.
                 $databaseNotification = $notification->toDatabase();
@@ -779,5 +789,20 @@ class AiOperationService
                 'error' => $exception->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * @return array{0: ?string, 1: ?string}
+     */
+    private function notificationLinkFor(AiOperation $operation): array
+    {
+        return match ($operation->operation_type) {
+            AiOperationType::ResumeAdaptation,
+            AiOperationType::AtsOptimization,
+            AiOperationType::AtsScore => $operation->job_posting_id
+                ? [JobPostingResource::getUrl('application', ['record' => $operation->job_posting_id]), 'Ver candidatura']
+                : [null, null],
+            AiOperationType::StrategicCompetencyClassification => [ProfessionalCompetenciesPage::getUrl(), 'Ver competências'],
+        };
     }
 }
