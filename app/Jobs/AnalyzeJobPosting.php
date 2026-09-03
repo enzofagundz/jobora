@@ -3,9 +3,11 @@
 namespace App\Jobs;
 
 use App\Enums\JobPostingStatus;
+use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Models\JobPosting;
 use App\Models\User;
 use App\Services\JobAnalysisService;
+use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -102,12 +104,18 @@ class AnalyzeJobPosting implements ShouldBeUnique, ShouldQueueAfterCommit
                 ->success()
                 ->title('Análise de vaga concluída')
                 ->body('A vaga foi analisada e está aguardando revisão.')
+                ->actions([
+                    Action::make('view')->label('Ver vaga')->url(JobPostingResource::getUrl('view', ['record' => $fresh->getKey()]))->markAsRead(),
+                ])
                 ->sendToDatabase($user, isEventDispatched: true);
         } elseif ($fresh->status === JobPostingStatus::Failed) {
             Notification::make()
                 ->danger()
                 ->title('Falha na análise da vaga')
                 ->body('A análise não foi concluída. Abra a vaga para tentar novamente.')
+                ->actions([
+                    Action::make('view')->label('Ver vaga')->url(JobPostingResource::getUrl('view', ['record' => $fresh->getKey()]))->markAsRead(),
+                ])
                 ->sendToDatabase($user, isEventDispatched: true);
         }
     }
@@ -143,6 +151,9 @@ class AnalyzeJobPosting implements ShouldBeUnique, ShouldQueueAfterCommit
                     ->danger()
                     ->title('Falha na análise da vaga')
                     ->body('A análise não foi concluída. Abra a vaga para tentar novamente.')
+                    ->actions([
+                        Action::make('view')->label('Ver vaga')->url(JobPostingResource::getUrl('view', ['record' => $fresh->getKey()]))->markAsRead(),
+                    ])
                     ->sendToDatabase($user, isEventDispatched: true);
             }
         }
