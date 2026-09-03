@@ -5,10 +5,12 @@ namespace App\Services;
 use App\Agents\JobExtractionAgent;
 use App\DTO\JobAnalysisResult;
 use App\Enums\JobPostingStatus;
+use App\Models\JobIaAttempt;
 use App\Models\JobPosting;
 use App\Models\User;
 use App\Support\Ai\AiRequestGate;
 use App\Support\Ai\AiUsageHelper;
+use App\Support\Ai\FriendlyAiErrorMapper;
 use App\Support\Ai\TransientAiClassifier;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
@@ -34,7 +36,7 @@ class JobAnalysisService
      * vaga em pending — não são falha da análise.
      * Confirmed postings are never re-analyzed.
      */
-    public function analyze(User $user, JobPosting $posting): JobPosting
+    public function analyze(User $user, JobPosting $posting, string $trigger = 'auto_dispatch'): JobPosting
     {
         Gate::forUser($user)->authorize('update', $posting);
 
@@ -79,6 +81,11 @@ class JobAnalysisService
                 'error_message' => null,
             ])->save();
 
+            $attempt = $this->recordAttempt($user, $posting, $this->baseAttemptPayload($posting, $started, $inputChars, $trigger) + [
+                'status' => 'success',
+                'transient' => false,
+            ] + AiUsageHelper::extract($usage));
+
             $this->log('info', 'Job posting analyzed successfully.', $posting, $started, [
                 'item_count' => count($result->items, COUNT_RECURSIVE) - count($result->items),
                 'operation' => 'job_extraction',
@@ -86,12 +93,22 @@ class JobAnalysisService
                 'model' => $this->agent->model(),
                 'input_chars' => $inputChars,
                 'usage' => $usage,
+                'attempt_id' => $attempt->id,
+                'attempt_no' => $attempt->attempt_no,
+                'trigger' => $trigger,
             ] + AiUsageHelper::extract($usage));
 
             return $posting;
         } catch (Throwable $e) {
             if (TransientAiClassifier::isTransient($e)) {
                 $meta = TransientAiClassifier::metadata($e);
+
+                $attempt = $this->recordAttempt($user, $posting, $this->baseAttemptPayload($posting, $started, $inputChars, $trigger) + [
+                    'status' => 'transient_error',
+                    'error_class' => $e::class,
+                    'error_message' => $e->getMessage(),
+                    'transient' => true,
+                ] + AiUsageHelper::extract($usage));
 
                 $this->log('warning', 'Job posting analysis deferred due to a transient provider error.', $posting, $started, [
                     'error' => $e->getMessage(),
@@ -102,6 +119,9 @@ class JobAnalysisService
                     'retry_after' => $meta['retry_after'],
                     'status' => $meta['status'],
                     'usage' => $usage,
+                    'attempt_id' => $attempt->id,
+                    'attempt_no' => $attempt->attempt_no,
+                    'trigger' => $trigger,
                 ] + AiUsageHelper::extract($usage));
 
                 throw $e;
@@ -110,20 +130,58 @@ class JobAnalysisService
             $posting->forceFill([
                 'status' => JobPostingStatus::Failed,
                 'suggested_data' => null,
-                'error_message' => 'Falha na análise com IA: '.$e->getMessage(),
+                'error_message' => FriendlyAiErrorMapper::for($e),
             ])->save();
+
+            $attempt = $this->recordAttempt($user, $posting, $this->baseAttemptPayload($posting, $started, $inputChars, $trigger) + [
+                'status' => 'permanent_error',
+                'error_class' => $e::class,
+                'error_message' => $e->getMessage(),
+                'transient' => false,
+            ] + AiUsageHelper::extract($usage));
 
             $this->log('error', 'Job posting analysis failed.', $posting, $started, [
                 'error' => $e->getMessage(),
+                'error_class' => $e::class,
                 'operation' => 'job_extraction',
                 'provider' => $this->agent->provider(),
                 'model' => $this->agent->model(),
                 'input_chars' => $inputChars,
                 'usage' => $usage,
+                'attempt_id' => $attempt->id,
+                'attempt_no' => $attempt->attempt_no,
+                'trigger' => $trigger,
             ] + AiUsageHelper::extract($usage));
 
             return $posting;
         }
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function baseAttemptPayload(JobPosting $posting, float $started, int $inputChars, string $trigger): array
+    {
+        return [
+            'operation' => 'job_extraction',
+            'provider' => $this->agent->provider(),
+            'model' => $this->agent->model(),
+            'latency_ms' => (int) round((microtime(true) - $started) * 1000),
+            'input_chars' => $inputChars,
+            'attempt_no' => $posting->nextAttemptNo(),
+            'trigger' => $trigger,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    private function recordAttempt(User $user, JobPosting $posting, array $attributes): JobIaAttempt
+    {
+        return JobIaAttempt::query()->create(array_merge($attributes, [
+            'job_posting_id' => $posting->id,
+            'user_id' => $user->id,
+        ]));
     }
 
     private function assertDescriptionWithinLimits(string $description): void

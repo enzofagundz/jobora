@@ -7,6 +7,7 @@ use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Models\JobPosting;
 use App\Models\User;
 use App\Services\JobAnalysisService;
+use App\Support\Ai\FriendlyAiErrorMapper;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
@@ -14,6 +15,7 @@ use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueueAfterCommit;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 class AnalyzeJobPosting implements ShouldBeUnique, ShouldQueueAfterCommit
@@ -38,7 +40,7 @@ class AnalyzeJobPosting implements ShouldBeUnique, ShouldQueueAfterCommit
      */
     public array $backoff = [10, 30, 60];
 
-    public function __construct(public JobPosting $posting, public int $userId) {}
+    public function __construct(public JobPosting $posting, public int $userId, public string $trigger = 'auto_dispatch') {}
 
     /**
      * Unique lock key: one concurrent analysis per posting.
@@ -72,6 +74,16 @@ class AnalyzeJobPosting implements ShouldBeUnique, ShouldQueueAfterCommit
         }
     }
 
+    private function provider(): string
+    {
+        return (string) config('ai.default');
+    }
+
+    private function model(): string
+    {
+        return (string) config('ai.providers.'.config('ai.default').'.models.text.default');
+    }
+
     public function handle(JobAnalysisService $service): void
     {
         $user = User::find($this->userId);
@@ -86,7 +98,7 @@ class AnalyzeJobPosting implements ShouldBeUnique, ShouldQueueAfterCommit
             return;
         }
 
-        $service->analyze($user, $posting);
+        $service->analyze($user, $posting, $this->trigger);
 
         $fresh = $posting->fresh();
 
@@ -109,15 +121,26 @@ class AnalyzeJobPosting implements ShouldBeUnique, ShouldQueueAfterCommit
                 ])
                 ->sendToDatabase($user, isEventDispatched: true);
         } elseif ($fresh->status === JobPostingStatus::Failed) {
-            Notification::make()
-                ->danger()
-                ->title('Falha na análise da vaga')
-                ->body('A análise não foi concluída. Abra a vaga para tentar novamente.')
-                ->actions([
-                    Action::make('view')->label('Ver vaga')->url(JobPostingResource::getUrl('view', ['record' => $fresh->getKey()]))->markAsRead(),
-                ])
-                ->sendToDatabase($user, isEventDispatched: true);
+            $this->notifyFailure($user, $fresh);
         }
+    }
+
+    private function notifyFailure(User $user, JobPosting $posting): void
+    {
+        $attempt = $posting->latestAttempt();
+        $attemptNo = $attempt?->attempt_no ?? $posting->latestAttemptNo();
+        $friendly = (string) ($posting->error_message ?: 'Não foi possível concluir a análise com IA. Tente novamente.');
+        $technical = $attempt ? " {$attempt->operation} {$attempt->provider}/{$attempt->model} ({$attempt->error_class})" : '';
+
+        Notification::make()
+            ->danger()
+            ->title('Falha na análise da vaga')
+            ->body("{$friendly} Tentativa {$attemptNo}.{$technical}")
+            ->actions([
+                Action::make('view')->label('Ver detalhes')->url(JobPostingResource::getUrl('view', ['record' => $posting->getKey()]))->markAsRead(),
+                Action::make('retry')->label('Tentar novamente')->action(fn (): mixed => self::dispatch($posting, $user->id, 'manual_retry'))->markAsRead(),
+            ])
+            ->sendToDatabase($user, isEventDispatched: true);
     }
 
     /**
@@ -141,20 +164,42 @@ class AnalyzeJobPosting implements ShouldBeUnique, ShouldQueueAfterCommit
         }
 
         if ($fresh && $fresh->status->value === 'pending') {
+            $friendly = FriendlyAiErrorMapper::for($exception ?? new \RuntimeException('timeout'));
+            $attemptNo = $fresh->nextAttemptNo();
+
             $fresh->forceFill([
                 'status' => JobPostingStatus::Failed,
-                'error_message' => 'Falha na análise com IA: '.($exception?->getMessage() ?? 'timeout'),
+                'suggested_data' => null,
+                'error_message' => $friendly,
             ])->save();
 
+            $attempt = $fresh->attempts()->create([
+                'user_id' => $fresh->user_id,
+                'operation' => 'job_extraction',
+                'provider' => $this->provider(),
+                'model' => $this->model(),
+                'status' => 'permanent_error',
+                'error_class' => $exception ? $exception::class : 'ExhaustedRetries',
+                'error_message' => $exception?->getMessage() ?? 'timeout',
+                'transient' => false,
+                'attempt_no' => $attemptNo,
+                'trigger' => 'auto_retry',
+            ]);
+
+            Log::channel('ai')->error('Job posting analysis failed.', [
+                'job_posting_id' => $fresh->id,
+                'error' => $attempt->error_message,
+                'error_class' => $attempt->error_class,
+                'operation' => 'job_extraction',
+                'provider' => $attempt->provider,
+                'model' => $attempt->model,
+                'attempt_id' => $attempt->id,
+                'attempt_no' => $attempt->attempt_no,
+                'trigger' => 'auto_retry',
+            ]);
+
             if ($user) {
-                Notification::make()
-                    ->danger()
-                    ->title('Falha na análise da vaga')
-                    ->body('A análise não foi concluída. Abra a vaga para tentar novamente.')
-                    ->actions([
-                        Action::make('view')->label('Ver vaga')->url(JobPostingResource::getUrl('view', ['record' => $fresh->getKey()]))->markAsRead(),
-                    ])
-                    ->sendToDatabase($user, isEventDispatched: true);
+                $this->notifyFailure($user, $fresh->fresh() ?? $fresh);
             }
         }
     }
