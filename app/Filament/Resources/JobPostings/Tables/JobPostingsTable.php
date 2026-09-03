@@ -60,6 +60,11 @@ class JobPostingsTable
                         JobPostingStatus::Failed => 'danger',
                     })
                     ->sortable(),
+                TextColumn::make('error_message')
+                    ->label('Erro')
+                    ->placeholder('—')
+                    ->limit(60)
+                    ->toggleable(),
                 TextColumn::make('items_count')
                     ->label('Itens')
                     ->counts('items')
@@ -89,16 +94,16 @@ class JobPostingsTable
             ])
             ->recordActions([
                 Action::make('analyze')
-                    ->label('Analisar com IA')
+                    ->label(fn (JobPosting $record): string => $record->status === JobPostingStatus::Failed ? 'Tentar novamente' : 'Analisar com IA')
                     ->icon(Heroicon::OutlinedSparkles)
                     ->color('primary')
                     ->authorize('update')
-                    ->visible(fn (JobPosting $record): bool => in_array($record->status, [JobPostingStatus::Pending, JobPostingStatus::Failed], true))
+                    ->visible(fn (JobPosting $record): bool => $record->status === JobPostingStatus::Failed)
                     ->requiresConfirmation()
                     ->modalHeading('Analisar com IA')
                     ->modalDescription('A descrição da vaga será enviada ao modelo de linguagem para (re)estruturação. Custo de uma chamada de IA por execução.')
                     ->action(function (JobPosting $record): void {
-                        AnalyzeJobPosting::dispatch($record, (int) auth()->id());
+                        AnalyzeJobPosting::dispatch($record, (int) auth()->id(), 'manual_retry');
 
                         Notification::make()
                             ->info()

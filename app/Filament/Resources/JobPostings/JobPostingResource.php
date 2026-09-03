@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\JobPostings;
 
+use App\Enums\JobPostingStatus;
 use App\Filament\Resources\JobPostings\Pages\ApplicationPage;
 use App\Filament\Resources\JobPostings\Pages\CreateJobPosting;
 use App\Filament\Resources\JobPostings\Pages\ListJobPostings;
@@ -12,6 +13,7 @@ use App\Models\JobPosting;
 use BackedEnum;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Resources\Resource;
+use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
@@ -59,6 +61,50 @@ class JobPostingResource extends Resource
                     ->openUrlInNewTab()
                     ->placeholder('—')
                     ->columnSpanFull(),
+                Section::make('Diagnóstico da análise')
+                    ->visible(fn (JobPosting $record): bool => $record->status === JobPostingStatus::Failed)
+                    ->schema([
+                        TextEntry::make('status')
+                            ->label('Status')
+                            ->badge(),
+                        TextEntry::make('error_message')
+                            ->label('O que aconteceu')
+                            ->placeholder('—')
+                            ->columnSpanFull(),
+                        TextEntry::make('attempts_count')
+                            ->label('Tentativas')
+                            ->state(fn (JobPosting $record): int => $record->attempts()->count()),
+                        TextEntry::make('last_attempt')
+                            ->label('Última tentativa')
+                            ->state(fn (JobPosting $record): ?string => $record->lastAttemptAt()?->format('d/m/Y H:i')),
+                    ]),
+                Section::make('Detalhes técnicos')
+                    ->collapsible()
+                    ->visible(fn (JobPosting $record): bool => $record->latestAttempt() !== null)
+                    ->schema([
+                        TextEntry::make('operation')
+                            ->label('Operação')
+                            ->state(fn (JobPosting $record): ?string => $record->latestAttempt()?->operation),
+                        TextEntry::make('provider')
+                            ->label('Provedor')
+                            ->state(fn (JobPosting $record): ?string => $record->latestAttempt()?->provider),
+                        TextEntry::make('model')
+                            ->label('Modelo')
+                            ->state(fn (JobPosting $record): ?string => $record->latestAttempt()?->model),
+                        TextEntry::make('error_class')
+                            ->label('Classe do erro')
+                            ->state(fn (JobPosting $record): ?string => $record->latestAttempt()?->error_class),
+                        TextEntry::make('technical_error')
+                            ->label('Erro técnico')
+                            ->state(fn (JobPosting $record): ?string => $record->latestAttempt()?->error_message)
+                            ->columnSpanFull(),
+                        TextEntry::make('latency')
+                            ->label('Latência (ms)')
+                            ->state(fn (JobPosting $record): ?int => $record->latestAttempt()?->latency_ms),
+                        TextEntry::make('attempt_id')
+                            ->label('Attempt ID')
+                            ->state(fn (JobPosting $record): ?int => $record->latestAttempt()?->id),
+                    ]),
             ]);
     }
 
