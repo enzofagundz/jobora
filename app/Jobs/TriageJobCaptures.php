@@ -3,9 +3,11 @@
 namespace App\Jobs;
 
 use App\Enums\JobCaptureTriageStatus;
+use App\Filament\Resources\JobCaptures\JobCaptureResource;
 use App\Models\JobCapture;
 use App\Models\User;
 use App\Services\JobTriageService;
+use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -89,23 +91,29 @@ class TriageJobCaptures implements ShouldBeUnique, ShouldQueueAfterCommit
         $completed = $fresh->where('triage_status', JobCaptureTriageStatus::Completed)->count();
         $failed = $fresh->where('triage_status', JobCaptureTriageStatus::Failed)->count();
 
+        $triageUrl = JobCaptureResource::getUrl('index');
+        $triageAction = [Action::make('view')->label('Ver capturas')->url($triageUrl)->markAsRead()];
+
         if ($failed === 0 && $completed > 0) {
             Notification::make()
                 ->success()
                 ->title('Triagem concluída')
                 ->body("{$completed} captura(s) processada(s) com sucesso.")
+                ->actions($triageAction)
                 ->sendToDatabase($user, isEventDispatched: true);
         } elseif ($completed > 0 && $failed > 0) {
             Notification::make()
                 ->warning()
                 ->title('Triagem concluída com erros')
                 ->body("{$completed} captura(s) processada(s); {$failed} falha(s).")
+                ->actions($triageAction)
                 ->sendToDatabase($user, isEventDispatched: true);
         } elseif ($completed === 0 && $failed > 0) {
             Notification::make()
                 ->danger()
                 ->title('Falha na triagem')
                 ->body('Nenhuma captura foi processada com sucesso.')
+                ->actions($triageAction)
                 ->sendToDatabase($user, isEventDispatched: true);
         }
     }
@@ -132,6 +140,9 @@ class TriageJobCaptures implements ShouldBeUnique, ShouldQueueAfterCommit
                 ->danger()
                 ->title('Falha na triagem')
                 ->body('Nenhuma captura foi processada com sucesso.')
+                ->actions([
+                    Action::make('view')->label('Ver capturas')->url(JobCaptureResource::getUrl('index'))->markAsRead(),
+                ])
                 ->sendToDatabase($recipient, isEventDispatched: true);
         }
     }
