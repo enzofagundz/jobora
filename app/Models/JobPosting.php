@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\JobPostingStatus;
+use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -43,6 +44,31 @@ class JobPosting extends Model
     public function items(): HasMany
     {
         return $this->hasMany(JobPostingItem::class);
+    }
+
+    public function attempts(): HasMany
+    {
+        return $this->hasMany(JobIaAttempt::class)->orderBy('attempt_no');
+    }
+
+    public function latestAttempt(): ?JobIaAttempt
+    {
+        return $this->attempts()->latest('id')->first();
+    }
+
+    public function latestAttemptNo(): int
+    {
+        return (int) ($this->attempts()->max('attempt_no') ?? 0);
+    }
+
+    public function nextAttemptNo(): int
+    {
+        return $this->latestAttemptNo() + 1;
+    }
+
+    public function lastAttemptAt(): ?CarbonInterface
+    {
+        return $this->latestAttempt()?->created_at;
     }
 
     public function applicationMethods(): HasMany

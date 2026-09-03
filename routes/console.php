@@ -12,6 +12,10 @@ Schedule::command('job-posting-items:normalize')
     ->daily()
     ->withoutOverlapping();
 
+Schedule::command('job-ia-attempts:prune')
+    ->daily()
+    ->withoutOverlapping();
+
 Schedule::command('ai-operations:expire')
     ->everyMinute()
     ->withoutOverlapping();
