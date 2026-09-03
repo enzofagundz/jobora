@@ -40,9 +40,71 @@ it('drops empty and oversized names and unknown categories', function () {
         'unknown_field' => ['ruído'],
     ]);
 
-    expect($result->items[ConceptCategory::Skill->value])->toBe(['Docker', 'kafka'])
+    // Docker é dono de tools; Kafka desconhecido fica em skills em Title Case.
+    expect($result->items[ConceptCategory::Skill->value])->toBe(['Kafka'])
+        ->and($result->items[ConceptCategory::Tool->value])->toBe(['Docker'])
         ->and($result->company)->toBeNull()
         ->and($result->items)->not->toHaveKey(ConceptCategory::Requirement->value);
+});
+
+it('moves misclassified concepts to the owner category without duplication', function () {
+    $result = resultFrom([
+        'tools' => ['php'],
+    ]);
+
+    expect($result->items)->toHaveKey(ConceptCategory::Skill->value)
+        ->and($result->items[ConceptCategory::Skill->value])->toBe(['PHP'])
+        ->and($result->items)->not->toHaveKey(ConceptCategory::Tool->value);
+});
+
+it('deduplicates the same concept across categories keeping the owner', function () {
+    $result = resultFrom([
+        'skills' => ['PHP'],
+        'tools' => ['php', 'Docker'],
+    ]);
+
+    expect($result->items[ConceptCategory::Skill->value] ?? [])->toBe(['PHP'])
+        ->and($result->items[ConceptCategory::Tool->value] ?? [])->toBe(['Docker']);
+});
+
+it('converges REST API variants to the canonical form in skills', function () {
+    $result = resultFrom([
+        'skills' => ['api rest'],
+        'tools' => ['REST API'],
+    ]);
+
+    expect(collect($result->items)->flatten()->all())->toBe(['REST API'])
+        ->and($result->items)->toHaveKey(ConceptCategory::Skill->value);
+});
+
+it('keeps pt-BR free text intact while Title Casing unknown concepts', function () {
+    $result = resultFrom([
+        'skills' => ['kafka'],
+        'requirements' => ['disponibilidade para viagens'],
+        'experience' => ['3+ anos'],
+    ]);
+
+    expect($result->items[ConceptCategory::Skill->value] ?? [])->toBe(['Kafka'])
+        ->and($result->items[ConceptCategory::Requirement->value] ?? [])->toBe(['disponibilidade para viagens'])
+        ->and($result->items[ConceptCategory::Experience->value] ?? [])->toBe(['3+ anos']);
+});
+
+it('moves misclassified methodologies to the owner category', function () {
+    $result = resultFrom([
+        'skills' => ['Scrum'],
+    ]);
+
+    expect($result->items)->toHaveKey(ConceptCategory::Methodology->value)
+        ->and($result->items[ConceptCategory::Methodology->value])->toBe(['Scrum'])
+        ->and($result->items)->not->toHaveKey(ConceptCategory::Skill->value);
+});
+
+it('keeps unmapped domain competencies where the model put them', function () {
+    $result = resultFrom([
+        'skills' => ['Vendas consultivas'],
+    ]);
+
+    expect($result->items[ConceptCategory::Skill->value] ?? [])->toBe(['Vendas Consultivas']);
 });
 
 it('truncates the item list at 100 items keeping category order', function () {

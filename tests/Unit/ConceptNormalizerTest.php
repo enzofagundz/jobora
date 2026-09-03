@@ -14,11 +14,38 @@ it('maps aliases to canonical names', function () {
         ->and($normalizer->normalize('aws'))->toBe('AWS');
 });
 
-it('trims, collapses whitespace and lowercases unknown concepts', function () {
+it('trims, collapses whitespace and Title Cases unknown concepts', function () {
     $normalizer = new ConceptNormalizer;
 
-    expect($normalizer->normalize('  React   Native '))->toBe('react native')
-        ->and($normalizer->normalize('Kotlin'))->toBe('kotlin');
+    expect($normalizer->normalize('  React   Native '))->toBe('React Native')
+        ->and($normalizer->normalize('Kotlin'))->toBe('Kotlin')
+        ->and($normalizer->normalize('kafka'))->toBe('Kafka');
+});
+
+it('maps REST API variants to the canonical English form', function () {
+    $normalizer = new ConceptNormalizer;
+
+    expect($normalizer->normalize('api rest'))->toBe('REST API')
+        ->and($normalizer->normalize('rest api'))->toBe('REST API')
+        ->and($normalizer->normalize('REST API'))->toBe('REST API')
+        ->and($normalizer->normalize('rest'))->toBe('REST API');
+});
+
+it('keeps canonical casing for seeded infrastructure acronyms', function () {
+    $normalizer = new ConceptNormalizer;
+
+    expect($normalizer->normalize('ci/cd'))->toBe('CI/CD')
+        ->and($normalizer->normalize('graphql'))->toBe('GraphQL');
+});
+
+it('returns null owner for unknown or invalid categories', function () {
+    $normalizer = new ConceptNormalizer;
+
+    expect($normalizer->ownerCategory('Inexistente'))->toBeNull();
+
+    config()->set('concepts.Bogus', ['category' => 'bogus']);
+
+    expect($normalizer->ownerCategory('Bogus'))->toBeNull();
 });
 
 it('returns empty string for blank names', function () {

@@ -170,6 +170,30 @@ it('marks the posting failed when the description is out of bounds', function ()
         ->and($posting->error_message)->toContain('entre 20 e 100000 caracteres');
 });
 
+it('recovers owner categories end to end from misclassified output', function () {
+    JobExtractionAgent::fake([[
+        'role' => 'Desenvolvedor PHP Sênior',
+        'company' => null,
+        'skills' => ['api rest'],
+        'tools' => ['php', 'REST API'],
+        'methodologies' => [],
+        'requirements' => [],
+        'experience' => [],
+    ]]);
+
+    $posting = postingWithDescription();
+
+    app(JobAnalysisService::class)->analyze($posting->user, $posting);
+
+    $posting->refresh();
+
+    expect($posting->status)->toBe(JobPostingStatus::NeedsReview)
+        ->and($posting->role)->toBe('Desenvolvedor PHP Sênior')
+        ->and($posting->suggested_data['items'])->toContain(['category' => 'skill', 'name' => 'PHP'])
+        ->and($posting->suggested_data['items'])->toContain(['category' => 'skill', 'name' => 'REST API'])
+        ->and($posting->suggested_data['items'])->not->toContain(['category' => 'tool', 'name' => 'PHP']);
+});
+
 it('retries a failed posting', function () {
     $attempts = 0;
 
