@@ -39,6 +39,17 @@ it('detects concepts inside rich HTML content', function () {
         ->not->toContain('Kubernetes');
 });
 
+it('does not match REST API on incidental substring rest', function () {
+    $content = 'Prestação de serviços e interesse em vendas.';
+
+    expect(analyzer()->conceptsIn($content))->not->toContain('REST API');
+});
+
+it('detects REST API by its multiword keyword', function () {
+    $content = 'Experiência com REST API e integrações.';
+
+    expect(analyzer()->conceptsIn($content))->toContain('REST API');
+});
 it('returns an empty set for a blank resume', function () {
     expect(analyzer()->conceptsIn(null))->toBe([])
         ->and(analyzer()->conceptsIn(''))->toBe([]);
