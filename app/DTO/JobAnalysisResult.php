@@ -42,6 +42,7 @@ final class JobAnalysisResult
         $company = self::nullableString($data['company'] ?? null, 'company');
 
         $items = [];
+        $seenCrossCategory = [];
         $total = 0;
 
         foreach (ConceptCategory::all() as $category) {
@@ -60,34 +61,56 @@ final class JobAnalysisResult
                 throw new InvalidArgumentException("Campo \"{$key}\" deve ser uma lista de strings.");
             }
 
-            $names = [];
-
             foreach ($raw as $entry) {
+                if ($total >= self::MAX_ITEMS) {
+                    break 2;
+                }
+
                 if (! is_string($entry)) {
                     throw new InvalidArgumentException("Campo \"{$key}\" deve conter apenas strings.");
                 }
 
-                $name = $normalizer->normalize($entry);
+                // Texto livre (requirements/experience) em pt-BR: preserva
+                // limpeza estável sem Title Case de conceitos.
+                $isFreeText = $category->isFreeText();
+
+                $name = $isFreeText
+                    ? $normalizer->clean($entry)
+                    : $normalizer->normalize($entry);
 
                 if ($name === '' || strlen($name) > self::MAX_NAME_LENGTH) {
                     continue;
                 }
 
-                if (in_array($name, $names, true)) {
+                $target = $category->value;
+
+                if (! $isFreeText) {
+                    $owner = $normalizer->ownerCategory($name);
+                    if ($owner !== null) {
+                        $target = $owner;
+                    }
+                }
+
+                $dedupKey = $normalizer->clean($name);
+
+                if (isset($seenCrossCategory[$dedupKey])) {
                     continue;
                 }
 
-                $names[] = $name;
-            }
+                if (in_array($name, $items[$target] ?? [], true)) {
+                    $seenCrossCategory[$dedupKey] = true;
 
-            if ($names === []) {
-                continue;
-            }
+                    continue;
+                }
 
-            // Keep category order; cut the tail once the 100-item cap is hit.
-            $items[$category->value] = array_slice($names, 0, self::MAX_ITEMS - $total);
-            $total += count($items[$category->value]);
+                $seenCrossCategory[$dedupKey] = true;
+                $items[$target][] = $name;
+                $total++;
+            }
         }
+
+        // Remove categorias vazias e respeita o teto de 100 itens.
+        $items = array_filter($items, fn (array $names): bool => $names !== []);
 
         $methods = [];
         $seen = [];

@@ -38,4 +38,13 @@ enum ConceptCategory: string implements HasLabel
             self::Experience,
         ];
     }
+
+    /**
+     * Whether the category holds pt-BR free text instead of normalized
+     * market concepts (no Title Case, no owner remap).
+     */
+    public function isFreeText(): bool
+    {
+        return $this === self::Requirement || $this === self::Experience;
+    }
 }

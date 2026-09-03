@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\ConceptCategory;
 use Illuminate\Support\Str;
 
 class ConceptNormalizer
@@ -13,8 +14,8 @@ class ConceptNormalizer
 
     /**
      * Normalize a concept name to its canonical form when a known alias
-     * matches; otherwise return the cleaned name (trim + collapsed
-     * whitespace, lowercased for stable aggregation).
+     * matches; otherwise return the cleaned name in Title Case for stable
+     * display (canonical official when it exists).
      */
     public function normalize(string $name): string
     {
@@ -24,7 +25,7 @@ class ConceptNormalizer
             return '';
         }
 
-        return $this->aliasMap()[$cleaned] ?? $cleaned;
+        return $this->aliasMap()[$cleaned] ?? $this->titleCase($cleaned);
     }
 
     /**
@@ -48,11 +49,34 @@ class ConceptNormalizer
     }
 
     /**
+     * Owner category (skill|tool|methodology) for a canonical name, if mapped.
+     * Unknown names and invalid config values resolve to null.
+     */
+    public function ownerCategory(string $canonicalName): ?string
+    {
+        $category = config('concepts.'.$canonicalName)['category'] ?? null;
+
+        if (! is_string($category)) {
+            return null;
+        }
+
+        return ConceptCategory::tryFrom($category)?->value;
+    }
+
+    /**
      * Clean a raw name: trim, collapse inner whitespace, lowercase.
      */
     public function clean(string $name): string
     {
         return Str::lower(preg_replace('/\s+/u', ' ', trim($name)) ?? '');
+    }
+
+    /**
+     * Title Case a cleaned (lowercased) name for display.
+     */
+    public function titleCase(string $cleaned): string
+    {
+        return mb_convert_case($cleaned, MB_CASE_TITLE, 'UTF-8');
     }
 
     /**

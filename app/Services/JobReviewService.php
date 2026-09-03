@@ -49,11 +49,18 @@ final class JobReviewService
 
             foreach ($items as $item) {
                 $category = $item['category'] instanceof ConceptCategory ? $item['category']->value : $item['category'];
-                $name = $this->normalizer->normalize($item['name']);
+                $categoryEnum = ConceptCategory::tryFrom($category);
+                $isFreeText = $categoryEnum?->isFreeText() ?? in_array($category, ['requirement', 'experience'], true);
+                $name = $isFreeText
+                    ? $this->normalizer->clean($item['name'])
+                    : $this->normalizer->normalize($item['name']);
 
                 if ($name === '') {
                     continue;
                 }
+
+                // Sem remap para categoria dona aqui: na revisão o usuário
+                // é autoridade sobre a categoria; normaliza-se só o nome.
 
                 $posting->items()->create([
                     'category' => $category,

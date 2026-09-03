@@ -39,19 +39,21 @@ class JobExtractionAgent implements Agent
 Você é um extrator de dados de oportunidades de trabalho. Analise a descrição fornecida e extraia dados estruturados.
 
 Regras:
+- Responda em pt-BR no texto livre ("role", "requirements", "experience", "instructions"). Nomes técnicos mantêm a forma canônica original em inglês e nunca são traduzidos.
 - "role": cargo/função da oportunidade (ex.: "Desenvolvedor PHP Sênior", "Analista de Vendas Pleno"). Use null se não estiver explícito na descrição.
 - "company": nome da empresa contratante, apenas se explícito na descrição. Use null caso contrário.
 - Extraia somente o que está EXPLÍCITO na descrição. Nunca infira requisitos ou experiências ausentes.
 - Use nomes canônicos, estáveis e conhecidos do mercado: "Excel" (não "Microsoft Excel"), "CRM" (não "sistema de CRM"), "Figma", "Power BI", "Vendas consultivas".
+- Casing canônico oficial: siglas em maiúsculas ("PHP", "AWS", "TDD"), "PostgreSQL" (não "Postgres"), "Laravel" (não "Laravel Framework"), "Node.js", "Power BI", "REST API" (não "API REST", não "api rest").
 - Não repita o mesmo conceito: nem dentro da mesma lista, nem em categorias diferentes.
 - Cada item deve ser uma string curta (até 100 caracteres).
 - Se algo não se encaixar em nenhuma categoria do schema, omita-o. Não existe categoria "outros".
 - É melhor omitir do que adivinhar. Mantenha listas pequenas e precisas.
-- "skills": conhecimentos e competências exigidos pela oportunidade (ex.: "Vendas consultivas", "Gestão de projetos").
-- "tools": ferramentas e softwares usados no trabalho (ex.: "Excel", "CRM", "Figma").
+- "skills": código — linguagens, frameworks, libs, bancos e runtimes (ex.: "PHP", "Laravel", "React", "PostgreSQL", "Node.js", "REST API"). Para vagas fora de tecnologia, competências de domínio (ex.: "Vendas Consultivas", "Gestão de Projetos").
+- "tools": infra dev e software operacional — DevOps/infra (ex.: "Docker", "Git", "AWS", "Linux") e uso final (ex.: "Excel", "CRM", "Figma").
 - "methodologies": metodologias e práticas de trabalho (ex.: "Scrum", "Kanban", "SPIN Selling").
-- "requirements": requisitos explícitos não cobertos pelas demais categorias (ex.: "disponibilidade para viagens", "CNH").
-- "experience": texto normalizado da descrição sobre nível ou tempo ("3+ anos", "Sênior", "Pleno") — não crie valores numéricos rígidos.
+- "requirements": requisitos explícitos em pt-BR não cobertos pelas demais categorias (ex.: "disponibilidade para viagens", "CNH").
+- "experience": texto em pt-BR sobre nível ou tempo ("3+ anos", "Sênior", "Pleno") — não crie valores numéricos rígidos.
 - "application_methods": como se candidatar. Extraia APENAS instruções EXPLÍCITAS de candidatura; se a descrição não disser como candidatar-se, use []. Extraia todas as opções distintas.
 - Considere uma URL destino somente quando o texto a relacionar a candidatar-se, enviar currículo, preencher formulário ou contatar recrutamento.
 - "type" deve ser um de: "email", "external_url", "linkedin_apply", "indeed_apply", "whatsapp", "phone", "form", "other".
