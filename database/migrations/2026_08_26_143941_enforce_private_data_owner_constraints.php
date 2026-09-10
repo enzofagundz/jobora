@@ -48,38 +48,49 @@ return new class extends Migration
         throw new RuntimeException('Down protegido: restrições de ownership (NOT NULL, UNIQUE por usuário) são irreversíveis sem perda de distinção original. Restaure manualmente se necessário.');
     }
 
+    /**
+     * Executa uma operação de schema tolerante a falha sem envenenar a
+     * transação externa. Cada operação roda em uma transação aninhada, o que
+     * gera um SAVEPOINT no PostgreSQL; em caso de erro, o rollback ao savepoint
+     * restaura o estado da transação e permite continuar.
+     */
+    private function safely(Closure $operation): void
+    {
+        try {
+            DB::transaction($operation);
+        } catch (Throwable) {
+            // Silenciado intencionalmente: índice/constraint opcional já ausente.
+        }
+    }
+
     private function rebuildJobPostings(): void
     {
         // Drop FKs que referenciam job_postings para permitir rename sem deixar FK quebrado
         foreach (['job_posting_items', 'application_methods', 'applications', 'resume_adaptations', 'job_captures'] as $table) {
-            try {
+            $this->safely(function () use ($table) {
                 Schema::table($table, function (Blueprint $t) {
                     $t->dropForeign(['job_posting_id']);
                 });
-            } catch (Throwable $e) {
-            }
+            });
         }
 
-        try {
+        $this->safely(function () {
             Schema::table('job_postings', function (Blueprint $table) {
                 $table->dropIndex(['collected_at']);
             });
-        } catch (Throwable) {
-        }
+        });
 
-        try {
+        $this->safely(function () {
             Schema::table('job_postings', function (Blueprint $table) {
                 $table->dropIndex(['status']);
             });
-        } catch (Throwable) {
-        }
+        });
 
-        try {
+        $this->safely(function () {
             Schema::table('job_postings', function (Blueprint $table) {
                 $table->dropIndex(['user_id']);
             });
-        } catch (Throwable) {
-        }
+        });
 
         Schema::rename('job_postings', 'job_postings_legacy');
 
@@ -130,12 +141,11 @@ return new class extends Migration
 
     private function rebuildResumes(): void
     {
-        try {
+        $this->safely(function () {
             Schema::table('resumes', function (Blueprint $table) {
                 $table->dropIndex(['user_id']);
             });
-        } catch (Throwable) {
-        }
+        });
 
         Schema::rename('resumes', 'resumes_legacy');
 
@@ -160,39 +170,36 @@ return new class extends Migration
     private function rebuildJobCaptures(): void
     {
         foreach (['job_captures_source_dedup_key_unique', 'job_captures_source_external_id_unique'] as $index) {
-            try {
-                DB::statement('DROP INDEX IF EXISTS "'.$index.'"');
-            } catch (Throwable) {
-            }
+            $this->safely(function () use ($index) {
+                Schema::table('job_captures', function (Blueprint $table) use ($index) {
+                    $table->dropUnique($index);
+                });
+            });
         }
 
-        try {
+        $this->safely(function () {
             Schema::table('job_captures', function (Blueprint $table) {
                 $table->dropIndex(['captured_at']);
             });
-        } catch (Throwable) {
-        }
+        });
 
-        try {
+        $this->safely(function () {
             Schema::table('job_captures', function (Blueprint $table) {
                 $table->dropIndex(['user_id']);
             });
-        } catch (Throwable) {
-        }
+        });
 
         // job_captures tem FK para job_postings já tratada no rebuildJobPostings (recriada), mas precisa ser removida antes de renomear
-        try {
+        $this->safely(function () {
             Schema::table('job_captures', function (Blueprint $table) {
                 $table->dropForeign(['user_id']);
             });
-        } catch (Throwable) {
-        }
-        try {
+        });
+        $this->safely(function () {
             Schema::table('job_captures', function (Blueprint $table) {
                 $table->dropForeign(['job_posting_id']);
             });
-        } catch (Throwable) {
-        }
+        });
 
         Schema::rename('job_captures', 'job_captures_legacy');
 
