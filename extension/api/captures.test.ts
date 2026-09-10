@@ -32,6 +32,18 @@ describe('sanitizeApiBaseUrl', () => {
     expect(sanitizeApiBaseUrl('http://localhost:8000/')).toBe('http://localhost:8000');
   });
 
+  it('aceita origins https do lerd (vagas/jobora .test)', () => {
+    expect(sanitizeApiBaseUrl('https://vagas.test')).toBe('https://vagas.test');
+    expect(sanitizeApiBaseUrl('https://vagas.test/')).toBe('https://vagas.test');
+    expect(sanitizeApiBaseUrl('https://jobora.test')).toBe('https://jobora.test');
+    expect(sanitizeApiBaseUrl('https://jobora.test/')).toBe('https://jobora.test');
+  });
+
+  it('rejeita http dos .test (site é secured, só https)', () => {
+    expect(sanitizeApiBaseUrl('http://vagas.test')).toBeNull();
+    expect(sanitizeApiBaseUrl('http://jobora.test')).toBeNull();
+  });
+
   it('rejeita origins fora do manifest, query, fragmento e lixo', () => {
     expect(sanitizeApiBaseUrl('https://evil.example')).toBeNull();
     expect(sanitizeApiBaseUrl('http://localhost:8000?x=1')).toBeNull();
@@ -59,6 +71,7 @@ describe('submitCapture', () => {
   it('monta path, headers Bearer e JSON no host configurado', async () => {
     await captureEnabled.setValue(true);
     await apiToken.setValue('segredo-do-env');
+    await apiBaseUrl.setValue('http://localhost:8000');
     const fetchSpy = mockFetch(async () => new Response('{}', { status: 201 }));
 
     await submitCapture(payload());
@@ -69,6 +82,19 @@ describe('submitCapture', () => {
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer segredo-do-env');
     expect((init.headers as Record<string, string>)['Content-Type']).toBe('application/json');
     expect(JSON.parse(init.body as string)).toMatchObject({ source: 'linkedin' });
+  });
+
+  it('envia para o origin lerd configurado (https://vagas.test)', async () => {
+    await captureEnabled.setValue(true);
+    await apiToken.setValue('segredo-do-env');
+    await apiBaseUrl.setValue('https://vagas.test');
+    const fetchSpy = mockFetch(async () => new Response('{}', { status: 201 }));
+
+    await submitCapture(payload());
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://vagas.test' + CAPTURE_PATH);
   });
 
   it('gate fechado (sem flag ou sem token) → auth e zero fetch', async () => {
