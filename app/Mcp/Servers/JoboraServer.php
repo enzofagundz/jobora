@@ -2,6 +2,13 @@
 
 namespace App\Mcp\Servers;
 
+use App\Mcp\Tools\Captures\CaptureJobTool;
+use App\Mcp\Tools\Captures\DeleteJobCaptureTool;
+use App\Mcp\Tools\Captures\GetJobCaptureTool;
+use App\Mcp\Tools\Captures\ListJobCapturesTool;
+use App\Mcp\Tools\Captures\PromoteEligibleJobCapturesTool;
+use App\Mcp\Tools\Captures\PromoteJobCaptureTool;
+use App\Mcp\Tools\Captures\TriageJobCapturesTool;
 use App\Mcp\Tools\System\GetAiOperationTool;
 use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Attributes\Instructions;
@@ -23,6 +30,13 @@ final class JoboraServer extends Server
 {
     protected array $tools = [
         GetAiOperationTool::class,
+        CaptureJobTool::class,
+        GetJobCaptureTool::class,
+        ListJobCapturesTool::class,
+        DeleteJobCaptureTool::class,
+        TriageJobCapturesTool::class,
+        PromoteJobCaptureTool::class,
+        PromoteEligibleJobCapturesTool::class,
     ];
 
     protected array $resources = [];

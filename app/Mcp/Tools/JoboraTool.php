@@ -63,6 +63,41 @@ abstract class JoboraTool extends Tool
         return Response::structured(['ok' => true, 'data' => $data]);
     }
 
+    protected function requireConfirm(Request $request): void
+    {
+        if ($request->get('confirm') !== true) {
+            throw ToolException::conflict('Operação destrutiva: envie confirm=true para prosseguir.');
+        }
+    }
+
+    /**
+     * @return array{limit: int, offset: int}
+     */
+    protected function page(Request $request): array
+    {
+        $limit = (int) ($request->get('limit') ?? 20);
+        $offset = (int) ($request->get('offset') ?? 0);
+
+        return [
+            'limit' => max(1, min(100, $limit)),
+            'offset' => max(0, $offset),
+        ];
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $items
+     */
+    protected function listed(array $items, int $total, int $limit, int $offset): ResponseFactory
+    {
+        $next = $offset + $limit;
+
+        return $this->ok([
+            'items' => array_values($items),
+            'total' => $total,
+            'next_offset' => $next < $total ? $next : null,
+        ]);
+    }
+
     protected function fail(ToolException $exception): Response
     {
         $payload = json_encode([
