@@ -42,16 +42,7 @@ return new class extends Migration
                 });
 
                 // Copy rows with category remap, deduping collisions: user-edited rows first, then lowest id.
-                DB::statement(<<<'SQL'
-                    INSERT OR IGNORE INTO job_posting_items
-                        (id, job_posting_id, category, name, source, created_at, updated_at)
-                    SELECT id, job_posting_id,
-                           CASE WHEN category IN ('technology','language','framework','database','cloud')
-                                THEN 'skill' ELSE category END,
-                           name, source, created_at, updated_at
-                    FROM job_posting_items_legacy
-                    ORDER BY CASE WHEN source = 'user' THEN 0 ELSE 1 END, id
-                SQL);
+                $this->copyFromLegacy('job_posting_items_legacy');
 
                 Schema::drop('job_posting_items_legacy');
 
@@ -61,8 +52,8 @@ return new class extends Migration
                 foreach (DB::table('job_postings')->whereNotNull('suggested_data')->cursor() as $posting) {
                     $data = json_decode($posting->suggested_data, true);
 
-                    foreach ($data['items'] ?? [] as &$item) {
-                        $item['category'] = $map[$item['category']] ?? $item['category'];
+                    foreach ($data['items'] ?? [] as $index => $item) {
+                        $data['items'][$index]['category'] = $map[$item['category']] ?? $item['category'];
                     }
 
                     DB::table('job_postings')->where('id', $posting->id)->update(['suggested_data' => json_encode($data)]);
@@ -98,15 +89,55 @@ return new class extends Migration
                     $table->index(['category', 'name']);
                 });
 
-                DB::statement(<<<'SQL'
-                    INSERT OR IGNORE INTO job_posting_items
-                        (id, job_posting_id, category, name, source, created_at, updated_at)
-                    SELECT id, job_posting_id, category, name, source, created_at, updated_at
-                    FROM job_posting_items_legacy_down
-                SQL);
+                $this->copyFromLegacy('job_posting_items_legacy_down');
 
                 Schema::drop('job_posting_items_legacy_down');
             });
         });
+    }
+
+    /**
+     * Copy legacy rows into the rebuilt table, remapping dev-only categories to "skill" and
+     * deduping collisions (user-edited rows win, then the lowest id).
+     *
+     * Uses the query builder's insertOrIgnore() so the conflict syntax is generated per driver
+     * (INSERT OR IGNORE on SQLite, ON CONFLICT DO NOTHING on PostgreSQL) instead of hardcoding
+     * SQLite-only raw SQL. The primary key is left to the database, avoiding bigserial desync.
+     */
+    private function copyFromLegacy(string $legacyTable): void
+    {
+        $remapped = ['technology', 'language', 'framework', 'database', 'cloud'];
+
+        $legacy = DB::table($legacyTable)
+            ->orderByRaw("CASE WHEN source = 'user' THEN 0 ELSE 1 END")
+            ->orderBy('id')
+            ->get();
+
+        $rows = [];
+        $seen = [];
+
+        foreach ($legacy as $row) {
+            $category = in_array($row->category, $remapped, true) ? 'skill' : $row->category;
+            $key = $row->job_posting_id.'|'.$category.'|'.$row->name;
+
+            if (isset($seen[$key])) {
+                continue;
+            }
+
+            $seen[$key] = true;
+
+            $rows[] = [
+                'job_posting_id' => $row->job_posting_id,
+                'category' => $category,
+                'name' => $row->name,
+                'source' => $row->source,
+                'created_at' => $row->created_at,
+                'updated_at' => $row->updated_at,
+            ];
+        }
+
+        foreach (array_chunk($rows, 500) as $chunk) {
+            DB::table('job_posting_items')->insertOrIgnore($chunk);
+        }
     }
 };
