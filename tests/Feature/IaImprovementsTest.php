@@ -337,6 +337,12 @@ it('agents resolve provider/model from the active config, not hardcoded', functi
     }
 });
 
+it('opencode_zen provider sends the x-opencode-session header required by the Go endpoint', function () {
+    $session = config('ai.providers.opencode_zen.headers.x-opencode-session');
+
+    expect($session)->toBeString()->and($session)->not->toBeEmpty();
+});
+
 it('sends extraction requests to the OpenCode Zen OpenAI-compatible endpoint', function () {
     config([
         'ai.default' => 'opencode_zen',
