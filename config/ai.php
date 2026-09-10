@@ -136,6 +136,11 @@ return [
             'driver' => 'openai-compatible',
             'key' => env('OPENCODE_ZEN_API_KEY'),
             'url' => env('OPENCODE_ZEN_BASE_URL', 'https://opencode.ai/zen/go/v1'),
+            // O endpoint Go exige x-opencode-session (estável por conversa)
+            // para roteamento; sem ele responde 400 MissingSessionID.
+            'headers' => [
+                'x-opencode-session' => env('OPENCODE_ZEN_SESSION_ID', '135bfaf9-c0b9-46d5-8334-298bb4af41fa'),
+            ],
             'models' => [
                 'text' => [
                     'default' => env('OPENCODE_ZEN_MODEL', 'mimo-v2.5-free'),
