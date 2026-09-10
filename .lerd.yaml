@@ -1,0 +1,10 @@
+domains:
+  - vagas
+  - jobora
+js_runtime: bun
+secured: true
+workers:
+  - queue
+  - reverb
+  - schedule
+  - vite

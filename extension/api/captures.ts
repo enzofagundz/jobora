@@ -10,6 +10,8 @@ export const REQUEST_TIMEOUT_MS = 10_000;
 const ALLOWED_API_ORIGINS: Record<string, true> = {
   'http://localhost:8000': true,
   'http://127.0.0.1:8000': true,
+  'https://vagas.test': true,
+  'https://jobora.test': true,
 };
 
 /** Normaliza a base: sem barra final; null se inválida/fora dos origins declarados. */

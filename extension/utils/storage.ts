@@ -6,7 +6,7 @@ import { storage } from 'wxt/utils/storage';
  * do content script; o backend é a fonte da verdade de duplicidade.
  */
 export const apiBaseUrl = storage.defineItem<string>('local:apiBaseUrl', {
-  fallback: 'http://localhost:8000',
+  fallback: 'https://vagas.test',
 });
 
 export const apiToken = storage.defineItem<string>('local:apiToken', {

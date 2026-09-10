@@ -58,7 +58,7 @@ async function save(): Promise<void> {
   const clean = sanitizeApiBaseUrl(url.value);
   if (!clean) {
     message.value =
-      'URL inválida. Aceita apenas http://localhost:8000 ou http://127.0.0.1:8000, sem barra final, query ou fragmento.';
+      'URL inválida. Aceita apenas http://localhost:8000, http://127.0.0.1:8000, https://vagas.test ou https://jobora.test, sem barra final, query ou fragmento.';
     return;
   }
   url.value = clean;
@@ -106,7 +106,7 @@ async function disconnect(): Promise<void> {
     <h1>Jobora Job Capture</h1>
 
     <label for="api-url">URL da API</label>
-    <input id="api-url" v-model="url" type="url" placeholder="http://localhost:8000" />
+    <input id="api-url" v-model="url" type="url" placeholder="https://vagas.test" />
 
     <label for="api-token">Token (credencial da conta)</label>
     <input
