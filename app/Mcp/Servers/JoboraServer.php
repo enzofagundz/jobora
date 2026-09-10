@@ -9,6 +9,13 @@ use App\Mcp\Tools\Captures\ListJobCapturesTool;
 use App\Mcp\Tools\Captures\PromoteEligibleJobCapturesTool;
 use App\Mcp\Tools\Captures\PromoteJobCaptureTool;
 use App\Mcp\Tools\Captures\TriageJobCapturesTool;
+use App\Mcp\Tools\JobPostings\AnalyzeJobPostingTool;
+use App\Mcp\Tools\JobPostings\ConfirmJobPostingTool;
+use App\Mcp\Tools\JobPostings\CreateJobPostingTool;
+use App\Mcp\Tools\JobPostings\DeleteJobPostingTool;
+use App\Mcp\Tools\JobPostings\DiscardJobPostingSuggestionTool;
+use App\Mcp\Tools\JobPostings\GetJobPostingTool;
+use App\Mcp\Tools\JobPostings\ListJobPostingsTool;
 use App\Mcp\Tools\System\GetAiOperationTool;
 use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Attributes\Instructions;
@@ -37,6 +44,13 @@ final class JoboraServer extends Server
         TriageJobCapturesTool::class,
         PromoteJobCaptureTool::class,
         PromoteEligibleJobCapturesTool::class,
+        CreateJobPostingTool::class,
+        GetJobPostingTool::class,
+        ListJobPostingsTool::class,
+        DeleteJobPostingTool::class,
+        AnalyzeJobPostingTool::class,
+        ConfirmJobPostingTool::class,
+        DiscardJobPostingSuggestionTool::class,
     ];
 
     protected array $resources = [];
