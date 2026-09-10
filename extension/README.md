@@ -34,7 +34,7 @@ bun install
 ## Configurar token e API
 
 1. Clique no ícone da extensão.
-2. **URL da API**: `http://localhost:8000` (único origin aceito na v1, além de `http://127.0.0.1:8000`; sem barra final).
+2. **URL da API**: `https://vagas.test` (ou `https://jobora.test`; legados `http://localhost:8000` e `http://127.0.0.1:8000` continuam aceitos; sem barra final).
 3. **Token**: cole o valor de `VAGAS_API_TOKEN` do `.env` do backend e clique em "Salvar".
 4. Marque **Ativar captura** — o checkbox só habilita depois de salvar um token.
 5. "Desconectar" remove o token e desmarca a captura; salvar um token novo nunca religa a captura sozinho.
@@ -66,7 +66,7 @@ Pré-requisitos: backend no ar, token válido configurado no popup **e** "Ativar
 ## Permissões (produção)
 
 - `storage` (config/token)
-- Hosts: `https://www.linkedin.com/*`, `https://*.indeed.com/*`, `http://localhost:8000/*`, `http://127.0.0.1:8000/*`
+- Hosts: `https://www.linkedin.com/*`, `https://*.indeed.com/*`, `https://vagas.test/*`, `https://jobora.test/*`, `http://localhost:8000/*`, `http://127.0.0.1:8000/*`
 
 Sem `<all_urls>`, sem `tabs`/`activeTab`/`scripting` no manifest de produção (esses dois aparecem apenas no modo dev, injetados automaticamente pelo WXT para hot reload). Um deploy remoto da API exigirá adicionar o origin exato ao manifest antes de habilitá-lo no popup.
 
@@ -98,6 +98,6 @@ Não existe main world, `unsafeWindow`, injeção de script nem dependência fun
 
 ## Limitações conhecidas
 
-- v1 aceita somente os origins de API declarados no manifest (localhost/127.0.0.1:8000).
+- v1 aceita somente os origins de API declarados no manifest (localhost/127.0.0.1:8000 e https vagas.test/jobora.test).
 - Seletores são cópia fiel dos userscripts; mudanças de markup do LinkedIn/Indeed devem ser registradas em `docs/extension-audit.md` antes de alterar regras.
 - Deduplicação local é por sessão (memória); a deduplicação definitiva é server-side (`unique(source, dedup_key)`).
