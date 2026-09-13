@@ -1,0 +1,60 @@
+<?php
+
+namespace App\Mcp\Tools\Ats;
+
+use App\Mcp\Support\McpUserResolver;
+use App\Mcp\Support\ToolException;
+use App\Mcp\Tools\JoboraTool;
+use App\Models\JobPosting;
+use App\Services\AiOperationService;
+use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Laravel\Mcp\Request;
+use Laravel\Mcp\Response;
+use Laravel\Mcp\ResponseFactory;
+use Laravel\Mcp\Server\Attributes\Description;
+use Laravel\Mcp\Server\Tools\Annotations\IsOpenWorld;
+
+#[IsOpenWorld]
+#[Description('Enfileira a nota de aderência ATS (0–10) da adaptação de uma vaga confirmada. Requer permissão de ATS. Assíncrona: acompanhe com get_ai_operation.')]
+class ScoreAtsTool extends JoboraTool
+{
+    public function __construct(
+        McpUserResolver $users,
+        private readonly AiOperationService $operations,
+    ) {
+        parent::__construct($users);
+    }
+
+    protected function execute(Request $request): Response|ResponseFactory
+    {
+        $validated = $request->validate(['job_posting_id' => ['required', 'integer']]);
+
+        $user = $this->user();
+
+        $posting = JobPosting::query()
+            ->where('user_id', $user->id)
+            ->whereKey((int) $validated['job_posting_id'])
+            ->first();
+
+        if ($posting === null) {
+            throw ToolException::notFound('Vaga não encontrada.');
+        }
+
+        $operation = $this->operations->enqueueAtsScore($user, $posting);
+
+        return $this->ok([
+            'operation_id' => $operation->id,
+            'status' => $operation->status?->value,
+        ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function schema(JsonSchema $schema): array
+    {
+        return [
+            'job_posting_id' => $schema->integer()->required()->description('Id da vaga confirmada.'),
+        ];
+    }
+}
