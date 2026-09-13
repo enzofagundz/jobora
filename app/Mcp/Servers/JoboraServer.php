@@ -5,6 +5,10 @@ namespace App\Mcp\Servers;
 use App\Mcp\Resources\MarketSnapshotResource;
 use App\Mcp\Resources\ProfessionalCompetenciesResource;
 use App\Mcp\Resources\ResumeAdaptationResource;
+use App\Mcp\Tools\Applications\GetApplicationTool;
+use App\Mcp\Tools\Applications\ListApplicationsTool;
+use App\Mcp\Tools\Applications\RecordApplicationUpdateTool;
+use App\Mcp\Tools\Applications\StartApplicationTool;
 use App\Mcp\Tools\Ats\AdaptResumeTool;
 use App\Mcp\Tools\Ats\ExportAdaptedResumePdfTool;
 use App\Mcp\Tools\Ats\GetResumeAdaptationTool;
@@ -90,6 +94,10 @@ final class JoboraServer extends Server
         SetAtsOptimizationTool::class,
         ScoreAtsTool::class,
         ExportAdaptedResumePdfTool::class,
+        StartApplicationTool::class,
+        GetApplicationTool::class,
+        ListApplicationsTool::class,
+        RecordApplicationUpdateTool::class,
     ];
 
     protected array $resources = [
