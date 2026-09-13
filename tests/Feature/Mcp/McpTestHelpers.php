@@ -5,6 +5,7 @@ namespace Tests\Feature\Mcp;
 use App\Enums\ConceptCategory;
 use App\Models\JobPosting;
 use App\Models\JobPostingItem;
+use App\Models\ResumeAdaptation;
 use App\Models\User;
 
 /**
@@ -31,5 +32,20 @@ final class McpTestHelpers
             'category' => $category,
             'name' => $name,
         ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $attributes
+     */
+    public static function adaptation(User $user, JobPosting $posting, array $attributes = []): ResumeAdaptation
+    {
+        return ResumeAdaptation::create(array_merge([
+            'job_posting_id' => $posting->id,
+            'adapted_content' => 'Currículo adaptado com PHP.',
+            'changes' => ['Resumo reescrito'],
+            'covered_keywords' => ['PHP'],
+            'missing_requirements' => ['React'],
+            'alerts' => [],
+        ], $attributes));
     }
 }
