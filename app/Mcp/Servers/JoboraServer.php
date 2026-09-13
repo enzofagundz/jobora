@@ -16,6 +16,11 @@ use App\Mcp\Tools\JobPostings\DeleteJobPostingTool;
 use App\Mcp\Tools\JobPostings\DiscardJobPostingSuggestionTool;
 use App\Mcp\Tools\JobPostings\GetJobPostingTool;
 use App\Mcp\Tools\JobPostings\ListJobPostingsTool;
+use App\Mcp\Tools\Resume\GetResumeTool;
+use App\Mcp\Tools\Resume\SaveResumeTool;
+use App\Mcp\Tools\Screening\GetScreeningPreferencesTool;
+use App\Mcp\Tools\Screening\SaveScreeningPreferencesTool;
+use App\Mcp\Tools\Search\GenerateSearchUrlTool;
 use App\Mcp\Tools\System\GetAiOperationTool;
 use Laravel\Mcp\Server;
 use Laravel\Mcp\Server\Attributes\Instructions;
@@ -51,6 +56,11 @@ final class JoboraServer extends Server
         AnalyzeJobPostingTool::class,
         ConfirmJobPostingTool::class,
         DiscardJobPostingSuggestionTool::class,
+        GetResumeTool::class,
+        SaveResumeTool::class,
+        GetScreeningPreferencesTool::class,
+        SaveScreeningPreferencesTool::class,
+        GenerateSearchUrlTool::class,
     ];
 
     protected array $resources = [];
