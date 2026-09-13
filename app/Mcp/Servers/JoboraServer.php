@@ -3,6 +3,7 @@
 namespace App\Mcp\Servers;
 
 use App\Mcp\Resources\MarketSnapshotResource;
+use App\Mcp\Resources\ProfessionalCompetenciesResource;
 use App\Mcp\Tools\Captures\CaptureJobTool;
 use App\Mcp\Tools\Captures\DeleteJobCaptureTool;
 use App\Mcp\Tools\Captures\GetJobCaptureTool;
@@ -10,6 +11,10 @@ use App\Mcp\Tools\Captures\ListJobCapturesTool;
 use App\Mcp\Tools\Captures\PromoteEligibleJobCapturesTool;
 use App\Mcp\Tools\Captures\PromoteJobCaptureTool;
 use App\Mcp\Tools\Captures\TriageJobCapturesTool;
+use App\Mcp\Tools\Competencies\ClassifyProfessionalCompetenciesTool;
+use App\Mcp\Tools\Competencies\ListProfessionalCompetenciesTool;
+use App\Mcp\Tools\Competencies\RemoveProfessionalCompetencyTool;
+use App\Mcp\Tools\Competencies\SetProfessionalCompetencyTool;
 use App\Mcp\Tools\JobPostings\AnalyzeJobPostingTool;
 use App\Mcp\Tools\JobPostings\ConfirmJobPostingTool;
 use App\Mcp\Tools\JobPostings\CreateJobPostingTool;
@@ -70,10 +75,15 @@ final class JoboraServer extends Server
         GetMarketPairsTool::class,
         GetMarketComparisonTool::class,
         GetMarketTrendsTool::class,
+        ListProfessionalCompetenciesTool::class,
+        ClassifyProfessionalCompetenciesTool::class,
+        SetProfessionalCompetencyTool::class,
+        RemoveProfessionalCompetencyTool::class,
     ];
 
     protected array $resources = [
         MarketSnapshotResource::class,
+        ProfessionalCompetenciesResource::class,
     ];
 
     protected array $prompts = [];
