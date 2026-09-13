@@ -4,6 +4,12 @@ namespace App\Mcp\Servers;
 
 use App\Mcp\Resources\MarketSnapshotResource;
 use App\Mcp\Resources\ProfessionalCompetenciesResource;
+use App\Mcp\Resources\ResumeAdaptationResource;
+use App\Mcp\Tools\Ats\AdaptResumeTool;
+use App\Mcp\Tools\Ats\ExportAdaptedResumePdfTool;
+use App\Mcp\Tools\Ats\GetResumeAdaptationTool;
+use App\Mcp\Tools\Ats\ScoreAtsTool;
+use App\Mcp\Tools\Ats\SetAtsOptimizationTool;
 use App\Mcp\Tools\Captures\CaptureJobTool;
 use App\Mcp\Tools\Captures\DeleteJobCaptureTool;
 use App\Mcp\Tools\Captures\GetJobCaptureTool;
@@ -79,11 +85,17 @@ final class JoboraServer extends Server
         ClassifyProfessionalCompetenciesTool::class,
         SetProfessionalCompetencyTool::class,
         RemoveProfessionalCompetencyTool::class,
+        GetResumeAdaptationTool::class,
+        AdaptResumeTool::class,
+        SetAtsOptimizationTool::class,
+        ScoreAtsTool::class,
+        ExportAdaptedResumePdfTool::class,
     ];
 
     protected array $resources = [
         MarketSnapshotResource::class,
         ProfessionalCompetenciesResource::class,
+        ResumeAdaptationResource::class,
     ];
 
     protected array $prompts = [];
