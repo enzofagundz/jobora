@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Servers;
 
+use App\Mcp\Resources\MarketSnapshotResource;
 use App\Mcp\Tools\Captures\CaptureJobTool;
 use App\Mcp\Tools\Captures\DeleteJobCaptureTool;
 use App\Mcp\Tools\Captures\GetJobCaptureTool;
@@ -16,6 +17,10 @@ use App\Mcp\Tools\JobPostings\DeleteJobPostingTool;
 use App\Mcp\Tools\JobPostings\DiscardJobPostingSuggestionTool;
 use App\Mcp\Tools\JobPostings\GetJobPostingTool;
 use App\Mcp\Tools\JobPostings\ListJobPostingsTool;
+use App\Mcp\Tools\Market\GetMarketComparisonTool;
+use App\Mcp\Tools\Market\GetMarketFrequenciesTool;
+use App\Mcp\Tools\Market\GetMarketPairsTool;
+use App\Mcp\Tools\Market\GetMarketTrendsTool;
 use App\Mcp\Tools\Resume\GetResumeTool;
 use App\Mcp\Tools\Resume\SaveResumeTool;
 use App\Mcp\Tools\Screening\GetScreeningPreferencesTool;
@@ -61,9 +66,15 @@ final class JoboraServer extends Server
         GetScreeningPreferencesTool::class,
         SaveScreeningPreferencesTool::class,
         GenerateSearchUrlTool::class,
+        GetMarketFrequenciesTool::class,
+        GetMarketPairsTool::class,
+        GetMarketComparisonTool::class,
+        GetMarketTrendsTool::class,
     ];
 
-    protected array $resources = [];
+    protected array $resources = [
+        MarketSnapshotResource::class,
+    ];
 
     protected array $prompts = [];
 }
