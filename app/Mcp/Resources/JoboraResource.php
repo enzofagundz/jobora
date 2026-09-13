@@ -5,6 +5,7 @@ namespace App\Mcp\Resources;
 use App\Mcp\Support\McpUserResolver;
 use App\Mcp\Support\ToolException;
 use App\Models\User;
+use Illuminate\Support\Str;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\Server\Resource;
@@ -17,6 +18,20 @@ use Throwable;
 abstract class JoboraResource extends Resource
 {
     public function __construct(protected readonly McpUserResolver $users) {}
+
+    /**
+     * Nome do resource em snake_case, sem o sufixo "Resource".
+     */
+    public function name(): string
+    {
+        $base = class_basename(static::class);
+
+        if (str_ends_with($base, 'Resource')) {
+            $base = substr($base, 0, -8);
+        }
+
+        return Str::snake($base);
+    }
 
     final public function handle(Request $request): Response
     {

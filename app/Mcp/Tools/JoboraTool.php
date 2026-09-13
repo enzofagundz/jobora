@@ -8,6 +8,7 @@ use App\Models\User;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -24,6 +25,20 @@ use Throwable;
 abstract class JoboraTool extends Tool
 {
     public function __construct(protected readonly McpUserResolver $users) {}
+
+    /**
+     * Nome da tool em snake_case, sem o sufixo "Tool" (MCP_SPEC §5.1).
+     */
+    public function name(): string
+    {
+        $base = class_basename(static::class);
+
+        if (str_ends_with($base, 'Tool')) {
+            $base = substr($base, 0, -4);
+        }
+
+        return Str::snake($base);
+    }
 
     final public function handle(Request $request): Response|ResponseFactory
     {
