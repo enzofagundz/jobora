@@ -2,9 +2,11 @@
 
 namespace App\Mcp\Servers;
 
+use App\Mcp\Resources\JobPostingResource;
 use App\Mcp\Resources\MarketSnapshotResource;
 use App\Mcp\Resources\ProfessionalCompetenciesResource;
 use App\Mcp\Resources\ResumeAdaptationResource;
+use App\Mcp\Resources\ResumeResource;
 use App\Mcp\Tools\Applications\GetApplicationTool;
 use App\Mcp\Tools\Applications\ListApplicationsTool;
 use App\Mcp\Tools\Applications\RecordApplicationUpdateTool;
@@ -104,6 +106,8 @@ final class JoboraServer extends Server
         MarketSnapshotResource::class,
         ProfessionalCompetenciesResource::class,
         ResumeAdaptationResource::class,
+        ResumeResource::class,
+        JobPostingResource::class,
     ];
 
     protected array $prompts = [];
