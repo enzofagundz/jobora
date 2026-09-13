@@ -2,6 +2,9 @@
 
 namespace Tests\Feature\Mcp;
 
+use App\Enums\ConceptCategory;
+use App\Models\JobPosting;
+use App\Models\JobPostingItem;
 use App\Models\User;
 
 /**
@@ -20,5 +23,13 @@ final class McpTestHelpers
         config(['jobora.mcp.user' => $user->email]);
 
         return $user;
+    }
+
+    public static function item(JobPosting $posting, string $name, ConceptCategory $category = ConceptCategory::Skill): JobPostingItem
+    {
+        return JobPostingItem::factory()->for($posting, 'jobPosting')->create([
+            'category' => $category,
+            'name' => $name,
+        ]);
     }
 }
