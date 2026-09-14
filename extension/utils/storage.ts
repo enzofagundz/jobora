@@ -28,3 +28,13 @@ export interface LastApiStatus {
 export const lastApiStatus = storage.defineItem<LastApiStatus | null>('session:lastApiStatus', {
   fallback: null,
 });
+
+export interface PanelPosition {
+  dx: number;
+  dy: number;
+}
+
+/** Offset de arrasto do painel de captura (global aos três sites). */
+export const panelPosition = storage.defineItem<PanelPosition>('local:panelPosition', {
+  fallback: { dx: 0, dy: 0 },
+});
