@@ -172,3 +172,11 @@ Migração concluída para identidade por usuário:
 - Extensão WXT: `api/captures.ts` adiciona `VALIDATE_PATH` e `validateCaptureToken()` (GET com Bearer, timeout, classificação `200/401/http/timeout/network` sem logar token). `entrypoints/popup/App.vue` importa `validateCaptureToken`, muda o label para "Token (credencial da conta)" e, após salvar URL+token, valida e exibe "Conectado — credencial válida." ou erros específicos. `Desconectar` limpa storage e desliga captura localmente.
 - Migração `2026_08_26_160000` cria `capture_token_hash`/`capture_token_last_four`/`disabled_at`; `2026_08_26_160001` converte o `VAGAS_API_TOKEN` legado no hash do owner se `VAGAS_API_USER_ID` ainda estiver configurado, falhando explicitamente se o owner não existir ou já possuir hash divergente. `config/capture.php` mantém as chaves legadas apenas para esse backfill; `.env.example` documenta a geração via `/capture-setup`.
 - Compatibilidade: `User::canAccessPanel()` e `CaptureTokenService` bloqueiam `disabled_at`; `cascadeOnDelete` remove capturas ao excluir o usuário; logout web não revoga o token da extensão; um único token por usuário invalida todos os dispositivos ao regenerar (tokens por instalação ficam para evolução futura).
+
+## 11. Jump automático ao fim — LinkedIn Publicações (2026-09-14)
+
+Auto-scroll até o fim absoluto em `search/results/content/*` sem nova permissão/rota/API (spec `linkedin-jump-fim-absoluto-spec.md`).
+
+- **Módulo:** `sites/linkedin/jump.ts` — `countPosts`/`getLastPost` via `isPost`, `runJumpToEnd` com `scrollIntoView(block:end)` no último post + overscroll 200 por ciclo e ajuste final, parada após `JUMP_STABLE_CYCLES=6` de `JUMP_SETTLE_MS=1200` sem count/altura nova, teto `JUMP_MAX_CYCLES=50`.
+- **Controller:** `sites/linkedin/controller.ts` — veto pré-disparo (`wheel/keydown/mousedown/touchmove`), `startJump` pós-scan inicial com `AbortController`, `Esc` (`keydown` capture) ou botão Cancelar abortam, `deactivate`/`removeUi` limpam listeners via `isGenerationActive`.
+- **Painel:** `components/CapturePanel.vue` — status `pulando para o fim · X posts` + Cancelar, `jump` reativo compartilhado.
