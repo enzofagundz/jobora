@@ -1,4 +1,4 @@
-import { createApp, type App as VueApp } from 'vue';
+import { createApp, reactive, type App as VueApp } from 'vue';
 import type { ContentScriptContext, ShadowRootContentScriptUi } from '#imports';
 import CapturePanel from '@/components/CapturePanel.vue';
 import { createCaptureSession, type CaptureSession } from '@/utils/capture-session';
@@ -10,6 +10,7 @@ import {
   isLinkedInRoute,
   isPost,
 } from './extract';
+import { countPosts, runJumpToEnd } from './jump';
 
 export interface LinkedInController {
   activate(ctx: ContentScriptContext): Promise<void>;
@@ -29,6 +30,11 @@ export function createLinkedInController(): LinkedInController {
   let context: ContentScriptContext | undefined;
   // Geração de ciclo de vida: deactivate() a incrementa; todo `await` re-checa.
   let lifecycleGeneration = 0;
+  const jumpState = reactive({ active: false, count: 0 });
+  let jumpAbort: AbortController | null = null;
+  let escListener: ((e: KeyboardEvent) => void) | null = null;
+  let preInteracted = false;
+  let preListeners: Array<() => void> = [];
 
   /** Falso após deactivate(), troca de rota ou invalidação do contexto WXT. */
   function isGenerationActive(generation: number): boolean {
@@ -121,9 +127,64 @@ export function createLinkedInController(): LinkedInController {
     debounceTimer = window.setTimeout(() => void processNewPosts(), OBSERVER_DEBOUNCE_MS);
   }
 
+  function cancelJump(): void {
+    jumpAbort?.abort();
+  }
+
+  function clearPreInteractionListeners(): void {
+    for (const remove of preListeners.splice(0)) remove();
+  }
+
+  function watchPreInteraction(): void {
+    clearPreInteractionListeners();
+    const mark = (): void => {
+      preInteracted = true;
+    };
+    const events = ['wheel', 'keydown', 'mousedown', 'touchmove'] as const;
+    for (const name of events) {
+      // keydown aqui é só veto pré-disparo; o Esc durante o jump tem listener próprio.
+      const handler = (): void => mark();
+      window.addEventListener(name, handler, { capture: true });
+      preListeners.push(() => window.removeEventListener(name, handler, { capture: true }));
+    }
+  }
+
+  async function startJump(generation: number): Promise<void> {
+    if (jumpAbort) return;
+    if (!isGenerationActive(generation)) return;
+    if (countPosts() === 0) return;
+    const ac = new AbortController();
+    jumpAbort = ac;
+    jumpState.active = true;
+    jumpState.count = countPosts();
+    const onEsc = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') ac.abort();
+    };
+    escListener = onEsc;
+    window.addEventListener('keydown', onEsc, { capture: true });
+    try {
+      await runJumpToEnd({
+        isActive: () => isGenerationActive(generation) && !ac.signal.aborted,
+        signal: ac.signal,
+        onProgress: (c) => {
+          jumpState.count = c;
+        },
+      });
+    } finally {
+      window.removeEventListener('keydown', onEsc, { capture: true });
+      if (escListener === onEsc) escListener = null;
+      if (jumpAbort === ac) jumpAbort = null;
+      jumpState.active = false;
+    }
+  }
+
   async function activate(ctx: ContentScriptContext): Promise<void> {
     const generation = lifecycleGeneration;
     context = ctx;
+    preInteracted = false;
+    jumpState.active = false;
+    jumpState.count = 0;
+    watchPreInteraction();
 
     // position modal → container fixo cobrindo a viewport; pointer-events none
     // deixa os cliques do site passarem (o painel religa em si).
@@ -140,6 +201,8 @@ export function createLinkedInController(): LinkedInController {
           'onUpdate:visible': (value: boolean) => {
             panelVisible = value;
           },
+          jump: jumpState,
+          onCancelJump: () => cancelJump(),
         });
         panelApp.mount(container);
         return panelApp;
@@ -167,21 +230,34 @@ export function createLinkedInController(): LinkedInController {
 
     await processNewPosts();
 
+    clearPreInteractionListeners();
+
     if (!isGenerationActive(generation)) return;
 
     // Guardar e remover o callback para não acumular a cada entrada/saída SPA.
     const removeInvalidatedListener = ctx.onInvalidated(deactivate);
     removeInvalidatedListeners.push(removeInvalidatedListener);
+
+    if (!preInteracted) {
+      void startJump(generation);
+    }
   }
 
   const removeInvalidatedListeners: Array<() => void> = [];
 
   /** Remove UI sem tocar geração/contadores; usado pelo activate invalidado e pelo deactivate. */
   function removeUi(): void {
+    cancelJump();
+    clearPreInteractionListeners();
+    if (escListener) {
+      window.removeEventListener('keydown', escListener, { capture: true });
+      escListener = null;
+    }
     observer?.disconnect();
     observer = null;
     clearTimeout(debounceTimer);
     rescanQueued = false;
+    jumpState.active = false;
     app?.unmount();
     app = null;
     ui?.remove();
