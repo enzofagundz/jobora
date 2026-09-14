@@ -6,6 +6,10 @@ import { createPanelDrag, type PanelDrag } from '@/utils/panel-drag';
 defineProps<{
   siteLabel: string;
   counters: { found: number; sent: number; duplicates: number; errors: number };
+  jumpActive?: boolean;
+  jumpCount?: number;
+  jump?: { active: boolean; count: number };
+  onCancelJump?: () => void;
 }>();
 
 const visible = defineModel<boolean>({ default: true });
@@ -53,6 +57,12 @@ onUnmounted(() => {
         <span>{{ label }}</span>
         <span class="vagas-value">{{ counters[key] }}</span>
       </template>
+    </div>
+    <div v-if="jump?.active ?? jumpActive" class="vagas-jump">
+      <span>pulando para o fim · {{ jump?.count ?? jumpCount ?? 0 }} posts</span>
+      <button type="button" class="vagas-cancel" @click="onCancelJump?.()">
+        Cancelar
+      </button>
     </div>
   </div>
 </template>
@@ -123,5 +133,22 @@ const counterLabels = {
 .vagas-value {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+.vagas-jump {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: #facc15;
+}
+.vagas-cancel {
+  margin-left: auto;
+  background: none;
+  border: 1px solid #475569;
+  border-radius: 6px;
+  color: #e2e8f0;
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 8px;
 }
 </style>

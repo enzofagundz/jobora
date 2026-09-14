@@ -21,6 +21,7 @@
                     Copie o token agora — ele só será exibido integralmente uma vez. Após sair ou recarregar a página, apenas a versão mascarada permanecerá.
                 </div>
                 <div class="mt-3 flex flex-wrap items-center gap-3"
+                     wire:key="credential-{{ md5($this->fullToken() ?: 'empty') }}"
                      x-data="{ revealed: false }"
                 >
                     <code class="min-w-0 flex-1 break-all rounded bg-gray-100 px-3 py-1.5 font-mono text-sm dark:bg-gray-800"
