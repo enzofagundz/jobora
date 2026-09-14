@@ -1,15 +1,41 @@
 <script lang="ts" setup>
+import { onMounted, onUnmounted, ref } from 'vue';
+import { panelPosition } from '@/utils/storage';
+import { createPanelDrag, type PanelDrag } from '@/utils/panel-drag';
+
 defineProps<{
   siteLabel: string;
   counters: { found: number; sent: number; duplicates: number; errors: number };
 }>();
 
 const visible = defineModel<boolean>({ default: true });
+
+const panelEl = ref<HTMLElement | null>(null);
+const handleEl = ref<HTMLElement | null>(null);
+let drag: PanelDrag | null = null;
+
+onMounted(async () => {
+  if (!panelEl.value || !handleEl.value) return;
+  const stored = await panelPosition.getValue();
+  // O componente pode desmontar durante o await do storage.
+  if (!panelEl.value || !handleEl.value) return;
+  drag = createPanelDrag({
+    panel: panelEl.value,
+    handle: handleEl.value,
+    onCommit: (offset) => void panelPosition.setValue(offset),
+  });
+  drag.setOffset(stored);
+});
+
+onUnmounted(() => {
+  drag?.destroy();
+  drag = null;
+});
 </script>
 
 <template>
-  <div v-if="visible" class="vagas-panel">
-    <div class="vagas-title-row">
+  <div v-if="visible" ref="panelEl" class="vagas-panel">
+    <div ref="handleEl" class="vagas-title-row">
       <span class="vagas-dot" aria-hidden="true"></span>
       <span class="vagas-title">{{ siteLabel }}</span>
       <span class="vagas-status">ativo</span>
@@ -61,6 +87,13 @@ const counterLabels = {
   gap: 6px;
   font-weight: 600;
   margin-bottom: 6px;
+  /* Handle de arrasto: cursor + bloqueio de scroll/seleção no toque. */
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.vagas-panel--dragging .vagas-title-row {
+  cursor: grabbing;
 }
 .vagas-dot {
   width: 8px;
