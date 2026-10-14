@@ -1131,3 +1131,51 @@ it('shows polling and the active classification state on the competencies page',
         ->toContain('wire:poll.5s="refreshAiOperation"')
         ->toContain('Classificação estratégica em andamento');
 });
+
+it('enfileira a adequação EN capturando o currículo em inglês', function () {
+    Queue::fake([ProcessAiOperation::class]);
+
+    $user = User::factory()->create();
+    $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create([
+        'description' => 'Vaga para PHP.',
+    ]);
+    $posting->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
+    app(ResumeService::class)->save($user, 'English resume with PHP.', ResumeLanguage::En);
+
+    $operation = app(AiOperationService::class)->enqueueResumeAdaptation($user, $posting, ResumeLanguage::En);
+
+    expect($operation->input_snapshot['language'])->toBe('en')
+        ->and($operation->input_snapshot['resume'])->toBe('English resume with PHP.')
+        ->and($operation->operation_key)->toContain(':en');
+});
+
+it('recusa enfileirar adequação sem currículo no idioma pedido', function () {
+    Queue::fake([ProcessAiOperation::class]);
+
+    $user = User::factory()->create();
+    $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
+
+    expect(fn () => app(AiOperationService::class)->enqueueResumeAdaptation($user, $posting, ResumeLanguage::En))
+        ->toThrow(LogicException::class, 'currículo em inglês');
+
+    expect(AiOperation::query()->count())->toBe(0);
+    Queue::assertNothingPushed();
+});
+
+it('bloqueia uma segunda operação ativa na vaga mesmo em outro idioma', function () {
+    Queue::fake([ProcessAiOperation::class]);
+
+    $user = User::factory()->create();
+    $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
+    app(ResumeService::class)->save($user, 'English resume with PHP.', ResumeLanguage::En);
+
+    app(AiOperationService::class)->enqueueResumeAdaptation($user, $posting, ResumeLanguage::PtBr);
+
+    expect(fn () => app(AiOperationService::class)->enqueueResumeAdaptation($user, $posting, ResumeLanguage::En))
+        ->toThrow(LogicException::class, 'vaga');
+
+    expect(AiOperation::query()->count())->toBe(1);
+});
