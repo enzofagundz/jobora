@@ -7,6 +7,7 @@ use App\Mcp\Resources\MarketSnapshotResource;
 use App\Mcp\Resources\ProfessionalCompetenciesResource;
 use App\Mcp\Resources\ResumeAdaptationResource;
 use App\Mcp\Resources\ResumeResource;
+use App\Mcp\Server\Methods\ReadResource;
 use App\Mcp\Tools\Applications\GetApplicationTool;
 use App\Mcp\Tools\Applications\ListApplicationsTool;
 use App\Mcp\Tools\Applications\RecordApplicationUpdateTool;
@@ -111,4 +112,10 @@ final class JoboraServer extends Server
     ];
 
     protected array $prompts = [];
+
+    protected function boot(): void
+    {
+        // Resolve resources de URI fixa também com query (`?language=...`).
+        $this->addMethod('resources/read', ReadResource::class);
+    }
 }
