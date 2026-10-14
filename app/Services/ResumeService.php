@@ -14,14 +14,7 @@ class ResumeService
      */
     public function save(User $user, string $content, ResumeLanguage $language): Resume
     {
-        $resume = $user->resumes()
-            ->where('language', $language->value)
-            ->first() ?? $user->resumes()->make(['language' => $language]);
-
-        $resume->content = $content;
-        $resume->save();
-
-        return $resume;
+        return $this->persist($user, $language, $content);
     }
 
     /**
@@ -30,12 +23,25 @@ class ResumeService
      */
     public function saveTranslation(User $user, string $content, string $sourceFingerprint): Resume
     {
+        return $this->persist($user, ResumeLanguage::En, $content, $sourceFingerprint);
+    }
+
+    /**
+     * Caminho único de gravação de um currículo: conteúdo e, quando houver,
+     * fingerprint de origem vão numa só escrita.
+     */
+    private function persist(User $user, ResumeLanguage $language, string $content, ?string $sourceFingerprint = null): Resume
+    {
         $resume = $user->resumes()
-            ->where('language', ResumeLanguage::En->value)
-            ->first() ?? $user->resumes()->make(['language' => ResumeLanguage::En]);
+            ->where('language', $language->value)
+            ->first() ?? $user->resumes()->make(['language' => $language]);
 
         $resume->content = $content;
-        $resume->source_fingerprint = $sourceFingerprint;
+
+        if ($sourceFingerprint !== null) {
+            $resume->source_fingerprint = $sourceFingerprint;
+        }
+
         $resume->save();
 
         return $resume;
