@@ -2,12 +2,14 @@
 
 namespace App\Mcp\Tools\Ats;
 
+use App\Enums\ResumeLanguage;
 use App\Mcp\Support\McpUserResolver;
 use App\Mcp\Support\ToolException;
 use App\Mcp\Tools\JoboraTool;
 use App\Models\JobPosting;
 use App\Services\AiOperationService;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Illuminate\Validation\Rule;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
@@ -27,7 +29,12 @@ class ScoreAtsTool extends JoboraTool
 
     protected function execute(Request $request): Response|ResponseFactory
     {
-        $validated = $request->validate(['job_posting_id' => ['required', 'integer']]);
+        $validated = $request->validate([
+            'job_posting_id' => ['required', 'integer'],
+            'language' => ['nullable', Rule::enum(ResumeLanguage::class)],
+        ]);
+
+        $language = ResumeLanguage::tryFrom((string) ($validated['language'] ?? '')) ?? ResumeLanguage::PtBr;
 
         $user = $this->user();
 
@@ -40,7 +47,7 @@ class ScoreAtsTool extends JoboraTool
             throw ToolException::notFound('Vaga não encontrada.');
         }
 
-        $operation = $this->operations->enqueueAtsScore($user, $posting);
+        $operation = $this->operations->enqueueAtsScore($user, $posting, $language);
 
         return $this->ok([
             'operation_id' => $operation->id,
@@ -55,6 +62,7 @@ class ScoreAtsTool extends JoboraTool
     {
         return [
             'job_posting_id' => $schema->integer()->required()->description('Id da vaga confirmada.'),
+            'language' => $schema->string()->description('Idioma da adaptação: pt-BR (padrão) ou en.'),
         ];
     }
 }

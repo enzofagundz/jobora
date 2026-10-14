@@ -2,11 +2,13 @@
 
 namespace App\Mcp\Tools\Ats;
 
+use App\Enums\ResumeLanguage;
 use App\Mcp\Support\ResumeAdaptationPresenter;
 use App\Mcp\Support\ToolException;
 use App\Mcp\Tools\JoboraTool;
 use App\Models\JobPosting;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Illuminate\Validation\Rule;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
@@ -19,7 +21,12 @@ class GetResumeAdaptationTool extends JoboraTool
 {
     protected function execute(Request $request): Response|ResponseFactory
     {
-        $validated = $request->validate(['job_posting_id' => ['required', 'integer']]);
+        $validated = $request->validate([
+            'job_posting_id' => ['required', 'integer'],
+            'language' => ['nullable', Rule::enum(ResumeLanguage::class)],
+        ]);
+
+        $language = ResumeLanguage::tryFrom((string) ($validated['language'] ?? '')) ?? ResumeLanguage::PtBr;
 
         $posting = JobPosting::query()
             ->where('user_id', $this->user()->id)
@@ -30,7 +37,7 @@ class GetResumeAdaptationTool extends JoboraTool
             throw ToolException::notFound('Vaga não encontrada.');
         }
 
-        $adaptation = $posting->resumeAdaptation()->first();
+        $adaptation = $posting->resumeAdaptation($language)->first();
 
         if ($adaptation === null) {
             throw ToolException::notFound('Adaptação não encontrada para esta vaga.');
@@ -46,6 +53,7 @@ class GetResumeAdaptationTool extends JoboraTool
     {
         return [
             'job_posting_id' => $schema->integer()->required()->description('Id da vaga.'),
+            'language' => $schema->string()->description('Idioma da adaptação: pt-BR (padrão) ou en.'),
         ];
     }
 }

@@ -12,7 +12,7 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Contracts\HasUriTemplate;
 use Laravel\Mcp\Support\UriTemplate;
 
-#[Description('Adaptação de currículo de uma vaga do usuário configurado: texto adaptado, alterações, contemplados, lacunas, alertas e estado ATS.')]
+#[Description('Adaptação de currículo de uma vaga do usuário configurado, no idioma da query (padrão pt-BR): texto adaptado, alterações, contemplados, lacunas, alertas e estado ATS.')]
 class ResumeAdaptationResource extends JoboraResource implements HasUriTemplate
 {
     public function __construct(
@@ -37,7 +37,7 @@ class ResumeAdaptationResource extends JoboraResource implements HasUriTemplate
             throw ToolException::notFound('Vaga não encontrada.');
         }
 
-        $adaptation = $posting->resumeAdaptation()->first();
+        $adaptation = $posting->resumeAdaptation($this->language($request))->first();
 
         if ($adaptation === null) {
             throw ToolException::notFound('Adaptação não encontrada para esta vaga.');
