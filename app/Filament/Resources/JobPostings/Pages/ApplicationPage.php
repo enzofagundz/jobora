@@ -7,6 +7,7 @@ use App\Enums\ApplicationMethodType;
 use App\Enums\ApplicationStatus;
 use App\Enums\JobPostingStatus;
 use App\Enums\ResumeLanguage;
+use App\Filament\Pages\ResumePage;
 use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Filament\Resources\JobPostings\Schemas\ApplicationMethodForm;
 use App\Models\AiOperation;
@@ -21,6 +22,7 @@ use App\Services\JobReviewService;
 use App\Services\ResumeService;
 use App\Support\Staleness;
 use Filament\Actions\Action;
+use Filament\Actions\ActionGroup;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Select;
@@ -63,6 +65,12 @@ class ApplicationPage extends Page implements HasTable
 
     public ?array $data = [];
 
+    /**
+     * Idioma em foco na página. Não é persistido: a página sempre abre em
+     * PT-BR e o seletor só troca a leitura desta sessão.
+     */
+    public string $resumeLanguage = ResumeLanguage::PtBr->value;
+
     public bool $atsConsent = false;
 
     public ?array $atsScoreResult = null;
@@ -85,6 +93,22 @@ class ApplicationPage extends Page implements HasTable
 
         $this->fillAdaptedForm();
         $this->refreshAiOperation();
+    }
+
+    /**
+     * Troca o idioma em foco: recarrega currículo original, adaptado e o
+     * estado do ATS pelo idioma escolhido. O seletor não persiste.
+     */
+    public function updatedResumeLanguage(): void
+    {
+        $this->atsConsent = false;
+        $this->fillOriginalForm();
+        $this->refreshAiOperation();
+    }
+
+    public function language(): ResumeLanguage
+    {
+        return ResumeLanguage::from($this->resumeLanguage);
     }
 
     public function form(Schema $schema): Schema
@@ -131,14 +155,38 @@ class ApplicationPage extends Page implements HasTable
         );
     }
 
+    /**
+     * Recarrega o currículo original do idioma em foco preservando o resto de
+     * data (fill() substituiria o array data inteiro).
+     */
+    private function fillOriginalForm(): void
+    {
+        $this->form->fillPartially(
+            [
+                'original_resume' => ResumeService::plainText($this->originalResume()),
+            ],
+            ['original_resume'],
+        );
+    }
+
     public function originalResume(): ?string
     {
-        return app(ResumeService::class)->content(auth()->user(), ResumeLanguage::PtBr);
+        return app(ResumeService::class)->content(auth()->user(), $this->language());
+    }
+
+    public function hasResume(ResumeLanguage $language): bool
+    {
+        return filled(app(ResumeService::class)->content(auth()->user(), $language));
     }
 
     public function adaptation(): ?ResumeAdaptation
     {
-        return $this->record->resumeAdaptation;
+        return $this->adaptationFor($this->language());
+    }
+
+    public function adaptationFor(ResumeLanguage $language): ?ResumeAdaptation
+    {
+        return $this->record->resumeAdaptation($language)->first();
     }
 
     public function activeAiOperation(): ?AiOperation
@@ -169,7 +217,6 @@ class ApplicationPage extends Page implements HasTable
     public function refreshAiOperation(): void
     {
         $this->record->refresh();
-        $this->record->load('resumeAdaptation');
         $this->fillAdaptedForm();
 
         $adaptation = $this->adaptation();
@@ -373,13 +420,33 @@ class ApplicationPage extends Page implements HasTable
             ->emptyStateDescription('Registre a primeira movimentação para iniciar o histórico desta candidatura.');
     }
 
-    public function adapt(): void
+    public function languageName(ResumeLanguage $language): string
+    {
+        return match ($language) {
+            ResumeLanguage::PtBr => 'Português (PT-BR)',
+            ResumeLanguage::En => 'Inglês (EN)',
+        };
+    }
+
+    public function adaptItemLabel(ResumeLanguage $language): string
+    {
+        $name = $this->languageName($language);
+
+        return $this->adaptationFor($language) === null
+            ? 'Adequar em '.$name
+            : 'Adequar novamente em '.$name;
+    }
+
+    public function adapt(ResumeLanguage $language = ResumeLanguage::PtBr): void
     {
         Gate::authorize('update', $this->record);
+
         $this->atsConsent = false;
 
         try {
-            app(AiOperationService::class)->enqueueResumeAdaptation(auth()->user(), $this->record);
+            app(AiOperationService::class)->enqueueResumeAdaptation(auth()->user(), $this->record, $language);
+            $this->resumeLanguage = $language->value;
+            $this->fillOriginalForm();
             $this->refreshAiOperation();
 
             Notification::make()
@@ -419,7 +486,7 @@ class ApplicationPage extends Page implements HasTable
 
         try {
             $newState = ! $this->isAtsOptimized();
-            app(AiOperationService::class)->enqueueAtsOptimization(auth()->user(), $this->record, $newState);
+            app(AiOperationService::class)->enqueueAtsOptimization(auth()->user(), $this->record, $newState, $this->language());
             $this->refreshAiOperation();
 
             Notification::make()
@@ -452,7 +519,7 @@ class ApplicationPage extends Page implements HasTable
         }
 
         try {
-            app(AiOperationService::class)->enqueueAtsScore(auth()->user(), $this->record);
+            app(AiOperationService::class)->enqueueAtsScore(auth()->user(), $this->record, $this->language());
             $this->refreshAiOperation();
 
             Notification::make()
@@ -472,12 +539,28 @@ class ApplicationPage extends Page implements HasTable
     protected function getHeaderActions(): array
     {
         return [
-            Action::make('adapt')
+            ActionGroup::make([
+                Action::make('adaptPtBr')
+                    ->label(fn (): string => $this->adaptItemLabel(ResumeLanguage::PtBr))
+                    ->disabled(fn (): bool => $this->hasActiveAiOperation())
+                    ->action(fn () => $this->adapt(ResumeLanguage::PtBr)),
+                Action::make('adaptEn')
+                    ->label(fn (): string => $this->adaptItemLabel(ResumeLanguage::En))
+                    ->disabled(fn (): bool => $this->hasActiveAiOperation() || ! $this->hasResume(ResumeLanguage::En))
+                    ->tooltip(fn (): ?string => $this->hasResume(ResumeLanguage::En)
+                        ? null
+                        : ResumeLanguage::En->missingResumeGuidance())
+                    ->action(fn () => $this->adapt(ResumeLanguage::En)),
+                Action::make('createEnglishResume')
+                    ->label('Criar versão em inglês do currículo')
+                    ->icon(Heroicon::OutlinedLanguage)
+                    ->visible(fn (): bool => ! $this->hasResume(ResumeLanguage::En))
+                    ->url(fn (): string => ResumePage::getUrl()),
+            ])
                 ->label(fn (): string => $this->adaptation() === null ? 'Adequar currículo' : 'Adequar novamente')
                 ->icon(Heroicon::OutlinedSparkles)
                 ->color('primary')
-                ->disabled(fn (): bool => $this->hasActiveAiOperation())
-                ->action(fn () => $this->adapt()),
+                ->button(),
             Action::make('startTracking')
                 ->label('Iniciar acompanhamento')
                 ->icon(Heroicon::OutlinedPaperAirplane)
@@ -582,9 +665,13 @@ class ApplicationPage extends Page implements HasTable
                 ->url(fn (): string => $this->isAtsOptimized()
                     ? route('filament.admin.resume-pdf.download', [
                         'posting' => $this->record,
+                        'language' => $this->resumeLanguage,
                         'ats_consent' => '1',
                     ])
-                    : route('filament.admin.resume-pdf.download', $this->record))
+                    : route('filament.admin.resume-pdf.download', [
+                        'posting' => $this->record,
+                        'language' => $this->resumeLanguage,
+                    ]))
                 ->openUrlInNewTab(),
             Action::make('manageApplicationMethods')
                 ->label('Gerenciar métodos')
