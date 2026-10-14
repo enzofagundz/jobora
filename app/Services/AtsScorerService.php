@@ -26,10 +26,10 @@ class AtsScorerService
     /**
      * @return array{score: int, rationale: string}
      */
-    public function score(User $user, JobPosting $posting): array
+    public function score(User $user, JobPosting $posting, ResumeLanguage $language = ResumeLanguage::PtBr): array
     {
         $this->assertAccess($user, $posting);
-        $snapshot = $this->snapshots->atsScore($posting->fresh()->load(['items', 'resumeAdaptation']));
+        $snapshot = $this->snapshots->atsScore($posting->fresh()->load(['items', 'resumeAdaptation']), $language);
 
         return $this->scorePayload($user, $posting, $snapshot['payload'], $snapshot['fingerprint']);
     }
@@ -123,7 +123,8 @@ class AtsScorerService
             $rationale = trim(mb_substr($rationale, 0, 200));
 
             if ($persistResult) {
-                $adaptation = $posting->resumeAdaptation()->first();
+                $language = ResumeLanguage::tryFrom((string) ($payload['language'] ?? '')) ?? ResumeLanguage::PtBr;
+                $adaptation = $posting->resumeAdaptation($language)->first();
 
                 if (! $adaptation) {
                     throw new \LogicException('Gere a adaptação do currículo antes de simular a nota.');
@@ -174,13 +175,13 @@ class AtsScorerService
      *
      * @return array{without: array{score:int, rationale:string}, with: array{score:int, rationale:string}}
      */
-    public function scoreComparison(User $user, JobPosting $posting): array
+    public function scoreComparison(User $user, JobPosting $posting, ResumeLanguage $language = ResumeLanguage::PtBr): array
     {
         Gate::forUser($user)->authorize('useAtsOptimization');
         Gate::forUser($user)->authorize('view', $posting);
 
         $posting = $posting->fresh()->load(['items', 'resumeAdaptation']);
-        $adaptation = $posting->resumeAdaptation;
+        $adaptation = $posting->resumeAdaptation($language)->first();
 
         if (! $adaptation) {
             throw new \LogicException('Gere a adaptação antes de comparar.');
@@ -190,12 +191,13 @@ class AtsScorerService
             ? $adaptation->ats_prompt
             : app(AtsPromptBuilder::class)->build(
                 $posting,
-                ResumeService::plainText($this->resumeService->content($user, ResumeLanguage::PtBr) ?? ''),
+                ResumeService::plainText($this->resumeService->content($user, $language) ?? ''),
+                $language,
             );
 
         return [
-            'without' => $this->scoreVariant($user, $posting, $adaptation, false, null),
-            'with' => $this->scoreVariant($user, $posting, $adaptation, true, $prompt !== '' ? $prompt : null),
+            'without' => $this->scoreVariant($user, $posting, $adaptation, false, null, $language),
+            'with' => $this->scoreVariant($user, $posting, $adaptation, true, $prompt !== '' ? $prompt : null, $language),
         ];
     }
 
@@ -208,6 +210,7 @@ class AtsScorerService
         ResumeAdaptation $adaptation,
         bool $optimized,
         ?string $prompt,
+        ResumeLanguage $language,
     ): array {
         $variantAdaptation = clone $adaptation;
         $variantAdaptation->forceFill([
@@ -215,9 +218,7 @@ class AtsScorerService
             'ats_prompt' => $optimized ? $prompt : null,
         ]);
 
-        $variantPosting = clone $posting;
-        $variantPosting->setRelation('resumeAdaptation', $variantAdaptation);
-        $snapshot = $this->snapshots->atsScore($variantPosting);
+        $snapshot = $this->snapshots->atsScore($posting, $language, $variantAdaptation);
 
         return $this->scorePayload(
             $user,

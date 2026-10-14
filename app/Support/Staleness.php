@@ -29,7 +29,7 @@ final class Staleness
 
         if (filled($adaptation->source_fingerprint) && $posting !== null && $user !== null) {
             try {
-                $current = app(AiInputSnapshotService::class)->resumeAdaptation($user, $posting);
+                $current = app(AiInputSnapshotService::class)->resumeAdaptation($user, $posting, $adaptation->language);
 
                 return ! hash_equals($adaptation->source_fingerprint, $current['fingerprint']);
             } catch (\Throwable) {
@@ -37,7 +37,7 @@ final class Staleness
             }
         }
 
-        $resume = $user?->resumes()->where('language', ResumeLanguage::PtBr->value)->first();
+        $resume = $user?->resumes()->where('language', $adaptation->language->value)->first();
 
         // Fallback: if adaptation has no posting/user, fallback to null check
         if ($resume !== null && $adaptation->updated_at->lt($resume->updated_at)) {
@@ -109,7 +109,7 @@ final class Staleness
 
         if (filled($adaptation->ats_source_fingerprint) && $posting !== null) {
             try {
-                $current = app(AiInputSnapshotService::class)->atsScore($posting);
+                $current = app(AiInputSnapshotService::class)->atsScore($posting, $adaptation->language);
 
                 return ! hash_equals($adaptation->ats_source_fingerprint, $current['fingerprint']);
             } catch (\Throwable) {
@@ -135,7 +135,7 @@ final class Staleness
 
         if (filled($adaptation->ats_prompt_fingerprint)) {
             try {
-                $current = app(AiInputSnapshotService::class)->atsOptimization($user, $posting, true);
+                $current = app(AiInputSnapshotService::class)->atsOptimization($user, $posting, true, $adaptation->language);
 
                 return ! hash_equals($adaptation->ats_prompt_fingerprint, $current['fingerprint']);
             } catch (\Throwable) {
@@ -155,7 +155,7 @@ final class Staleness
             return true;
         }
 
-        $resume = $user->resumes()->where('language', ResumeLanguage::PtBr->value)->first();
+        $resume = $user->resumes()->where('language', $adaptation->language->value)->first();
 
         if ($resume !== null && $adaptation->updated_at->lt($resume->updated_at)) {
             return true;

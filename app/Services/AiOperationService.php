@@ -39,7 +39,7 @@ class AiOperationService
         private readonly AtsScorerService $atsScorer,
     ) {}
 
-    public function enqueueResumeAdaptation(User $user, JobPosting $posting): AiOperation
+    public function enqueueResumeAdaptation(User $user, JobPosting $posting, ResumeLanguage $language = ResumeLanguage::PtBr): AiOperation
     {
         Gate::forUser($user)->authorize('update', $posting);
 
@@ -51,16 +51,16 @@ class AiOperationService
             throw new LogicException('A adequação exige uma vaga confirmada.');
         }
 
-        if (blank($this->resumeService->content($user, ResumeLanguage::PtBr))) {
-            throw new LogicException('Cadastre o currículo antes de adequá-lo a uma vaga.');
+        if (blank($this->resumeService->content($user, $language))) {
+            throw new LogicException($language->missingResumeGuidance());
         }
 
-        $snapshot = $this->snapshots->resumeAdaptation($user, $posting->fresh()->load('items'));
+        $snapshot = $this->snapshots->resumeAdaptation($user, $posting->fresh()->load('items'), $language);
 
         return $this->enqueue(
             $user,
             AiOperationType::ResumeAdaptation,
-            AiOperationType::ResumeAdaptation->value.':job_posting:'.$posting->id,
+            AiOperationType::ResumeAdaptation->value.':job_posting:'.$posting->id.':'.$language->value,
             'job_posting',
             $posting->id,
             $posting->id,
@@ -91,7 +91,7 @@ class AiOperationService
         );
     }
 
-    public function enqueueAtsScore(User $user, JobPosting $posting): AiOperation
+    public function enqueueAtsScore(User $user, JobPosting $posting, ResumeLanguage $language = ResumeLanguage::PtBr): AiOperation
     {
         Gate::forUser($user)->authorize('useAtsOptimization');
         Gate::forUser($user)->authorize('view', $posting);
@@ -104,12 +104,12 @@ class AiOperationService
             throw new LogicException('A simulação ATS exige uma vaga confirmada.');
         }
 
-        $snapshot = $this->snapshots->atsScore($posting->fresh()->load(['items', 'resumeAdaptation']));
+        $snapshot = $this->snapshots->atsScore($posting->fresh()->load(['items', 'resumeAdaptation']), $language);
 
         return $this->enqueue(
             $user,
             AiOperationType::AtsScore,
-            AiOperationType::AtsScore->value.':job_posting:'.$posting->id,
+            AiOperationType::AtsScore->value.':job_posting:'.$posting->id.':'.$language->value,
             'job_posting',
             $posting->id,
             $posting->id,
@@ -117,7 +117,7 @@ class AiOperationService
         );
     }
 
-    public function enqueueAtsOptimization(User $user, JobPosting $posting, bool $enabled): AiOperation
+    public function enqueueAtsOptimization(User $user, JobPosting $posting, bool $enabled, ResumeLanguage $language = ResumeLanguage::PtBr): AiOperation
     {
         Gate::forUser($user)->authorize('useAtsOptimization');
         Gate::forUser($user)->authorize('update', $posting);
@@ -134,6 +134,7 @@ class AiOperationService
             $user,
             $posting->fresh()->load(['items', 'resumeAdaptation']),
             $enabled,
+            $language,
         );
 
         if ($enabled && blank($snapshot['payload']['ats_prompt'] ?? null)) {
@@ -143,7 +144,7 @@ class AiOperationService
         return $this->enqueue(
             $user,
             AiOperationType::AtsOptimization,
-            AiOperationType::AtsOptimization->value.':job_posting:'.$posting->id,
+            AiOperationType::AtsOptimization->value.':job_posting:'.$posting->id.':'.$language->value,
             'job_posting',
             $posting->id,
             $posting->id,
