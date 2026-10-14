@@ -7,4 +7,3 @@ workers:
   - queue
   - reverb
   - schedule
-  - vite
