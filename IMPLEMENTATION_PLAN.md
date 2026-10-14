@@ -2,7 +2,7 @@
 
 > Documento de execução derivado de `TECHNICAL_PLAN.md` (fonte técnica) e `PRD.md` (fonte de produto).
 > O repositório já contém a maior parte do MVP implementada (verificado em 2026-08-13). Cada tarefa indica o estado atual: **verificar/aceitar** (validar o que existe contra critérios objetivos) ou **implementar** (criar o que falta). Não refazer trabalho existente. Ordem de execução segue o TECHNICAL_PLAN §16.
-> Restrições fixas: Laravel 13 + Filament 5 + Laravel AI SDK (provider `opencode_zen`, modelo `mimo-v2.5-free`); SQLite; single-user; vagas como fonte de dados (não gerenciador de vagas/candidaturas); sem scraping; sem Redis/filas/Elasticsearch; comparação agregada mercado × currículo; sem Ollama; sem chamadas HTTP próprias ao OpenCode Zen (toda comunicação via Laravel AI SDK). F6 (adequação de currículo): IA via mesmo provider `opencode_zen`/`mimo-v2.5-free` — **Cloudflare não é provedor de IA**, atua apenas como driver de PDF (`spatie/laravel-pdf`); persistência da última versão adaptada por vaga (sem histórico); currículo original nunca substituído; PDF não persistido (derivado sob demanda); sem DOCX no MVP; sem CRUD para a adaptação.
+> Restrições fixas: Laravel 13 + Filament 5 + Laravel AI SDK (provider `opencode_zen`, modelo `mimo-v2.5-free`); SQLite; single-user; vagas como fonte de dados (não gerenciador de vagas/candidaturas); sem scraping; sem Redis/filas/Elasticsearch; comparação agregada mercado × currículo; sem Ollama; sem chamadas HTTP próprias ao OpenCode Zen (toda comunicação via Laravel AI SDK). F6 (adequação de currículo): IA via mesmo provider `opencode_zen`/`mimo-v2.5-free` — **Cloudflare não é provedor de IA**, atua apenas como driver de PDF (`spatie/laravel-pdf`); persistência de uma versão adaptada por (vaga, idioma) — PT-BR e EN — (sem histórico); currículo original nunca substituído; PDF não persistido (derivado sob demanda); sem DOCX no MVP; sem CRUD para a adaptação.
 
 ## 1. Estratégia de implementação
 
@@ -13,7 +13,7 @@ Construir o MVP em 11 fases seguindo a ordem de dependências do TECHNICAL_PLAN 
 - **Fase C — Cadastro de vagas (T008):** Resource Filament List/Create com validação do TP §6.1.
 - **Fase D — IA (T009–T013):** Agent, schema estruturado (contrato JSON no prompt), DTO validado, Service com tratamento de erros, ação "Analisar com IA", testes com fakes.
 - **Fase E — Revisão humana (T014):** página de revisão com Confirmar/Descartar/Re-analisar e persistência de itens com `ItemSource`.
-- **Fase F — Currículo (T015):** linha única substituível + página Filament.
+- **Fase F — Currículo (T015):** versões por idioma (PT-BR canônico e EN derivado por tradução de IA) + página Filament.
 - **Fase G — Análises (T016–T017):** normalização de conceitos + motor de frequências/rankings/combinações/série mensal.
 - **Fase H — Comparação mercado × currículo (T018):** análise de presença no currículo + tabela aderência/lacunas.
 - **Fase I — Dashboard (T019):** widgets de stats, top conceitos, lacunas e tendência.
@@ -278,20 +278,20 @@ Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAn
 
 #### T015 — Currículo (ResumeService + ResumePage)
 
-**Objetivo:** cadastrar/atualizar o currículo em texto, linha única substituível, refletindo imediatamente na comparação (TP §10, §14).
+**Objetivo:** cadastrar/atualizar o currículo em versões por idioma (uma por (usuário, idioma); PT-BR canônico e EN derivado por tradução de IA), refletindo imediatamente na comparação (TP §10, §14).
 
-**Contexto:** TP §16 etapa 9. Estado: **implementado — verificar/aceitar**. `App\Services\ResumeService` (`save()` = atualiza a linha existente — `first() ?? new Resume`; `current()`; `content()`). `App\Filament\Pages\ResumePage` (slug `resume`, navigationLabel "Currículo", textarea `content` required rows 20 autosize, `save()`, `lastUpdatedAt()` mostra data da última atualização, helperText explica substituição sem histórico).
+**Contexto:** TP §16 etapa 9. Estado: **implementado — verificar/aceitar**. `App\Services\ResumeService` (`save($user, $content, $language)` = atualiza a linha daquele idioma; `current($user, $language)`; `content($user, $language)`; `saveTranslation()` grava a versão EN com o `source_fingerprint` do PT-BR). `App\Filament\Pages\ResumePage` (slug `resume`, navigationLabel "Currículo", abas PT-BR | EN, textarea `content` required rows 20 autosize, `save()` grava a versão da aba, `lastUpdatedAt()` mostra data da última atualização, botão de gerar/regenerar a versão EN com confirmação e aviso de drift).
 
 **Implementação:**
-- Verificar `ResumeService::save`: 2 envios → 1 linha, conteúdo = último envio.
-- Verificar `ResumePage`: formulário carrega o texto atual no mount; salvar persiste; mostra data da última atualização.
+- Verificar `ResumeService::save`: 2 envios no mesmo idioma → 1 linha, conteúdo = último envio; idiomas distintos coexistem.
+- Verificar `ResumePage`: formulário carrega o texto do idioma ativo no mount; salvar persiste aquela versão; mostra data da última atualização; geração da versão EN substitui a anterior (com confirmação) e sinaliza drift quando o PT-BR muda depois.
 - Verificar que o texto é armazenado como está (sem normalização persistida — a normalização é feita sob demanda por `ResumeAnalyzer`, T018).
 
 **Dependências:** T003, T005, T006.
 
-**Critérios de conclusão:** salvar currículo cria/atualiza linha única; novo envio substitui; data de atualização visível; conteúdo disponível via `ResumeService::content()`.
+**Critérios de conclusão:** salvar currículo cria/atualiza a versão daquele idioma; novo envio substitui a versão; PT-BR e EN coexistem; data de atualização visível; conteúdo disponível via `ResumeService::content($user, $language)`.
 
-**Testes:** `tests/Feature/ResumeAndComparisonTest.php` ("salva o currículo em linha única e substitui"); `tests/Feature/FilamentPagesTest.php` ("renderiza a página do currículo e salva").
+**Testes:** `tests/Feature/ResumeAndComparisonTest.php` ("currículo por idioma"); `tests/Feature/FilamentPagesTest.php` ("renderiza a página do currículo e salva").
 
 ### Fase G — Análises
 
@@ -431,7 +431,7 @@ Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAn
 
 ### Fase L — Adequação de currículo para ATS (F6)
 
-**Objetivo da fase:** implementar a F6 ponta a ponta conforme TP etapas 15–17: persistência da última versão adaptada por vaga, agente de adequação (mesmo provider `opencode_zen`/`mimo-v2.5-free`), validação de integridade em 2 camadas, página de resultado não-CRUD e exportação PDF via `spatie/laravel-pdf` com driver `cloudflare` (Cloudflare Browser Run). Cloudflare **não** é provedor de IA. Nenhum teste depende de chamadas reais (fakes do Agent e `Pdf::fake()`).
+**Objetivo da fase:** implementar a F6 ponta a ponta conforme TP etapas 15–17: persistência de uma versão adaptada por (vaga, idioma), agente de adequação (mesmo provider `opencode_zen`/`mimo-v2.5-free`), validação de integridade em 2 camadas, página de resultado não-CRUD e exportação PDF via `spatie/laravel-pdf` com driver `cloudflare` (Cloudflare Browser Run). Cloudflare **não** é provedor de IA. Nenhum teste depende de chamadas reais (fakes do Agent e `Pdf::fake()`).
 
 **Decisões de implementação registradas:** o download do PDF é uma **rota GET autenticada do painel** (`filament.admin.resume-pdf.download`), não uma ação Livewire — retornos de arquivo de ações são serializados no snapshot JSON e bytes binários quebram o encode (erro "Malformed UTF-8"). A autorização do Resource/ações/páginas/rota é explícita via `App\Policies\JobPostingPolicy` (single-user: todos os métodos permitem; a fronteira fica testável). `AnalyzeJobPosting` implementa `ShouldQueueAfterCommit` (o job só é disparado após o commit da transação). A análise em segundo plano exige worker ativo (`php artisan dev` ou `queue:work`).
 
@@ -439,12 +439,12 @@ Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAn
 
 #### T023 — Persistência da adequação (migration + Model `ResumeAdaptation`)
 
-**Objetivo:** tabela `resume_adaptations` com constraint 1:1 por vaga (última versão, sem histórico) e Model Eloquent, sem qualquer alteração no currículo original (TP §4–5, §16 etapa 15).
+**Objetivo:** tabela `resume_adaptations` com constraint por (vaga, idioma) (uma versão por idioma, sem histórico temporal) e Model Eloquent, sem qualquer alteração no currículo original (TP §4–5, §16 etapa 15).
 
 **Contexto:** TP §4 (entidade `ResumeAdaptation`), §5 (migration 5), §16 etapa 15. Estado: **implementado — verificar/aceitar**.
 
 **Implementação:**
-- Migration `resume_adaptations`: `id` BIGINT PK; `job_posting_id` BIGINT NOT NULL **UNIQUE** FK → `job_postings.id` ON DELETE CASCADE (garante 1 adaptação por vaga — constraint 1:1); `adapted_content` TEXT NOT NULL; `changes`, `covered_keywords`, `missing_requirements`, `alerts` TEXT NULL (JSON); `created_at`/`updated_at`.
+- Migration `resume_adaptations`: `id` BIGINT PK; `job_posting_id` BIGINT NOT NULL FK → `job_postings.id` ON DELETE CASCADE; `language` TEXT NOT NULL (default `pt-BR`); **UNIQUE** (`job_posting_id`, `language`) (garante 1 adaptação por (vaga, idioma)); `adapted_content` TEXT NOT NULL; `changes`, `covered_keywords`, `missing_requirements`, `alerts` TEXT NULL (JSON); `created_at`/`updated_at`.
 - Model `App\Models\ResumeAdaptation`: fillable completo; casts `changes`/`covered_keywords`/`missing_requirements`/`alerts` → array; relação `jobPosting()` belongsTo.
 - Sem tabela de histórico: regenerar = atualizar a mesma linha (UPSERT é responsabilidade do service, T027).
 - Nenhuma mudança em `resumes` (o original nunca é substituído).
@@ -529,7 +529,7 @@ Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAn
 
 **Dependências:** T023 (model), T024 (DTO), T025 (agent), T026 (integridade), T015 (`ResumeService`), T018 (`ResumeAnalyzer`), T014 (vaga confirmed).
 
-**Critérios de conclusão:** fluxo completo gera e persiste a última adaptação por vaga; regenerar substitui; falha não persiste nada; vaga não confirmada ou sem currículo ⇒ exceção clara; `resumes` intocada.
+**Critérios de conclusão:** fluxo completo gera e persiste a adaptação daquele (vaga, idioma); regenerar substitui a versão daquele idioma; falha não persiste nada; vaga não confirmada ou sem currículo daquele idioma ⇒ exceção clara; `resumes` intocada.
 
 **Testes:** T028 (Feature com fakes) + T031.
 
@@ -542,7 +542,7 @@ Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAn
 **Implementação:**
 - `tests/Unit/ResumeAdaptationResultTest`: tipos errados lançam; limites (itens/chars); campos limpos; HTML rejeitado.
 - `tests/Feature/ResumeAdaptationFlowTest` (parte domínio, com `ResumeAdaptationAgent::fake([...])`):
-  - resposta válida → adaptação persistida (1 linha por vaga, com `adapted_content` e listas JSON);
+  - resposta válida → adaptação persistida (1 linha por (vaga, idioma), com `adapted_content` e listas JSON);
   - regenerar → mesma linha, conteúdo novo (UPSERT);
   - resposta com conceito inventado (fora do currículo original) ⇒ rejeição, nada persistido;
   - vaga não `confirmed` ou sem currículo ⇒ exceção, nada persistido;
@@ -657,7 +657,7 @@ Condições objetivas (derivadas do PRD §7–8) — todas devem ser verdadeiras
 4. **Revisão humana:** página de revisão mostra descrição original (read-only) + role/company/itens editáveis com origem ai/user; correção manual persiste após recarregar; Confirmar persiste os dados confirmados (itens com `ItemSource` correto, `suggested_data` apagado, status `confirmed`); Descartar volta a `pending`.
 5. **Persistência dos dados confirmados:** apenas a versão revisada pelo usuário é armazenada como base; a sugestão do modelo não é mantida após a revisão.
 6. **Vaga não confirmada fora das análises:** apenas vagas `confirmed` compõem frequências/combinações/tendências.
-7. **Currículo:** cadastro e atualização em texto; novo envio substitui a versão anterior (linha única); atualização reflete na comparação imediatamente.
+7. **Currículo:** cadastro e atualização em texto por idioma (PT-BR canônico e EN derivado por tradução de IA); novo envio substitui a versão daquele idioma; a versão PT-BR reflete na comparação imediatamente.
 8. **Análises agregadas:** frequências absolutas e relativas por categoria, rankings, combinações recorrentes — cenário de aceitação: 3 vagas (2× Python, 1× React) → Python 2, React 1, percentuais corretos.
 9. **Cruzamento mercado × currículo:** tabela Item | Categoria | Nº de vagas | % vagas | Currículo (Presente/Ausente); cenário PRD: Python presente, React ausente com frequências corretas.
 10. **Lacunas:** itens frequentes nas vagas e ausentes do currículo, priorizados por frequência.
@@ -665,7 +665,7 @@ Condições objetivas (derivadas do PRD §7–8) — todas devem ser verdadeiras
 12. **Visualização no Filament:** Listagem/Cadastro de vagas, página de revisão, página do currículo, Mercado × Currículo, Tendências e Dashboard com widgets (stats, top conceitos, lacunas, gráfico mensal).
 13. **Testes das funcionalidades críticas:** suite Pest verde (Unit + Feature) com fakes do SDK (sem chamadas reais em CI), cobrindo fluxo da vaga, análise, revisão, currículo, análises, comparação, temporal e páginas Filament.
 14. **Smoke real concluído:** fluxo ponta-a-ponta com chave real validado no navegador (T022).
-15. **Adequação (F6):** ação "Adequar currículo" (vaga `confirmed` com currículo cadastrado) gera a versão adaptada com os 5 resultados (adaptado, alterações, contemplados, ausentes, alertas); persistida a última versão por vaga (1:1, sem histórico — T023/T027); currículo original nunca alterado.
+15. **Adequação (F6):** ação "Adequar currículo" (dropdown com um item por idioma; vaga `confirmed` com currículo daquele idioma cadastrado) gera a versão adaptada com os 5 resultados (adaptado, alterações, contemplados, ausentes, alertas); persistida uma versão por (vaga, idioma) — PT-BR e EN, sem histórico (T023/T027); currículo original nunca alterado.
 16. **Integridade (F6):** todo conceito do currículo adaptado existe no currículo original; conceito novo ⇒ rejeição com mensagem; `covered_keywords`/`missing_requirements` consistentes (T026).
 17. **PDF (F6):** exportação em PDF via `spatie/laravel-pdf` com driver `cloudflare` (Cloudflare Browser Run), derivado sob demanda do Blade de impressão, legível por ATS; DOCX fora do MVP (T029).
 18. **Testes F6:** suite F6 verde com fakes (Agent + `Pdf::fake()`), sem chamadas reais; smoke real da adequação + PDF validado (T032).
@@ -751,11 +751,11 @@ T032 Refinamentos F6
 | T020 | Página de tendências (análise temporal) | J — Temporal | T017 | Série mensal + comparação 3×3 + aviso dados insuficientes |
 | T021 | Suite completa e regressão do fluxo integral | K — Testes | T008–T020 | `php artisan test` verde |
 | T022 | Smoke real ponta-a-ponta + Definition of Done | K — Testes | T021 | Fluxo real validado; DoD do MVP 100% |
-| T023 | Persistência da adequação (migration + Model `ResumeAdaptation`) | L — F6 | T005, T006 | Tabela 1:1 por vaga (UNIQUE), sem histórico; `resumes` intocada |
+| T023 | Persistência da adequação (migration + Model `ResumeAdaptation`) | L — F6 | T005, T006 | Tabela com UNIQUE (`job_posting_id`, `language`) — uma por (vaga, idioma), sem histórico; `resumes` intocada |
 | T024 | DTO `ResumeAdaptationResult` | L — F6 | — (paralelo a T023) | Resposta da IA validada estruturalmente (5 campos, limites, sem HTML) |
 | T025 | Agent `ResumeAdaptationAgent` | L — F6 | T004, T024 | Agent opencode_zen/mimo-v2.5-free com regra de integridade; sem Cloudflare/HTML |
 | T026 | Validação de integridade (2 camadas) | L — F6 | T016, T018, T024 | Conceitos do adaptado ⊆ original; keywords/ausentes consistentes |
-| T027 | Service `ResumeAdaptationService` | L — F6 | T023, T024, T025, T026, T015, T018, T014 | Fluxo completo com UPSERT por vaga; falha não persiste nada |
+| T027 | Service `ResumeAdaptationService` | L — F6 | T023, T024, T025, T026, T015, T018, T014 | Fluxo completo com UPSERT por (vaga, idioma); falha não persiste nada |
 | T028 | Testes do domínio F6 (DTO, integridade, UPSERT, original intocado) | L — F6 | T023, T024, T026, T027 | Cenários verdes com fakes, sem rede |
 | T029 | PDF: `spatie/laravel-pdf` + driver `cloudflare` + `ResumePdfService` + Blade | L — F6 | T027, T002 | PDF sob demanda a partir do Blade; sem persistir PDF; sem DOCX |
 | T030 | Filament `ResumeAdaptationPage` (não-CRUD) | L — F6 | T003, T008, T027, T029 | Página com os 5 resultados + Adequar novamente/Copiar/Baixar PDF |
@@ -779,4 +779,4 @@ T032 Refinamentos F6
 | F6 — Adequação de currículo para uma vaga (ATS) | T023 (persistência), T024 (DTO), T025 (agent), T026 (integridade), T027 (service), T028 (testes domínio), T029 (PDF), T030 (página Filament), T031 (testes integração), T032 (refinamentos) |
 | Entrada do currículo PDF/DOCX (PENDENTE no PRD) | T033 (bloqueada pela decisão de extração de texto — TP §17) |
 
-Revisão interna: toda funcionalidade do PRD (F1–F6), análise temporal, comparação agregada, lacunas e adequação de currículo possuem tarefa(s) correspondente(s); nenhuma funcionalidade fora do escopo (scraping, gestão de candidaturas, multi-usuário, carta de apresentação, candidatura automática, integração LinkedIn, envio automático, múltiplas versões persistentes, DOCX no MVP, exportação CSV/JSON, histórico de currículo) foi adicionada.
+Revisão interna: toda funcionalidade do PRD (F1–F6), análise temporal, comparação agregada, lacunas e adequação de currículo possuem tarefa(s) correspondente(s); nenhuma funcionalidade fora do escopo (scraping, gestão de candidaturas, multi-usuário, carta de apresentação, candidatura automática, integração LinkedIn, envio automático, histórico temporal de versões do currículo/adaptação, DOCX no MVP, exportação CSV/JSON, histórico de currículo) foi adicionada.
