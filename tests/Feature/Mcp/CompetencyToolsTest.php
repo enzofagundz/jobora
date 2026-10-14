@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\ProfessionalCompetencySource;
+use App\Enums\ResumeLanguage;
 use App\Enums\StrategicRole;
 use App\Jobs\ProcessAiOperation;
 use App\Mcp\Resources\ProfessionalCompetenciesResource;
@@ -32,7 +33,7 @@ it('lista competências vazias quando não há', function () {
 
 it('lista competências com papel estratégico e presença no currículo', function () {
     $user = McpTestHelpers::user();
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
 
     ProfessionalCompetency::factory()->for($user, 'user')->create([
         'concept' => 'PHP',
@@ -61,7 +62,7 @@ it('lista competências com papel estratégico e presença no currículo', funct
 
 it('define uma competência manual e ela aparece na lista', function () {
     $user = McpTestHelpers::user();
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
 
     JoboraServer::tool(SetProfessionalCompetencyTool::class, [
         'concept' => 'php',
@@ -131,7 +132,7 @@ it('não remove competência de outro usuário', function () {
 it('enfileira a classificação estratégica das competências', function () {
     $user = McpTestHelpers::user();
     Queue::fake();
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
 
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
     McpTestHelpers::item($posting, 'PHP');
@@ -156,7 +157,7 @@ it('recusa classificar competências sem currículo cadastrado', function () {
 
 it('expõe as competências estratégicas como resource', function () {
     $user = McpTestHelpers::user();
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     ProfessionalCompetency::factory()->for($user, 'user')->create([
         'concept' => 'PHP',
         'strategic_role' => StrategicRole::Core,

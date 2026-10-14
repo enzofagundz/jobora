@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\ResumeLanguage;
 use App\Models\ResumeAdaptation;
 use Spatie\LaravelPdf\Facades\Pdf;
 use Spatie\LaravelPdf\PdfBuilder;
@@ -17,11 +18,15 @@ class ResumePdfService
 {
     public function download(ResumeAdaptation $adaptation): PdfBuilder
     {
+        $language = $adaptation->language;
+
         return Pdf::view('pdf.adapted-resume', [
             'adaptation' => $adaptation,
+            'language' => $language->value,
+            'label' => $language->documentLabel(),
         ])
             ->format('a4')
             ->margins(16, 16, 16, 16)
-            ->name('curriculo-adaptado.pdf');
+            ->name($language === ResumeLanguage::En ? 'resume.pdf' : 'curriculo-adaptado.pdf');
     }
 }

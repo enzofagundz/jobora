@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\ResumeLanguage;
 use App\Mcp\Resources\MarketSnapshotResource;
 use App\Mcp\Servers\JoboraServer;
 use App\Mcp\Tools\Market\GetMarketComparisonTool;
@@ -59,7 +60,7 @@ it('devolve combinações recorrentes na mesma categoria', function () {
 
 it('compara o mercado com o currículo e aponta lacunas', function () {
     $user = McpTestHelpers::user();
-    app(ResumeService::class)->save($user, 'Currículo com Python e automação.');
+    app(ResumeService::class)->save($user, 'Currículo com Python e automação.', ResumeLanguage::PtBr);
 
     foreach (['Python', 'Python', 'React'] as $name) {
         $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
@@ -110,7 +111,7 @@ it('devolve a série temporal com dois meses de dados', function () {
 
 it('expõe um snapshot de mercado como resource', function () {
     $user = McpTestHelpers::user();
-    app(ResumeService::class)->save($user, 'Currículo com Python.');
+    app(ResumeService::class)->save($user, 'Currículo com Python.', ResumeLanguage::PtBr);
 
     foreach (['Python', 'Python', 'React'] as $name) {
         $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();

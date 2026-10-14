@@ -7,6 +7,7 @@ use App\Agents\StrategicCompetencyAgent;
 use App\Enums\JobCaptureTriageResult;
 use App\Enums\JobCaptureTriageStatus;
 use App\Enums\JobPostingStatus;
+use App\Enums\ResumeLanguage;
 use App\Jobs\AnalyzeJobPosting;
 use App\Jobs\TriageJobCaptures;
 use App\Models\JobCapture;
@@ -102,7 +103,7 @@ it('adaptação não envia job_items duplicado nem resume_concepts', function ()
     $posting->items()->create(['category' => 'skill', 'name' => 'Laravel', 'source' => 'ai']);
     $posting->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
 
-    app(ResumeService::class)->save($user, 'Currículo com PHP e Laravel.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP e Laravel.', ResumeLanguage::PtBr);
 
     $captured = null;
     ResumeAdaptationAgent::fake(function (string $prompt) use (&$captured) {
@@ -129,7 +130,7 @@ it('adaptação não envia job_items duplicado nem resume_concepts', function ()
 
 it('classificação não envia resume_concepts redundante', function () {
     $user = User::factory()->create();
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
     $posting->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
 
@@ -240,7 +241,7 @@ it('currículo alterado invalida adaptação mas não reextrai vaga', function (
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create(['description' => 'Vaga PHP']);
     $posting->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
 
-    app(ResumeService::class)->save($user, 'Currículo inicial com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo inicial com PHP.', ResumeLanguage::PtBr);
 
     ResumeAdaptationAgent::fake([[
         'adapted_resume' => 'Adaptado com PHP.',
@@ -255,7 +256,7 @@ it('currículo alterado invalida adaptação mas não reextrai vaga', function (
     expect(Staleness::isAdaptationStale($adaptation))->toBeFalse();
 
     sleep(1);
-    app(ResumeService::class)->save($user, 'Currículo atualizado com Python e Laravel.');
+    app(ResumeService::class)->save($user, 'Currículo atualizado com Python e Laravel.', ResumeLanguage::PtBr);
 
     expect(Staleness::isAdaptationStale($adaptation->refresh()))->toBeTrue();
 
@@ -279,12 +280,12 @@ it('preferências alteradas invalidam triagem mas não extração', function () 
 
 it('competência fica stale quando currículo ou mercado mudam', function () {
     $user = User::factory()->create();
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
 
     $competency = ProfessionalCompetency::factory()->create(['user_id' => $user->id, 'concept' => 'PHP']);
 
     sleep(1);
-    app(ResumeService::class)->save($user, 'Currículo com PHP e Laravel.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP e Laravel.', ResumeLanguage::PtBr);
 
     expect(Staleness::isCompetencyStale($competency->refresh()))->toBeTrue();
 });

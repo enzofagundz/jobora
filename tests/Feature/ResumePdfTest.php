@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\ResumeLanguage;
 use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
@@ -85,4 +86,63 @@ it('redireciona com notificação quando a geração do PDF falha', function () 
         ->get(route('filament.admin.resume-pdf.download', $posting))
         ->assertRedirect(JobPostingResource::getUrl('application', ['record' => $posting]))
         ->assertSessionHas('filament.notifications');
+});
+
+it('resolve a adaptação pelo idioma e marca o rótulo em inglês', function () {
+    Pdf::fake();
+
+    $user = User::factory()->create();
+    $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
+
+    ResumeAdaptation::create([
+        'job_posting_id' => $posting->id,
+        'adapted_content' => 'Currículo em português.',
+        'changes' => [],
+        'covered_keywords' => [],
+        'missing_requirements' => [],
+        'alerts' => [],
+    ]);
+    $en = ResumeAdaptation::create([
+        'job_posting_id' => $posting->id,
+        'language' => ResumeLanguage::En,
+        'adapted_content' => "JOAO SILVA\nDev",
+        'changes' => [],
+        'covered_keywords' => [],
+        'missing_requirements' => [],
+        'alerts' => [],
+    ]);
+
+    $this->actingAs($user)
+        ->get(route('filament.admin.resume-pdf.download', [
+            'posting' => $posting,
+            'language' => 'en',
+        ]))
+        ->assertOk();
+
+    Pdf::assertRespondedWithPdf(fn (PdfBuilder $pdf): bool => $pdf->viewData['adaptation']->is($en)
+        && $pdf->viewData['language'] === 'en'
+        && $pdf->viewData['label'] === 'Resume');
+});
+
+it('usa o rótulo Currículo para a versão pt-BR', function () {
+    Pdf::fake();
+
+    $user = User::factory()->create();
+    $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
+    $ptBr = ResumeAdaptation::create([
+        'job_posting_id' => $posting->id,
+        'adapted_content' => 'Currículo em português.',
+        'changes' => [],
+        'covered_keywords' => [],
+        'missing_requirements' => [],
+        'alerts' => [],
+    ]);
+
+    $this->actingAs($user)
+        ->get(route('filament.admin.resume-pdf.download', $posting))
+        ->assertOk();
+
+    Pdf::assertRespondedWithPdf(fn (PdfBuilder $pdf): bool => $pdf->viewData['adaptation']->is($ptBr)
+        && $pdf->viewData['language'] === 'pt-BR'
+        && $pdf->viewData['label'] === 'Currículo');
 });

@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\ResumeLanguage;
 use App\Models\JobPosting;
 use App\Models\User;
 use App\Services\AtsPromptBuilder;
@@ -118,4 +119,25 @@ it('handles missing role and company', function () {
 
     expect($prompt)->toContain('PHP')
         ->and($prompt)->toContain('Perfil altamente compatível');
+});
+
+it('gera o bloco em inglês quando o idioma é EN', function () {
+    $user = User::factory()->create();
+    $posting = JobPosting::factory()->for($user, 'user')->create([
+        'role' => 'Backend Engineer',
+        'company' => 'Acme',
+        'description' => 'PHP Laravel',
+    ]);
+    $posting->items()->createMany([
+        ['category' => 'skill', 'name' => 'PHP', 'source' => 'ai'],
+        ['category' => 'skill', 'name' => 'Laravel', 'source' => 'ai'],
+    ]);
+
+    $builder = app(AtsPromptBuilder::class);
+    $prompt = $builder->build($posting, 'Experienced with PHP and Laravel.', ResumeLanguage::En);
+
+    expect($prompt)->toContain('Highly compatible profile')
+        ->and($prompt)->toContain('PHP')
+        ->and($prompt)->not->toContain('Perfil altamente compatível')
+        ->and(mb_strlen($prompt))->toBeLessThanOrEqual(300);
 });

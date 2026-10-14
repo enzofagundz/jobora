@@ -16,6 +16,7 @@ final class ResumeAdaptationPresenter
     {
         return [
             'job_posting_id' => $adaptation->job_posting_id,
+            'language' => $adaptation->language?->value,
             'adapted_content' => $adaptation->adapted_content,
             'changes' => $adaptation->changes ?? [],
             'covered_keywords' => $adaptation->covered_keywords ?? [],

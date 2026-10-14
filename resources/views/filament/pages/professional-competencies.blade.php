@@ -29,7 +29,7 @@
 
         {{ $this->table }}
 
-        @if (blank(app(\App\Services\ResumeService::class)->content(auth()->user())))
+        @if (blank(app(\App\Services\ResumeService::class)->content(auth()->user(), \App\Enums\ResumeLanguage::PtBr)))
             <p class="mt-4 text-sm text-warning-600 dark:text-warning-400">
                 Nenhum currículo cadastrado — a classificação com IA exige o currículo para montar os candidatos.
             </p>

@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools\JobPostings;
 
+use App\Enums\ResumeLanguage;
 use App\Mcp\Support\JobPostingPresenter;
 use App\Mcp\Support\ToolException;
 use App\Mcp\Tools\JoboraTool;
@@ -22,7 +23,7 @@ class GetJobPostingTool extends JoboraTool
         $validated = $request->validate(['id' => ['required', 'integer']]);
 
         $posting = JobPosting::query()
-            ->with(['items', 'applicationMethods', 'resumeAdaptation', 'application'])
+            ->with(['items', 'applicationMethods', 'application'])
             ->where('user_id', $this->user()->id)
             ->whereKey((int) $validated['id'])
             ->first();
@@ -31,7 +32,7 @@ class GetJobPostingTool extends JoboraTool
             throw ToolException::notFound('Vaga não encontrada.');
         }
 
-        return $this->ok(['job_posting' => JobPostingPresenter::detail($posting)]);
+        return $this->ok(['job_posting' => JobPostingPresenter::detail($posting, ResumeLanguage::PtBr)]);
     }
 
     /**

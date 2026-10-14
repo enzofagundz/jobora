@@ -10,7 +10,7 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Attributes\Uri;
 
 #[Uri('jobora://resume')]
-#[Description('Currículo atual do usuário configurado (texto e data de atualização).')]
+#[Description('Currículo do usuário configurado, no idioma pedido (padrão pt-BR): texto e data de atualização.')]
 class ResumeResource extends JoboraResource
 {
     public function __construct(
@@ -22,7 +22,7 @@ class ResumeResource extends JoboraResource
 
     protected function read(Request $request): Response
     {
-        $resume = $this->resumes->current($this->user());
+        $resume = $this->resumes->current($this->user(), $this->language($request));
 
         return $this->ok([
             'content' => $resume?->content,

@@ -2,6 +2,7 @@
 
 use App\Agents\StrategicCompetencyAgent;
 use App\Enums\ProfessionalCompetencySource;
+use App\Enums\ResumeLanguage;
 use App\Enums\StrategicRole;
 use App\Filament\Pages\ProfessionalCompetenciesPage;
 use App\Filament\Widgets\ComparisonSummaryWidget;
@@ -20,7 +21,7 @@ beforeEach(function (): void {
 
 function competencyPageResume(string $text): void
 {
-    app(ResumeService::class)->save(auth()->user(), $text);
+    app(ResumeService::class)->save(auth()->user(), $text, ResumeLanguage::PtBr);
 }
 
 function competencyPageMarket(array $names): void

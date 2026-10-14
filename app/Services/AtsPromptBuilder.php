@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\ResumeLanguage;
 use App\Models\JobPosting;
 
 class AtsPromptBuilder
@@ -15,7 +16,7 @@ class AtsPromptBuilder
         private readonly ConceptNormalizer $normalizer,
     ) {}
 
-    public function build(JobPosting $posting, string $resumeContent): string
+    public function build(JobPosting $posting, string $resumeContent, ResumeLanguage $language = ResumeLanguage::PtBr): string
     {
         $resumeContent = trim($resumeContent);
 
@@ -35,6 +36,7 @@ class AtsPromptBuilder
                 'present_in_resume' => $this->analyzer->hasConcept($resumeContent, $item->name)
                     || $this->analyzer->contains($resumeContent, $item->name),
             ])->all(),
+            $language,
         );
     }
 
@@ -43,7 +45,7 @@ class AtsPromptBuilder
      *
      * @param  array<int, array<string, mixed>>  $items
      */
-    public function buildFromSnapshot(string $role, ?string $company, string $resumeContent, array $items): string
+    public function buildFromSnapshot(string $role, ?string $company, string $resumeContent, array $items, ResumeLanguage $language = ResumeLanguage::PtBr): string
     {
         if (blank(trim($resumeContent))) {
             return '';
@@ -76,31 +78,7 @@ class AtsPromptBuilder
 
         $keywordsPart = implode(', ', array_slice($present, 0, self::MAX_KEYWORDS));
 
-        if ($role !== '' && $company !== '') {
-            $prompt = sprintf(
-                'Perfil altamente compatível com %s em %s: experiência comprovada em %s. Recomenda-se entrevista.',
-                $role,
-                $company,
-                $keywordsPart
-            );
-        } elseif ($role !== '') {
-            $prompt = sprintf(
-                'Perfil altamente compatível com %s: experiência comprovada em %s. Recomenda-se entrevista.',
-                $role,
-                $keywordsPart
-            );
-        } elseif ($company !== '') {
-            $prompt = sprintf(
-                'Perfil altamente compatível em %s: experiência comprovada em %s. Recomenda-se entrevista.',
-                $company,
-                $keywordsPart
-            );
-        } else {
-            $prompt = sprintf(
-                'Perfil altamente compatível: experiência comprovada em %s. Recomenda-se entrevista.',
-                $keywordsPart
-            );
-        }
+        $prompt = $this->template($language, $role, $company, $keywordsPart);
 
         // Enforce 300 chars limit, truncating without breaking word when possible.
         if (mb_strlen($prompt) > self::MAX_LENGTH) {
@@ -115,5 +93,42 @@ class AtsPromptBuilder
         }
 
         return $prompt;
+    }
+
+    /**
+     * Templates por idioma e forma da cascata cargo/empresa. A variante é
+     * escolhida uma única vez; trocar de idioma só troca o mapa.
+     *
+     * @var array<string, array<string, string>>
+     */
+    private const TEMPLATES = [
+        'pt-BR' => [
+            'role_company' => 'Perfil altamente compatível com %role% em %company%: experiência comprovada em %keywords%. Recomenda-se entrevista.',
+            'role' => 'Perfil altamente compatível com %role%: experiência comprovada em %keywords%. Recomenda-se entrevista.',
+            'company' => 'Perfil altamente compatível em %company%: experiência comprovada em %keywords%. Recomenda-se entrevista.',
+            'default' => 'Perfil altamente compatível: experiência comprovada em %keywords%. Recomenda-se entrevista.',
+        ],
+        'en' => [
+            'role_company' => 'Highly compatible profile for %role% at %company%: proven experience in %keywords%. Interview recommended.',
+            'role' => 'Highly compatible profile for %role%: proven experience in %keywords%. Interview recommended.',
+            'company' => 'Highly compatible profile at %company%: proven experience in %keywords%. Interview recommended.',
+            'default' => 'Highly compatible profile: proven experience in %keywords%. Interview recommended.',
+        ],
+    ];
+
+    private function template(ResumeLanguage $language, string $role, string $company, string $keywords): string
+    {
+        $shape = match (true) {
+            $role !== '' && $company !== '' => 'role_company',
+            $role !== '' => 'role',
+            $company !== '' => 'company',
+            default => 'default',
+        };
+
+        return strtr(self::TEMPLATES[$language->value][$shape], [
+            '%role%' => $role,
+            '%company%' => $company,
+            '%keywords%' => $keywords,
+        ]);
     }
 }

@@ -3,6 +3,7 @@
 use App\Agents\JobExtractionAgent;
 use App\Agents\ResumeAdaptationAgent;
 use App\Enums\JobPostingStatus;
+use App\Enums\ResumeLanguage;
 use App\Filament\Pages\CaptureSetupPage;
 use App\Filament\Pages\JobSearchPage;
 use App\Filament\Pages\MarketComparisonPage;
@@ -20,9 +21,12 @@ use App\Filament\Widgets\StatsOverviewWidget;
 use App\Filament\Widgets\TopConceptsWidget;
 use App\Filament\Widgets\TrendsChartWidget;
 use App\Jobs\AnalyzeJobPosting;
+use App\Jobs\ProcessAiOperation;
+use App\Models\AiOperation;
 use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
 use App\Models\User;
+use App\Services\AiInputSnapshotService;
 use App\Services\CaptureTokenService;
 use App\Services\JobAnalysisService;
 use App\Services\ResumeService;
@@ -97,7 +101,7 @@ it('renderiza a página do currículo e salva o texto', function () {
         ->assertHasNoFormErrors()
         ->assertSet('data.content', fn (mixed $value): bool => is_string($value));
 
-    expect(app(ResumeService::class)->content(auth()->user()))->toBe('Currículo com Python e Docker.');
+    expect(app(ResumeService::class)->content(auth()->user(), ResumeLanguage::PtBr))->toBe('Currículo com Python e Docker.');
 });
 
 it('renderiza a comparação mercado × currículo com dados do PRD', function () {
@@ -109,7 +113,7 @@ it('renderiza a comparação mercado × currículo com dados do PRD', function (
     $p2 = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
     $p2->items()->create(['category' => 'skill', 'name' => 'Python', 'source' => 'ai']);
 
-    app(ResumeService::class)->save(auth()->user(), 'Currículo com Python.');
+    app(ResumeService::class)->save(auth()->user(), 'Currículo com Python.', ResumeLanguage::PtBr);
 
     $component = Livewire::test(MarketComparisonPage::class);
 
@@ -154,7 +158,7 @@ it('widgets exibem dados corretos', function () {
     Livewire::test(TopConceptsWidget::class)
         ->assertSee('Python');
 
-    app(ResumeService::class)->save(auth()->user(), 'Currículo sem menção a nenhuma tecnologia.');
+    app(ResumeService::class)->save(auth()->user(), 'Currículo sem menção a nenhuma tecnologia.', ResumeLanguage::PtBr);
 
     Livewire::test(ComparisonSummaryWidget::class)
         ->assertSee('Python');
@@ -238,12 +242,12 @@ it('renderiza a página de adequação e gera a adaptação pela ação', functi
         ['category' => 'skill', 'name' => 'Python', 'source' => 'ai'],
         ['category' => 'skill', 'name' => 'React', 'source' => 'ai'],
     ]);
-    app(ResumeService::class)->save(auth()->user(), 'Currículo com Python.');
+    app(ResumeService::class)->save(auth()->user(), 'Currículo com Python.', ResumeLanguage::PtBr);
 
     Livewire::test(ApplicationPage::class, ['record' => $posting->id])
         ->assertSuccessful()
         ->assertSee('Currículo original')
-        ->callAction('adapt')
+        ->callAction('adaptPtBr')
         ->assertSuccessful()
         ->assertSet('data.adapted_resume', "Currículo adaptado.\nDestaque para Python.")
         ->assertSee('Currículo adaptado');
@@ -269,7 +273,7 @@ it('renderiza o currículo adaptado como texto na adequação', function () {
 
 it('renderiza o currículo original como texto na adequação', function () {
     $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
-    app(ResumeService::class)->save(auth()->user(), '<p><strong>Currículo</strong> com <em>Laravel</em>.</p>');
+    app(ResumeService::class)->save(auth()->user(), '<p><strong>Currículo</strong> com <em>Laravel</em>.</p>', ResumeLanguage::PtBr);
 
     Livewire::test(ApplicationPage::class, ['record' => $posting->id])
         ->assertSuccessful()
@@ -289,7 +293,7 @@ it('expõe o link de download do PDF na página', function () {
 
     Livewire::test(ApplicationPage::class, ['record' => $posting->id])
         ->assertSuccessful()
-        ->assertActionHasUrl('downloadPdf', route('filament.admin.resume-pdf.download', $posting));
+        ->assertActionHasUrl('downloadPdf', route('filament.admin.resume-pdf.download', ['posting' => $posting, 'language' => 'pt-BR']));
 });
 
 it('baixa o PDF da adaptação pela rota dedicada', function () {
@@ -401,7 +405,7 @@ it('ApplicationPage sem currículo cadastrado mostra empty state e continua abri
 });
 
 it('ApplicationPage sem adaptação mostra empty state de adequação', function () {
-    app(ResumeService::class)->save(auth()->user(), 'Currículo base.');
+    app(ResumeService::class)->save(auth()->user(), 'Currículo base.', ResumeLanguage::PtBr);
     $confirmed = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
 
     Livewire::test(ApplicationPage::class, ['record' => $confirmed->id])
@@ -535,7 +539,7 @@ it('ApplicationPage abre uma vaga confirmada sem afetar currículo ou métodos e
 
     $confirmed->refresh();
     expect($confirmed->applicationMethods)->toHaveCount(1)
-        ->and($confirmed->resumeAdaptation?->adapted_content)->toBe('Versão adaptada preservada.');
+        ->and($confirmed->resumeAdaptation(ResumeLanguage::PtBr)->first()?->adapted_content)->toBe('Versão adaptada preservada.');
 });
 
 it('permite visualizar vaga aguardando revisão no detalhe', function () {
@@ -613,4 +617,187 @@ it('ordena a navegação lateral conforme o fluxo do produto', function () {
         MarketComparisonPage::class,
         MarketTrendsPage::class,
     ]);
+});
+
+it('gera a versão em inglês a partir das abas do currículo', function () {
+    Queue::fake([ProcessAiOperation::class]);
+    app(ResumeService::class)->save(auth()->user(), 'Currículo com Python.', ResumeLanguage::PtBr);
+
+    Livewire::test(ResumePage::class)
+        ->assertSuccessful()
+        ->assertSee('PT-BR')
+        ->assertSee('EN')
+        ->callAction('generateEnglish')
+        ->assertNotified();
+
+    expect(AiOperation::query()->where('operation_type', 'resume_translation')->count())->toBe(1);
+});
+
+it('recusa gerar a versão em inglês sem o currículo pt-BR', function () {
+    Livewire::test(ResumePage::class)
+        ->callAction('generateEnglish')
+        ->assertNotified();
+
+    expect(AiOperation::query()->count())->toBe(0);
+});
+
+it('salva a versão em inglês pela aba EN', function () {
+    app(ResumeService::class)->save(auth()->user(), 'Currículo com Python.', ResumeLanguage::PtBr);
+
+    Livewire::test(ResumePage::class)
+        ->set('activeTab', 'en')
+        ->fillForm(['content_en' => 'English resume with Python.'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect(app(ResumeService::class)->content(auth()->user(), ResumeLanguage::En))->toBe('English resume with Python.');
+});
+
+it('pede confirmação ao regenerar com a versão em inglês existente', function () {
+    Queue::fake([ProcessAiOperation::class]);
+    app(ResumeService::class)->save(auth()->user(), 'Currículo com Python.', ResumeLanguage::PtBr);
+    app(ResumeService::class)->save(auth()->user(), 'Existing english.', ResumeLanguage::En);
+
+    $component = Livewire::test(ResumePage::class)
+        ->mountAction('generateEnglish');
+
+    expect(AiOperation::query()->count())->toBe(0);
+
+    $component->callMountedAction();
+
+    expect(AiOperation::query()->count())->toBe(1);
+});
+
+it('abre a Candidatura em PT-BR e troca o currículo original pelo seletor de idioma', function () {
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
+    app(ResumeService::class)->save(auth()->user(), 'Currículo em português.', ResumeLanguage::PtBr);
+    app(ResumeService::class)->save(auth()->user(), 'English resume.', ResumeLanguage::En);
+
+    Livewire::test(ApplicationPage::class, ['record' => $posting->id])
+        ->assertSuccessful()
+        ->assertSet('resumeLanguage', 'pt-BR')
+        ->assertSet('data.original_resume', 'Currículo em português.')
+        ->set('resumeLanguage', 'en')
+        ->assertSet('resumeLanguage', 'en')
+        ->assertSet('data.original_resume', 'English resume.');
+});
+
+it('mostra o dropdown de adequação com um item por idioma e indica "novamente" quando já há adaptação', function () {
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
+    app(ResumeService::class)->save(auth()->user(), 'Currículo em português.', ResumeLanguage::PtBr);
+    app(ResumeService::class)->save(auth()->user(), 'English resume.', ResumeLanguage::En);
+    ResumeAdaptation::create([
+        'job_posting_id' => $posting->id,
+        'language' => 'pt-BR',
+        'adapted_content' => 'Adaptação PT.',
+    ]);
+
+    Livewire::test(ApplicationPage::class, ['record' => $posting->id])
+        ->assertSuccessful()
+        ->assertSee('Adequar novamente em Português (PT-BR)')
+        ->assertSee('Adequar em Inglês (EN)');
+});
+
+it('desabilita o item Inglês sem a versão EN e oferece a orientação e o link para o Currículo', function () {
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
+    app(ResumeService::class)->save(auth()->user(), 'Currículo em português.', ResumeLanguage::PtBr);
+
+    Livewire::test(ApplicationPage::class, ['record' => $posting->id])
+        ->assertSuccessful()
+        ->assertActionDisabled('adaptEn')
+        ->assertSee('Não há currículo em inglês')
+        ->assertSeeHtml('href="'.ResumePage::getUrl().'"');
+
+    app(ResumeService::class)->save(auth()->user(), 'English resume.', ResumeLanguage::En);
+
+    Livewire::test(ApplicationPage::class, ['record' => $posting->id])
+        ->assertActionEnabled('adaptEn');
+});
+
+it('adequar em inglês preserva a adaptação PT-BR da mesma vaga', function () {
+    ResumeAdaptationAgent::fake([[
+        'adapted_resume' => 'English adapted.',
+        'changes' => [],
+        'covered_keywords' => [],
+        'missing_requirements' => [],
+        'alerts' => [],
+    ]]);
+
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
+    app(ResumeService::class)->save(auth()->user(), 'Currículo em português.', ResumeLanguage::PtBr);
+    app(ResumeService::class)->save(auth()->user(), 'English resume.', ResumeLanguage::En);
+    ResumeAdaptation::create([
+        'job_posting_id' => $posting->id,
+        'language' => 'pt-BR',
+        'adapted_content' => 'Adaptação PT preservada.',
+        'changes' => [],
+        'covered_keywords' => [],
+        'missing_requirements' => [],
+        'alerts' => [],
+    ]);
+
+    Livewire::test(ApplicationPage::class, ['record' => $posting->id])
+        ->callAction('adaptEn')
+        ->assertNotified()
+        ->assertSet('resumeLanguage', 'en');
+
+    $adaptations = ResumeAdaptation::where('job_posting_id', $posting->id)->get();
+
+    expect($adaptations)->toHaveCount(2)
+        ->and($adaptations->firstWhere('language', ResumeLanguage::PtBr)->adapted_content)->toBe('Adaptação PT preservada.')
+        ->and($adaptations->firstWhere('language', ResumeLanguage::En)->adapted_content)->toBe('English adapted.');
+});
+
+it('mostra a adequação e o empty state por idioma conforme o seletor', function () {
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
+    app(ResumeService::class)->save(auth()->user(), 'Currículo em português.', ResumeLanguage::PtBr);
+    app(ResumeService::class)->save(auth()->user(), 'English resume.', ResumeLanguage::En);
+    ResumeAdaptation::create([
+        'job_posting_id' => $posting->id,
+        'language' => 'pt-BR',
+        'adapted_content' => 'Adaptação PT.',
+        'changes' => [],
+        'covered_keywords' => [],
+        'missing_requirements' => [],
+        'alerts' => [],
+    ]);
+
+    Livewire::test(ApplicationPage::class, ['record' => $posting->id])
+        ->assertSet('resumeLanguage', 'pt-BR')
+        ->assertSet('data.adapted_resume', 'Adaptação PT.')
+        ->assertDontSee('Nenhuma adequação gerada')
+        ->set('resumeLanguage', 'en')
+        ->assertSet('data.adapted_resume', '')
+        ->assertSee('Nenhuma adequação gerada')
+        ->assertSee('Ainda não há adequação em Inglês (EN)');
+});
+
+it('o download do PDF segue o idioma selecionado', function () {
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
+    app(ResumeService::class)->save(auth()->user(), 'Currículo em português.', ResumeLanguage::PtBr);
+    app(ResumeService::class)->save(auth()->user(), 'English resume.', ResumeLanguage::En);
+    ResumeAdaptation::create(['job_posting_id' => $posting->id, 'language' => 'pt-BR', 'adapted_content' => 'PT.']);
+    ResumeAdaptation::create(['job_posting_id' => $posting->id, 'language' => 'en', 'adapted_content' => 'EN.']);
+
+    Livewire::test(ApplicationPage::class, ['record' => $posting->id])
+        ->assertActionHasUrl('downloadPdf', route('filament.admin.resume-pdf.download', ['posting' => $posting, 'language' => 'pt-BR']))
+        ->set('resumeLanguage', 'en')
+        ->assertActionHasUrl('downloadPdf', route('filament.admin.resume-pdf.download', ['posting' => $posting, 'language' => 'en']));
+});
+
+it('avisa que a versão EN está desatualizada quando o pt-BR muda', function () {
+    $user = auth()->user();
+    app(ResumeService::class)->save($user, 'Currículo com Python.', ResumeLanguage::PtBr);
+    $fingerprint = app(AiInputSnapshotService::class)->resumeTranslation($user)['fingerprint'];
+    app(ResumeService::class)->saveTranslation($user, 'English resume with Python.', $fingerprint);
+
+    Livewire::test(ResumePage::class)
+        ->set('activeTab', 'en')
+        ->assertDontSee('desatualizada');
+
+    app(ResumeService::class)->save($user, 'Currículo atualizado com Python e Docker.', ResumeLanguage::PtBr);
+
+    Livewire::test(ResumePage::class)
+        ->set('activeTab', 'en')
+        ->assertSee('desatualizada');
 });

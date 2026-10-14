@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Enums\ConceptCategory;
+use App\Enums\ResumeLanguage;
 use App\Services\MarketAnalysisService;
 use App\Services\MarketComparisonService;
 use App\Services\ResumeService;
@@ -94,7 +95,7 @@ class MarketComparisonPage extends Page implements HasSchemas, HasTable
 
     public function hasResume(): bool
     {
-        return ! blank(app(ResumeService::class)->content(auth()->user()));
+        return ! blank(app(ResumeService::class)->content(auth()->user(), ResumeLanguage::PtBr));
     }
 
     public function categoryLabel(string $value): string

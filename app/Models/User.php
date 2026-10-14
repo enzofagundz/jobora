@@ -64,6 +64,11 @@ class User extends Authenticatable implements FilamentUser, MustVerifyEmail
         return $this->hasOne(Resume::class);
     }
 
+    public function resumes(): HasMany
+    {
+        return $this->hasMany(Resume::class);
+    }
+
     /**
      * Get the attributes that should be cast.
      *

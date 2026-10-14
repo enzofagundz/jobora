@@ -2,6 +2,7 @@
     @php
         $originalResume = $this->originalResume();
         $adaptation = $this->adaptation();
+        $language = $this->language();
         $activeOperation = $this->activeAiOperation();
         $methods = $this->applicationMethods();
         $sourceUrl = \App\Filament\Resources\JobPostings\Pages\ApplicationPage::safeHttpUrl($this->record->source_url);
@@ -29,6 +30,29 @@
                 </div>
             </div>
         @endif
+
+        {{-- Seletor de idioma: controla original, adaptado, ATS e PDF. Default PT-BR. --}}
+        <x-filament::section compact>
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
+                <label for="resumeLanguage" class="text-sm font-medium text-gray-700 dark:text-gray-200">
+                    Idioma
+                </label>
+                <div class="w-56">
+                    <x-filament::input.wrapper>
+                        <x-filament::input.select id="resumeLanguage" wire:model.live="resumeLanguage">
+                            @foreach (\App\Enums\ResumeLanguage::cases() as $option)
+                                <option value="{{ $option->value }}">
+                                    {{ $this->languageName($option) }}
+                                </option>
+                            @endforeach
+                        </x-filament::input.select>
+                    </x-filament::input.wrapper>
+                </div>
+                <p class="text-sm text-gray-500 dark:text-gray-400">
+                    Controla o currículo original, a adequação e o PDF exibidos.
+                </p>
+            </div>
+        </x-filament::section>
 
         {{-- Vaga: cargo, empresa, status contextual, link externo validado --}}
         <x-filament::section divided icon="heroicon-o-briefcase" heading="Vaga">
@@ -212,7 +236,7 @@
                                     <x-filament::button wire:click="simulateAtsScore" color="info" icon="heroicon-o-chart-bar" size="sm" :disabled="$this->hasActiveAiOperation()">Simular nota ATS</x-filament::button>
                                     <x-filament::button wire:click="toggleAtsOptimization" color="gray" size="sm" icon="heroicon-o-x-mark" wire:confirm="Desativar a otimização? O bloco invisível será removido." :disabled="$this->hasActiveAiOperation()">Desativar otimização</x-filament::button>
                                     @if($this->adaptation()?->is_ats_optimized && $this->atsConsent)
-                                        <x-filament::button tag="a" :href="route('filament.admin.resume-pdf.download', ['posting' => $this->record, 'ats_consent' => '1'])" target="_blank" color="success" icon="heroicon-o-arrow-down-tray" size="sm">Baixar PDF otimizado</x-filament::button>
+                                        <x-filament::button tag="a" :href="route('filament.admin.resume-pdf.download', ['posting' => $this->record, 'ats_consent' => '1', 'language' => $language->value])" target="_blank" color="success" icon="heroicon-o-arrow-down-tray" size="sm">Baixar PDF otimizado</x-filament::button>
                                     @endif
                                 </div>
                             </div>
@@ -246,7 +270,8 @@
                     </div>
                     <h2 class="text-sm font-semibold text-gray-950 dark:text-white">Nenhuma adequação gerada</h2>
                     <p class="mx-auto mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">
-                        Use o botão "Adequar currículo" para gerar a versão adaptada desta vaga.
+                        Ainda não há adequação em {{ $this->languageName($language) }} para esta vaga.
+                        Use o dropdown "Adequar currículo" para gerar a versão adaptada deste idioma.
                     </p>
                 </div>
             @endif
@@ -257,8 +282,16 @@
                 </div>
                 <h2 class="text-sm font-semibold text-gray-950 dark:text-white">Nenhum currículo cadastrado</h2>
                 <p class="mx-auto mt-1 max-w-md text-sm text-gray-500 dark:text-gray-400">
-                    Cadastre o currículo na página Currículo antes de adequá-lo a uma vaga.
+                    {{ $language->missingResumeGuidance() }}
                 </p>
+                <div class="mt-4">
+                    <x-filament::link
+                        :href="\App\Filament\Pages\ResumePage::getUrl()"
+                        icon="heroicon-o-document-text"
+                    >
+                        Ir para a página Currículo
+                    </x-filament::link>
+                </div>
             </div>
         @endif
 

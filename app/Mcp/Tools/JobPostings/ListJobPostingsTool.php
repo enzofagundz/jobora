@@ -34,7 +34,7 @@ class ListJobPostingsTool extends JoboraTool
 
         $query = JobPosting::query()
             ->with([
-                'resumeAdaptation:id,job_posting_id',
+                'resumeAdaptations:id,job_posting_id',
                 'application:id,job_posting_id,status',
             ])
             ->withCount('items')

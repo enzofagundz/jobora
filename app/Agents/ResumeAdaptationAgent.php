@@ -2,12 +2,29 @@
 
 namespace App\Agents;
 
+use App\Enums\ResumeLanguage;
 use Laravel\Ai\Contracts\Agent;
 use Laravel\Ai\Promptable;
 
 class ResumeAdaptationAgent implements Agent
 {
     use Promptable;
+
+    /**
+     * Idioma de saída da adaptação; influencia as instruções do agente.
+     */
+    private ResumeLanguage $language = ResumeLanguage::PtBr;
+
+    /**
+     * Cópia do agente instruída a responder no idioma pedido.
+     */
+    public function withLanguage(ResumeLanguage $language): static
+    {
+        $clone = clone $this;
+        $clone->language = $language;
+
+        return $clone;
+    }
 
     /**
      * Provider name registered in config/ai.php.
@@ -34,6 +51,22 @@ class ResumeAdaptationAgent implements Agent
     }
 
     public function instructions(): string
+    {
+        return $this->baseInstructions().$this->languageDirective();
+    }
+
+    /**
+     * Diretiva de idioma de saída; vazia para pt-BR, mantendo o prompt atual.
+     */
+    private function languageDirective(): string
+    {
+        return match ($this->language) {
+            ResumeLanguage::PtBr => '',
+            ResumeLanguage::En => "\n\nIDIOMA DE SAÍDA: o idioma da adaptação é o inglês (en). Escreva o conteúdo de adapted_resume, changes, covered_keywords, missing_requirements e alerts em inglês.",
+        };
+    }
+
+    private function baseInstructions(): string
     {
         return <<<'PROMPT'
 Você é um especialista em adequação de currículos para vagas de emprego (critérios de ATS). Você receberá um JSON com: o currículo original do candidato (resume), a descrição original da vaga (job_description), cargo/empresa (job_role/job_company) e o posicionamento mercado × currículo (positioning: itens da vaga com flag present_in_resume indicando se o conceito já está no currículo).

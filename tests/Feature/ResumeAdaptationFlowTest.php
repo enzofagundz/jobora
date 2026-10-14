@@ -1,6 +1,7 @@
 <?php
 
 use App\Agents\ResumeAdaptationAgent;
+use App\Enums\ResumeLanguage;
 use App\Models\JobPosting;
 use App\Models\Resume;
 use App\Models\ResumeAdaptation;
@@ -27,7 +28,7 @@ function adaptationPosting(?User $user = null): JobPosting
 
 function adaptationResume(User $user): void
 {
-    app(ResumeService::class)->save($user, 'Currículo com Python e Laravel.');
+    app(ResumeService::class)->save($user, 'Currículo com Python e Laravel.', ResumeLanguage::PtBr);
 }
 
 function validAdaptationResponse(): array
@@ -113,8 +114,8 @@ it('never alters the original resume', function () {
 
     app(ResumeAdaptationService::class)->adapt($user, $posting);
 
-    expect(Resume::count())->toBe(1)
-        ->and(app(ResumeService::class)->content($user))->toBe('Currículo com Python e Laravel.');
+    expect(Resume::query()->where('language', ResumeLanguage::PtBr->value)->count())->toBe(1)
+        ->and(app(ResumeService::class)->content($user, ResumeLanguage::PtBr))->toBe('Currículo com Python e Laravel.');
 });
 
 it('rejects an adapted resume with an invented concept', function () {
@@ -213,3 +214,90 @@ it('persists nothing when the agent throws', function () {
 
     app(ResumeAdaptationService::class)->adapt($user, $posting);
 })->throws(RuntimeException::class, 'Provider indisponível');
+
+it('mantém adequações pt-BR e EN coexistentes e regenera só a escolhida', function () {
+    ResumeAdaptationAgent::fake([
+        validAdaptationResponse(),
+        [
+            'adapted_resume' => 'Adapted resume in English.',
+            'changes' => [],
+            'covered_keywords' => ['Python'],
+            'missing_requirements' => [],
+            'alerts' => [],
+        ],
+        [
+            'adapted_resume' => 'Currículo adaptado v2.',
+            'changes' => [],
+            'covered_keywords' => ['Python'],
+            'missing_requirements' => [],
+            'alerts' => [],
+        ],
+    ]);
+
+    $user = User::factory()->create();
+    $posting = adaptationPosting($user);
+    adaptationResume($user);
+    app(ResumeService::class)->save($user, 'Resume with Python and Laravel.', ResumeLanguage::En);
+
+    $service = app(ResumeAdaptationService::class);
+
+    $ptBr = $service->adapt($user, $posting, ResumeLanguage::PtBr);
+    $en = $service->adapt($user, $posting->fresh(), ResumeLanguage::En);
+
+    expect(ResumeAdaptation::count())->toBe(2)
+        ->and($ptBr->language)->toBe(ResumeLanguage::PtBr)
+        ->and($en->language)->toBe(ResumeLanguage::En)
+        ->and($en->adapted_content)->toBe('Adapted resume in English.');
+
+    $service->adapt($user, $posting->fresh(), ResumeLanguage::PtBr);
+
+    expect(ResumeAdaptation::count())->toBe(2)
+        ->and($ptBr->refresh()->adapted_content)->toBe('Currículo adaptado v2.')
+        ->and($en->refresh()->adapted_content)->toBe('Adapted resume in English.');
+});
+
+it('instrui o agente a responder no idioma da adaptação', function () {
+    $agent = app(ResumeAdaptationAgent::class);
+
+    expect((string) $agent->instructions())->not->toContain('o idioma da adaptação é o inglês');
+
+    $en = $agent->withLanguage(ResumeLanguage::En);
+
+    expect((string) $en->instructions())->toContain('o idioma da adaptação é o inglês')
+        ->and((string) $en->instructions())->toContain('adapted_resume');
+});
+
+it('consome o currículo do idioma pedido ao adequar', function () {
+    $captured = null;
+    ResumeAdaptationAgent::fake(function (string $prompt) use (&$captured): array {
+        $captured = json_decode($prompt, true);
+
+        return [
+            'adapted_resume' => 'Adapted resume in English.',
+            'changes' => [],
+            'covered_keywords' => ['Python'],
+            'missing_requirements' => [],
+            'alerts' => [],
+        ];
+    });
+
+    $user = User::factory()->create();
+    $posting = adaptationPosting($user);
+    adaptationResume($user);
+    app(ResumeService::class)->save($user, 'Resume with Python and Laravel.', ResumeLanguage::En);
+
+    app(ResumeAdaptationService::class)->adapt($user, $posting, ResumeLanguage::En);
+
+    expect($captured['language'])->toBe('en')
+        ->and($captured['resume'])->toBe('Resume with Python and Laravel.');
+});
+
+it('recusa adequar em EN sem currículo em inglês, com orientação', function () {
+    ResumeAdaptationAgent::fake([]);
+
+    $user = User::factory()->create();
+    $posting = adaptationPosting($user);
+    adaptationResume($user);
+
+    app(ResumeAdaptationService::class)->adapt($user, $posting, ResumeLanguage::En);
+})->throws(LogicException::class, 'currículo em inglês');

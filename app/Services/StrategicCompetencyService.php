@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Agents\StrategicCompetencyAgent;
 use App\DTO\StrategicCompetencyResult;
 use App\Enums\ProfessionalCompetencySource;
+use App\Enums\ResumeLanguage;
 use App\Enums\StrategicRole;
 use App\Models\ProfessionalCompetency;
 use App\Models\User;
@@ -46,7 +47,7 @@ class StrategicCompetencyService
      */
     public function classify(User $user): int
     {
-        $resume = $this->resumeService->content($user);
+        $resume = $this->resumeService->content($user, ResumeLanguage::PtBr);
 
         if (blank($resume)) {
             throw new LogicException('Cadastre o currículo antes de classificar as competências.');
@@ -216,7 +217,7 @@ class StrategicCompetencyService
             return [];
         }
 
-        $content = $this->resumeService->content($user);
+        $content = $this->resumeService->content($user, ResumeLanguage::PtBr);
 
         return $user->professionalCompetencies()
             ->orderBy('concept')

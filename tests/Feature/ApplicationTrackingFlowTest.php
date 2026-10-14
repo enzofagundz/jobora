@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\ApplicationStatus;
+use App\Enums\ResumeLanguage;
 use App\Filament\Resources\JobPostings\Pages\ApplicationPage;
 use App\Models\Application;
 use App\Models\ApplicationEvent;
@@ -104,7 +105,7 @@ it('preserva métodos e currículo ao iniciar e atualizar', function () {
         ->assertSuccessful();
     expect($posting->refresh()->applicationMethods)->toHaveCount(1)
         ->and($posting->applicationMethods->first()->email)->toBe('vagas@empresa.com')
-        ->and($posting->resumeAdaptation?->adapted_content)->toBe('Versão adaptada preservada.')
+        ->and($posting->resumeAdaptation(ResumeLanguage::PtBr)->first()?->adapted_content)->toBe('Versão adaptada preservada.')
         ->and(Application::where('job_posting_id', $posting->id)->count())->toBe(1);
 });
 

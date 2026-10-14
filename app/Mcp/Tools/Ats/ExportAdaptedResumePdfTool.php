@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools\Ats;
 
+use App\Enums\ResumeLanguage;
 use App\Mcp\Support\McpUserResolver;
 use App\Mcp\Support\ToolException;
 use App\Mcp\Tools\JoboraTool;
@@ -12,13 +13,14 @@ use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\Rule;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
 use Laravel\Mcp\Server\Attributes\Description;
 use Throwable;
 
-#[Description('Gera o PDF da adaptação de currículo de uma vaga confirmada e devolve o caminho do arquivo. Quando a adaptação está otimizada para ATS, exige ats_consent=true e rejeita otimização desatualizada.')]
+#[Description('Gera o PDF da adaptação de currículo do idioma pedido (padrão pt-BR) de uma vaga confirmada e devolve o caminho do arquivo. Quando a adaptação está otimizada para ATS, exige ats_consent=true e rejeita otimização desatualizada.')]
 class ExportAdaptedResumePdfTool extends JoboraTool
 {
     public function __construct(
@@ -33,7 +35,10 @@ class ExportAdaptedResumePdfTool extends JoboraTool
         $validated = $request->validate([
             'job_posting_id' => ['required', 'integer'],
             'ats_consent' => ['nullable', 'boolean'],
+            'language' => ['nullable', Rule::enum(ResumeLanguage::class)],
         ]);
+
+        $language = $this->language($request);
 
         $user = $this->user();
 
@@ -46,7 +51,7 @@ class ExportAdaptedResumePdfTool extends JoboraTool
             throw ToolException::notFound('Vaga não encontrada.');
         }
 
-        $adaptation = $posting->resumeAdaptation()->first();
+        $adaptation = $posting->resumeAdaptation($language)->first();
 
         if ($adaptation === null) {
             throw ToolException::notFound('Adaptação não encontrada para esta vaga.');
@@ -69,7 +74,8 @@ class ExportAdaptedResumePdfTool extends JoboraTool
         }
 
         $relativeDirectory = 'mcp/pdf';
-        $path = Storage::disk('local')->path($relativeDirectory."/adapted-resume-{$posting->id}.pdf");
+        $suffix = $language === ResumeLanguage::En ? '-en' : '';
+        $path = Storage::disk('local')->path($relativeDirectory."/adapted-resume-{$posting->id}{$suffix}.pdf");
 
         Storage::disk('local')->makeDirectory($relativeDirectory);
 
@@ -100,6 +106,7 @@ class ExportAdaptedResumePdfTool extends JoboraTool
         return [
             'job_posting_id' => $schema->integer()->required()->description('Id da vaga confirmada.'),
             'ats_consent' => $schema->boolean()->description('Obrigatório true quando a adaptação está otimizada para ATS.'),
+            'language' => $schema->string()->description('Idioma da adaptação exportada: pt-BR (padrão) ou en.'),
         ];
     }
 }

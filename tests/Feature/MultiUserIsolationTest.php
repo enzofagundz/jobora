@@ -5,6 +5,7 @@ use App\Agents\JobTriageAgent;
 use App\Enums\JobCaptureTriageResult;
 use App\Enums\JobCaptureTriageStatus;
 use App\Enums\JobPostingStatus;
+use App\Enums\ResumeLanguage;
 use App\Filament\Resources\JobCaptures\Pages\ListJobCaptures;
 use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Filament\Resources\JobPostings\Pages\ListJobPostings;
@@ -114,18 +115,18 @@ it('ResumeService mantém uma linha por usuário; salvar B não altera A e adapt
     $userB = User::factory()->create();
     $service = app(ResumeService::class);
 
-    $service->save($userA, 'Conteudo A');
-    $service->save($userB, 'Conteudo B');
+    $service->save($userA, 'Conteudo A', ResumeLanguage::PtBr);
+    $service->save($userB, 'Conteudo B', ResumeLanguage::PtBr);
 
-    expect($service->content($userA))->toBe('Conteudo A')
-        ->and($service->content($userB))->toBe('Conteudo B');
+    expect($service->content($userA, ResumeLanguage::PtBr))->toBe('Conteudo A')
+        ->and($service->content($userB, ResumeLanguage::PtBr))->toBe('Conteudo B');
 
     // criar posting de A e garantir que adaptação usaria currículo de A, não B
     $postingA = JobPosting::factory()->for($userA, 'user')->confirmed()->create();
     $postingA->items()->create(['category' => 'skill', 'name' => 'Python', 'source' => 'ai']);
 
     // verificar que service retorna conteúdo correto por usuário (isolado)
-    expect($service->content($userA))->not->toBe($service->content($userB));
+    expect($service->content($userA, ResumeLanguage::PtBr))->not->toBe($service->content($userB, ResumeLanguage::PtBr));
 });
 
 it('MarketAnalysis, MarketComparison e widgets só contam dados do usuário atual', function () {
@@ -138,8 +139,8 @@ it('MarketAnalysis, MarketComparison e widgets só contam dados do usuário atua
     $postingB->items()->create(['category' => 'skill', 'name' => 'React', 'source' => 'ai']);
 
     $service = app(ResumeService::class);
-    $service->save($userA, 'Tenho Python');
-    $service->save($userB, 'Tenho React');
+    $service->save($userA, 'Tenho Python', ResumeLanguage::PtBr);
+    $service->save($userB, 'Tenho React', ResumeLanguage::PtBr);
 
     $analysis = app(MarketAnalysisService::class);
     $freqA = $analysis->frequencies($userA);
@@ -319,7 +320,7 @@ it('fluxo integrado: registrar A, verificar, login, criar posting/resume, logout
         'collected_at' => now(),
         'status' => JobPostingStatus::Confirmed,
     ]);
-    app(ResumeService::class)->save($userA, 'Curriculo Alice');
+    app(ResumeService::class)->save($userA, 'Curriculo Alice', ResumeLanguage::PtBr);
 
     // criar B diretamente
     $userB = User::factory()->unverified()->create(['email' => 'bob@example.com', 'password' => Hash::make('password123')]);
@@ -329,5 +330,5 @@ it('fluxo integrado: registrar A, verificar, login, criar posting/resume, logout
 
     $this->actingAs($userB);
     Livewire::test(ListJobPostings::class)->assertCanNotSeeTableRecords(collect([$postingA]));
-    expect(app(ResumeService::class)->content($userB))->not->toBe('Curriculo Alice');
+    expect(app(ResumeService::class)->content($userB, ResumeLanguage::PtBr))->not->toBe('Curriculo Alice');
 });

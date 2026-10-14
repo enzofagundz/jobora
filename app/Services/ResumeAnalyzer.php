@@ -34,6 +34,20 @@ class ResumeAnalyzer
     }
 
     /**
+     * Conceitos presentes no texto candidato mas ausentes do original — a
+     * definição de invenção compartilhada pela adequação e pela tradução.
+     *
+     * @return array<int, string>
+     */
+    public function inventedConcepts(?string $original, ?string $candidate): array
+    {
+        return array_values(array_diff(
+            $this->conceptsIn($candidate),
+            $this->conceptsIn($original),
+        ));
+    }
+
+    /**
      * Whether the resume contains a specific canonical concept.
      */
     public function hasConcept(?string $content, string $canonicalName): bool

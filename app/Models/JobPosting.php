@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\JobPostingStatus;
+use App\Enums\ResumeLanguage;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -76,9 +77,18 @@ class JobPosting extends Model
         return $this->hasMany(ApplicationMethod::class);
     }
 
-    public function resumeAdaptation(): HasOne
+    public function resumeAdaptations(): HasMany
     {
-        return $this->hasOne(ResumeAdaptation::class);
+        return $this->hasMany(ResumeAdaptation::class);
+    }
+
+    /**
+     * A adequação de um idioma. Toda leitura declara o idioma explicitamente
+     * (ADR 0001); o default pt-BR é resolvido nos pontos de entrada MCP.
+     */
+    public function resumeAdaptation(ResumeLanguage $language): HasOne
+    {
+        return $this->hasOne(ResumeAdaptation::class)->where('language', $language->value);
     }
 
     public function application(): HasOne

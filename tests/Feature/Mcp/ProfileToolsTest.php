@@ -1,11 +1,13 @@
 <?php
 
+use App\Enums\ResumeLanguage;
 use App\Mcp\Servers\JoboraServer;
 use App\Mcp\Tools\Resume\GetResumeTool;
 use App\Mcp\Tools\Resume\SaveResumeTool;
 use App\Mcp\Tools\Screening\GetScreeningPreferencesTool;
 use App\Mcp\Tools\Screening\SaveScreeningPreferencesTool;
 use App\Mcp\Tools\Search\GenerateSearchUrlTool;
+use App\Services\ResumeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Feature\Mcp\McpTestHelpers;
 
@@ -55,6 +57,63 @@ it('recusa salvar currículo em branco', function () {
     McpTestHelpers::user();
 
     JoboraServer::tool(SaveResumeTool::class, ['content' => '   ', 'confirm' => true])
+        ->assertHasErrors(['validation']);
+});
+
+it('devolve o currículo do idioma pedido', function () {
+    $user = McpTestHelpers::user();
+    app(ResumeService::class)->save($user, 'Currículo em português.', ResumeLanguage::PtBr);
+    app(ResumeService::class)->save($user, 'Resume in English.', ResumeLanguage::En);
+
+    JoboraServer::tool(GetResumeTool::class, [])
+        ->assertOk()
+        ->assertStructuredContent(fn ($json) => $json
+            ->where('ok', true)
+            ->where('data.content', 'Currículo em português.')
+            ->etc());
+
+    JoboraServer::tool(GetResumeTool::class, ['language' => 'en'])
+        ->assertOk()
+        ->assertStructuredContent(fn ($json) => $json
+            ->where('ok', true)
+            ->where('data.content', 'Resume in English.')
+            ->etc());
+});
+
+it('salva o currículo em inglês sem tocar na versão pt-BR', function () {
+    McpTestHelpers::user();
+
+    JoboraServer::tool(SaveResumeTool::class, ['content' => 'Currículo em português.', 'confirm' => true])
+        ->assertOk();
+
+    JoboraServer::tool(SaveResumeTool::class, [
+        'content' => 'Resume in English.',
+        'confirm' => true,
+        'language' => 'en',
+    ])
+        ->assertOk()
+        ->assertStructuredContent(fn ($json) => $json
+            ->where('ok', true)
+            ->where('data.content', 'Resume in English.')
+            ->etc());
+
+    JoboraServer::tool(GetResumeTool::class, [])
+        ->assertOk()
+        ->assertStructuredContent(fn ($json) => $json
+            ->where('data.content', 'Currículo em português.')
+            ->etc());
+
+    JoboraServer::tool(GetResumeTool::class, ['language' => 'en'])
+        ->assertOk()
+        ->assertStructuredContent(fn ($json) => $json
+            ->where('data.content', 'Resume in English.')
+            ->etc());
+});
+
+it('recusa idioma de currículo desconhecido', function () {
+    McpTestHelpers::user();
+
+    JoboraServer::tool(GetResumeTool::class, ['language' => 'fr'])
         ->assertHasErrors(['validation']);
 });
 

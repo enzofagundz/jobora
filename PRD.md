@@ -95,8 +95,8 @@ A finalidade é identificar lacunas e aderências em relação às tendências d
 **Armazenados**
 
 - **Vaga (unidade de observação)**: descrição (obrigatória), data de coleta (automática), link (opcional; apenas referência de origem, não é identificador único) e dados estruturados: cargo, empresa, tecnologias, linguagens, frameworks, bancos de dados, ferramentas, cloud, metodologias, habilidades, requisitos, experiência exigida e outros atributos relevantes (extraídos em F2 via modelo de IA; campos podem ficar vazios quando não identificáveis). Apenas a versão revisada pelo usuário é armazenada: a sugestão do modelo é usada na etapa de revisão (F2) e não é mantida após a revisão.
-- **Currículo**: texto atual (uma versão corrente, atualizável; histórico de versões não é obrigatório no MVP).
-- **Versão adaptada do currículo (por vaga)**: resultado da adequação (F6) — a última versão adaptada de cada vaga, acompanhada da explicação das alterações realizadas, dos requisitos/palavras-chave contemplados, dos requisitos relevantes ainda ausentes e dos alertas de adaptação; uma nova geração substitui a anterior (sem histórico de versões no MVP).
+- **Currículo**: texto do perfil em versões por idioma — PT-BR (canônica) e EN (derivada do PT-BR por tradução de IA) —, cada uma atualizável; histórico de versões não é obrigatório no MVP.
+- **Versão adaptada do currículo (por vaga e idioma)**: resultado da adequação (F6) — uma versão adaptada por (vaga, idioma), no máximo PT-BR e EN, acompanhada da explicação das alterações realizadas, dos requisitos/palavras-chave contemplados, dos requisitos relevantes ainda ausentes e dos alertas de adaptação; uma nova geração substitui a versão anterior daquele idioma (sem histórico de versões no MVP).
 
 **Extraídos ou derivados por análise**
 
@@ -151,7 +151,7 @@ Fluxo da adequação de currículo para uma vaga (F6):
 - Visualização das principais frequências e padrões.
 - Cruzamento com o currículo: aderências e lacunas em relação aos padrões agregados.
 - Análise temporal básica (evolução de frequências por período, ex.: mensal/trimestral); os resultados dependem do acúmulo de dados ao longo do tempo.
-- Adequação de currículo para uma vaga (F6): seleção de vaga cadastrada, geração da versão adaptada com os resultados associados (alterações, requisitos contemplados, lacunas, alertas), revisão, cópia e exportação em PDF (`spatie/laravel-pdf` com driver `cloudflare` / Cloudflare Browser Run — formato de exportação do MVP); persistência da última versão adaptada por vaga (sem histórico).
+- Adequação de currículo para uma vaga (F6): seleção de vaga cadastrada, geração da versão adaptada com os resultados associados (alterações, requisitos contemplados, lacunas, alertas), revisão, cópia e exportação em PDF (`spatie/laravel-pdf` com driver `cloudflare` / Cloudflare Browser Run — formato de exportação do MVP); persistência de uma versão adaptada por (vaga, idioma) — PT-BR e EN — (sem histórico).
 
 **Interessante, mas pode esperar**
 
@@ -171,20 +171,20 @@ Fluxo da adequação de currículo para uma vaga (F6):
 - Geração de carta de apresentação.
 - Candidatura automática e envio automático de currículo.
 - Integração com LinkedIn como fluxo do produto (ex.: publicação ou candidatura), além da captura de vagas.
-- Múltiplas versões persistentes do currículo adaptado (persiste-se apenas a última versão por vaga, sem histórico).
+- Histórico temporal do currículo adaptado (persiste-se uma versão por idioma — PT-BR e EN —, sem histórico de versões).
 
 ## 8. Critérios de aceitação
 
 - **Cadastro de descrição**: ao colar uma descrição válida, a vaga aparece na base com a data do dia; uma vaga cadastrada sem link é salva normalmente (link opcional).
 - **Estruturação**: ao cadastrar uma descrição contendo, por exemplo, "Python" e "React", o sistema apresenta uma sugestão estruturada gerada pelo modelo (via Laravel AI SDK + OpenCode Zen + `mimo-v2.5-free`) e validada pela aplicação; após a revisão, a vaga fica registrada com essas tecnologias; uma correção manual persiste após recarregar; enquanto a revisão não é concluída, a vaga não entra nas análises.
-- **Currículo**: ao colar o texto do currículo, ele é salvo; um novo envio substitui a versão anterior; a atualização se reflete nas análises comparativas.
+- **Currículo**: ao colar o texto do currículo, ele é salvo na versão do idioma correspondente; um novo envio substitui a versão anterior daquele idioma; a versão PT-BR se reflete nas análises comparativas.
 - **Comparação agregada**: com vagas contendo "Python" e "React" e um currículo com "Python" sem "React", a visão comparativa mostra Python como presente no currículo e React como ausente, junto com a frequência de cada item nas vagas.
 - **Análises**: com 3 vagas cadastradas (ex.: 2 com Python, 1 com React), o relatório lista Python com frequência 2 e React com frequência 1; as lacunas listam apenas itens frequentes nas vagas e ausentes do currículo.
 - **Base para o tempo**: toda vaga registrada possui data de coleta, permitindo análises temporais.
 - **Adequação de currículo**: com uma vaga confirmada exigindo, por exemplo, "Python" e "React" e um currículo com "Python" sem "React", a adequação gera uma versão adaptada que reformula e destaca a experiência com Python (apenas informações existentes), lista "React" como requisito ausente (lacuna) e não introduz nenhuma informação factual ausente do currículo original; a versão adaptada não é uma reprodução da descrição da vaga.
 - **Integridade**: em qualquer cenário, a versão adaptada contém apenas informações verdadeiras presentes no currículo (reformuladas, nunca inventadas); requisitos da vaga sem correspondência no currículo aparecem como lacunas; quando uma adaptação exigiria inventar informação, o sistema exibe um alerta.
 - **Resultado da adequação**: a resposta apresenta os cinco itens — versão adaptada, explicação das alterações, requisitos contemplados, requisitos ausentes e alertas.
-- **Persistência da adequação**: gerar uma nova adequação para a mesma vaga substitui a versão adaptada anterior (sem histórico).
+- **Persistência da adequação**: gerar uma nova adequação para a mesma vaga e idioma substitui a versão adaptada anterior daquele idioma (sem histórico); as adequações de idiomas diferentes coexistem.
 
 ## Decisões ainda pendentes
 
