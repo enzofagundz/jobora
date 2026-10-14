@@ -2,17 +2,21 @@
 
 namespace App\Services;
 
+use App\Enums\ResumeLanguage;
 use App\Models\Resume;
 use App\Models\User;
 
 class ResumeService
 {
     /**
-     * Save the current resume. A single row per user is guaranteed.
+     * Save the resume for a given language. One row per (user, language) is
+     * guaranteed. The canonical resume is the pt-BR version.
      */
-    public function save(User $user, string $content): Resume
+    public function save(User $user, string $content, ResumeLanguage $language): Resume
     {
-        $resume = $user->resume()->first() ?? $user->resume()->make();
+        $resume = $user->resumes()
+            ->where('language', $language->value)
+            ->first() ?? $user->resumes()->make(['language' => $language]);
 
         $resume->content = $content;
         $resume->save();
@@ -20,14 +24,16 @@ class ResumeService
         return $resume;
     }
 
-    public function current(User $user): ?Resume
+    public function current(User $user, ResumeLanguage $language): ?Resume
     {
-        return $user->resume()->first();
+        return $user->resumes()
+            ->where('language', $language->value)
+            ->first();
     }
 
-    public function content(User $user): ?string
+    public function content(User $user, ResumeLanguage $language): ?string
     {
-        return $this->current($user)?->content;
+        return $this->current($user, $language)?->content;
     }
 
     /**
