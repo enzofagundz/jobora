@@ -51,6 +51,26 @@ class AiInputSnapshotService
     }
 
     /**
+     * Snapshot for the PT-BR → EN translation: the canonical resume text and
+     * its fingerprint, so drift can be detected after the translation.
+     *
+     * @return array{payload: array<string, mixed>, fingerprint: string}
+     */
+    public function resumeTranslation(User $user): array
+    {
+        $resume = ResumeService::plainText($this->resumeService->content($user, ResumeLanguage::PtBr));
+
+        $payload = [
+            'resume' => $resume,
+        ];
+
+        return [
+            'payload' => $payload,
+            'fingerprint' => $this->fingerprint($payload),
+        ];
+    }
+
+    /**
      * @return array{payload: array<string, mixed>, fingerprint: string}
      */
     public function strategicCompetency(User $user): array

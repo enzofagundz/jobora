@@ -13,7 +13,7 @@ class Resume extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['content', 'language'];
+    protected $fillable = ['content', 'language', 'source_fingerprint'];
 
     public function user(): BelongsTo
     {

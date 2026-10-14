@@ -6,6 +6,7 @@ use App\Enums\ResumeLanguage;
 use App\Models\JobCapture;
 use App\Models\JobPosting;
 use App\Models\ProfessionalCompetency;
+use App\Models\Resume;
 use App\Models\ResumeAdaptation;
 use App\Models\ScreeningPreference;
 use App\Services\AiInputSnapshotService;
@@ -51,6 +52,37 @@ final class Staleness
         }
 
         return false;
+    }
+
+    /**
+     * The EN version is stale when the canonical PT-BR resume changed after
+     * the translation that produced it. Non-EN rows are never stale.
+     */
+    public static function isResumeTranslationStale(Resume $resume): bool
+    {
+        if ($resume->language !== ResumeLanguage::En) {
+            return false;
+        }
+
+        $user = $resume->user;
+
+        if ($user === null) {
+            return false;
+        }
+
+        if (filled($resume->source_fingerprint)) {
+            try {
+                $current = app(AiInputSnapshotService::class)->resumeTranslation($user);
+
+                return ! hash_equals($resume->source_fingerprint, $current['fingerprint']);
+            } catch (\Throwable) {
+                return true;
+            }
+        }
+
+        $ptBr = $user->resumes()->where('language', ResumeLanguage::PtBr->value)->first();
+
+        return $ptBr !== null && $resume->updated_at->lt($ptBr->updated_at);
     }
 
     /**

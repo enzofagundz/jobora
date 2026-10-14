@@ -2,6 +2,7 @@
 
 use App\Agents\AtsScorerAgent;
 use App\Agents\ResumeAdaptationAgent;
+use App\Agents\ResumeTranslationAgent;
 use App\Agents\StrategicCompetencyAgent;
 use App\Enums\AiOperationStatus;
 use App\Enums\AiOperationType;
@@ -1130,4 +1131,139 @@ it('shows polling and the active classification state on the competencies page',
     expect($component->html())
         ->toContain('wire:poll.5s="refreshAiOperation"')
         ->toContain('Classificação estratégica em andamento');
+});
+
+it('enqueues a resume translation with the pt-BR snapshot', function () {
+    Queue::fake([ProcessAiOperation::class]);
+
+    $user = User::factory()->create();
+    app(ResumeService::class)->save($user, 'Currículo original com PHP.', ResumeLanguage::PtBr);
+
+    $operation = app(AiOperationService::class)->enqueueResumeTranslation($user);
+
+    expect($operation->operation_type)->toBe(AiOperationType::ResumeTranslation)
+        ->and($operation->status)->toBe(AiOperationStatus::Queued)
+        ->and($operation->target_type)->toBe('user')
+        ->and($operation->job_posting_id)->toBeNull()
+        ->and($operation->input_snapshot['resume'])->toBe('Currículo original com PHP.')
+        ->and($operation->input_fingerprint)->toHaveLength(64);
+
+    Queue::assertPushed(ProcessAiOperation::class);
+});
+
+it('refuses the translation when the pt-BR resume is empty', function () {
+    $user = User::factory()->create();
+
+    expect(fn () => app(AiOperationService::class)->enqueueResumeTranslation($user))
+        ->toThrow(LogicException::class, 'Cadastre o currículo em português');
+});
+
+it('does not enqueue a duplicate translation while the current one is active', function () {
+    Queue::fake([ProcessAiOperation::class]);
+
+    $user = User::factory()->create();
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
+
+    app(AiOperationService::class)->enqueueResumeTranslation($user);
+
+    expect(fn () => app(AiOperationService::class)->enqueueResumeTranslation($user))
+        ->toThrow(LogicException::class)
+        ->and(AiOperation::query()->count())->toBe(1);
+});
+
+it('processes the translation snapshot and stores the english version with the source fingerprint', function () {
+    Queue::fake([ProcessAiOperation::class]);
+
+    $user = User::factory()->create();
+    app(ResumeService::class)->save($user, 'Currículo original com PHP.', ResumeLanguage::PtBr);
+
+    $operation = app(AiOperationService::class)->enqueueResumeTranslation($user);
+
+    $capturedPrompt = null;
+    ResumeTranslationAgent::fake(function (string $prompt) use (&$capturedPrompt): array {
+        $capturedPrompt = $prompt;
+
+        return ['translated_resume' => "English resume.\nPHP experience."];
+    });
+    Event::fake([DatabaseNotificationsSent::class]);
+
+    (new ProcessAiOperation($operation->id, $operation->run_token))
+        ->handle(app(AiOperationService::class));
+
+    $operation->refresh();
+    $english = app(ResumeService::class)->current($user, ResumeLanguage::En);
+
+    expect($operation->status)->toBe(AiOperationStatus::Completed)
+        ->and($english?->content)->toBe("English resume.\nPHP experience.")
+        ->and($english?->source_fingerprint)->toBe($operation->input_fingerprint)
+        ->and(json_decode($capturedPrompt, true)['resume'])->toBe('Currículo original com PHP.')
+        ->and($operation->notified_at)->not->toBeNull()
+        ->and($user->notifications()->count())->toBe(1);
+});
+
+it('rejects a translation that introduces concepts absent from the original resume', function () {
+    Queue::fake([ProcessAiOperation::class]);
+
+    $user = User::factory()->create();
+    app(ResumeService::class)->save($user, 'Currículo original com PHP.', ResumeLanguage::PtBr);
+    $operation = app(AiOperationService::class)->enqueueResumeTranslation($user);
+
+    ResumeTranslationAgent::fake([['translated_resume' => 'English resume with Kubernetes.']]);
+
+    expect(fn () => (new ProcessAiOperation($operation->id, $operation->run_token))->handle(app(AiOperationService::class)))
+        ->toThrow(RuntimeException::class);
+
+    expect(app(ResumeService::class)->content($user, ResumeLanguage::En))->toBeNull();
+});
+
+it('marks the english version stale when pt-BR changes after the translation', function () {
+    Queue::fake([ProcessAiOperation::class]);
+
+    $user = User::factory()->create();
+    app(ResumeService::class)->save($user, 'Currículo original com PHP.', ResumeLanguage::PtBr);
+    $operation = app(AiOperationService::class)->enqueueResumeTranslation($user);
+
+    ResumeTranslationAgent::fake([['translated_resume' => 'English resume with PHP.']]);
+    (new ProcessAiOperation($operation->id, $operation->run_token))->handle(app(AiOperationService::class));
+
+    $english = app(ResumeService::class)->current($user, ResumeLanguage::En);
+
+    expect(Staleness::isResumeTranslationStale($english))->toBeFalse();
+
+    app(ResumeService::class)->save($user, 'Currículo atualizado com PHP e Laravel.', ResumeLanguage::PtBr);
+
+    expect(Staleness::isResumeTranslationStale($english->fresh()))->toBeTrue();
+});
+
+it('keeps the source fingerprint when the english version is edited by hand', function () {
+    Queue::fake([ProcessAiOperation::class]);
+
+    $user = User::factory()->create();
+    app(ResumeService::class)->save($user, 'Currículo original com PHP.', ResumeLanguage::PtBr);
+    $operation = app(AiOperationService::class)->enqueueResumeTranslation($user);
+
+    ResumeTranslationAgent::fake([['translated_resume' => 'English resume with PHP.']]);
+    (new ProcessAiOperation($operation->id, $operation->run_token))->handle(app(AiOperationService::class));
+
+    app(ResumeService::class)->save($user, 'Hand edited english resume.', ResumeLanguage::En);
+
+    $english = app(ResumeService::class)->current($user, ResumeLanguage::En);
+
+    expect($english->content)->toBe('Hand edited english resume.')
+        ->and($english->source_fingerprint)->toBe($operation->input_fingerprint);
+});
+
+it('notifies a terminal translation failure', function () {
+    Queue::fake([ProcessAiOperation::class]);
+
+    $user = User::factory()->create();
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
+    $operation = app(AiOperationService::class)->enqueueResumeTranslation($user);
+    Event::fake([DatabaseNotificationsSent::class]);
+
+    $job = new ProcessAiOperation($operation->id, $operation->run_token);
+    $job->failed(new RuntimeException('falha controlada'));
+
+    expect($operation->refresh()->status)->toBe(AiOperationStatus::Failed)
+        ->and($user->notifications()->sole()->data['title'])->toBe('Falha na tradução');
 });

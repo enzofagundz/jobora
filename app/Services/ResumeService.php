@@ -24,6 +24,23 @@ class ResumeService
         return $resume;
     }
 
+    /**
+     * Persist the EN version produced by the AI translation, recording the
+     * fingerprint of the PT-BR it was derived from so drift can be detected.
+     */
+    public function saveTranslation(User $user, string $content, string $sourceFingerprint): Resume
+    {
+        $resume = $user->resumes()
+            ->where('language', ResumeLanguage::En->value)
+            ->first() ?? $user->resumes()->make(['language' => ResumeLanguage::En]);
+
+        $resume->content = $content;
+        $resume->source_fingerprint = $sourceFingerprint;
+        $resume->save();
+
+        return $resume;
+    }
+
     public function current(User $user, ResumeLanguage $language): ?Resume
     {
         return $user->resumes()

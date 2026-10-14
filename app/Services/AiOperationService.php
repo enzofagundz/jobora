@@ -7,6 +7,7 @@ use App\Enums\AiOperationType;
 use App\Enums\JobPostingStatus;
 use App\Enums\ResumeLanguage;
 use App\Filament\Pages\ProfessionalCompetenciesPage;
+use App\Filament\Pages\ResumePage;
 use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Jobs\ProcessAiOperation;
 use App\Models\AiOperation;
@@ -35,6 +36,7 @@ class AiOperationService
         private readonly AiInputSnapshotService $snapshots,
         private readonly ResumeService $resumeService,
         private readonly ResumeAdaptationService $resumeAdaptation,
+        private readonly ResumeTranslationService $resumeTranslation,
         private readonly StrategicCompetencyService $strategicCompetency,
         private readonly AtsScorerService $atsScorer,
     ) {}
@@ -64,6 +66,25 @@ class AiOperationService
             'job_posting',
             $posting->id,
             $posting->id,
+            $snapshot,
+        );
+    }
+
+    public function enqueueResumeTranslation(User $user): AiOperation
+    {
+        if (blank($this->resumeService->content($user, ResumeLanguage::PtBr))) {
+            throw new LogicException('Cadastre o currículo em português antes de gerar a versão em inglês.');
+        }
+
+        $snapshot = $this->snapshots->resumeTranslation($user);
+
+        return $this->enqueue(
+            $user,
+            AiOperationType::ResumeTranslation,
+            AiOperationType::ResumeTranslation->value.':user:'.$user->id,
+            'user',
+            $user->id,
+            null,
             $snapshot,
         );
     }
@@ -276,6 +297,7 @@ class AiOperationService
     {
         return match ($operationType) {
             AiOperationType::ResumeAdaptation => 'Adequação já está em andamento para esta vaga.',
+            AiOperationType::ResumeTranslation => 'Tradução já está em andamento para este usuário.',
             AiOperationType::StrategicCompetencyClassification => 'Classificação já está em andamento para este usuário.',
             AiOperationType::AtsOptimization => 'Atualização da otimização ATS já está em andamento para esta vaga.',
             AiOperationType::AtsScore => 'Simulação ATS já está em andamento para esta vaga.',
@@ -378,6 +400,7 @@ class AiOperationService
         try {
             match ($operation->operation_type) {
                 AiOperationType::ResumeAdaptation => $this->processResumeAdaptation($operation, $runToken, $ownedAttemptToken),
+                AiOperationType::ResumeTranslation => $this->processResumeTranslation($operation, $runToken, $ownedAttemptToken),
                 AiOperationType::StrategicCompetencyClassification => $this->processStrategicCompetency($operation, $runToken, $ownedAttemptToken),
                 AiOperationType::AtsOptimization => $this->processAtsOptimization($operation, $runToken, $ownedAttemptToken),
                 AiOperationType::AtsScore => $this->processAtsScore($operation, $runToken, $ownedAttemptToken),
@@ -425,6 +448,25 @@ class AiOperationService
         $this->resumeAdaptation->adaptFromSnapshot(
             $operation->user,
             $operation->jobPosting,
+            $operation->input_snapshot ?? [],
+            $operation->input_fingerprint,
+            fn (Closure $persist): mixed => $this->persistForAttempt(
+                $operation->id,
+                $runToken,
+                $attemptToken,
+                $persist,
+            ),
+        );
+    }
+
+    private function processResumeTranslation(AiOperation $operation, string $runToken, string $attemptToken): void
+    {
+        if ($operation->user === null) {
+            throw new LogicException('O usuário da tradução não está disponível.');
+        }
+
+        $this->resumeTranslation->translateFromSnapshot(
+            $operation->user,
             $operation->input_snapshot ?? [],
             $operation->input_fingerprint,
             fn (Closure $persist): mixed => $this->persistForAttempt(
@@ -671,6 +713,10 @@ class AiOperationService
                 'Adequação concluída',
                 'A versão adaptada do currículo está disponível para esta vaga.',
             ],
+            AiOperationType::ResumeTranslation => [
+                'Tradução concluída',
+                'A versão em inglês do seu currículo está disponível.',
+            ],
             AiOperationType::StrategicCompetencyClassification => [
                 'Classificação estratégica concluída',
                 'As competências estratégicas do seu perfil foram atualizadas.',
@@ -694,6 +740,10 @@ class AiOperationService
             AiOperationType::ResumeAdaptation => [
                 'Falha na adequação',
                 'Não foi possível gerar a versão adaptada. Tente novamente.',
+            ],
+            AiOperationType::ResumeTranslation => [
+                'Falha na tradução',
+                'Não foi possível gerar a versão em inglês do currículo. Tente novamente.',
             ],
             AiOperationType::StrategicCompetencyClassification => [
                 'Falha na classificação estratégica',
@@ -804,6 +854,7 @@ class AiOperationService
                 ? [JobPostingResource::getUrl('application', ['record' => $operation->job_posting_id]), 'Ver candidatura']
                 : [null, null],
             AiOperationType::StrategicCompetencyClassification => [ProfessionalCompetenciesPage::getUrl(), 'Ver competências'],
+            AiOperationType::ResumeTranslation => [ResumePage::getUrl(), 'Ver currículo'],
         };
     }
 }
