@@ -256,6 +256,17 @@ it('mantém adequações pt-BR e EN coexistentes e regenera só a escolhida', fu
         ->and($en->refresh()->adapted_content)->toBe('Adapted resume in English.');
 });
 
+it('instrui o agente a responder no idioma da adaptação', function () {
+    $agent = app(ResumeAdaptationAgent::class);
+
+    expect((string) $agent->instructions())->not->toContain('o idioma da adaptação é o inglês');
+
+    $en = $agent->withLanguage(ResumeLanguage::En);
+
+    expect((string) $en->instructions())->toContain('o idioma da adaptação é o inglês')
+        ->and((string) $en->instructions())->toContain('adapted_resume');
+});
+
 it('consome o currículo do idioma pedido ao adequar', function () {
     $captured = null;
     ResumeAdaptationAgent::fake(function (string $prompt) use (&$captured): array {

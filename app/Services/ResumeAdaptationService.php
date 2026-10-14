@@ -112,7 +112,7 @@ class ResumeAdaptationService
             $response = $gate->run(
                 $this->agent->provider(),
                 $this->agent->model(),
-                fn () => $this->agent->prompt($jsonPayload)
+                fn () => $this->agent->withLanguage($language)->prompt($jsonPayload)
             );
             $usage = $response->usage ?? null;
 
@@ -126,9 +126,7 @@ class ResumeAdaptationService
 
             $this->assertIntegrity($result, (string) $payload['resume']);
 
-            $existingAdaptation = ResumeAdaptation::where('job_posting_id', $posting->id)
-                ->where('language', $language->value)
-                ->first();
+            $existingAdaptation = $posting->resumeAdaptation($language)->first();
             $wasOptimized = (bool) ($existingAdaptation?->is_ats_optimized ?? false);
 
             $prompt = '';
@@ -236,9 +234,7 @@ class ResumeAdaptationService
             throw new \LogicException('A otimização exige uma vaga confirmada.');
         }
 
-        $adaptation = ResumeAdaptation::where('job_posting_id', $posting->id)
-            ->where('language', $language->value)
-            ->first();
+        $adaptation = $posting->resumeAdaptation($language)->first();
 
         if (! $adaptation) {
             throw new \LogicException('Gere a adaptação do currículo antes de otimizar para ATS.');
@@ -260,7 +256,7 @@ class ResumeAdaptationService
         try {
             $snapshot = $this->snapshots->atsOptimization(
                 $user,
-                $posting->fresh()->load(['items', 'resumeAdaptation']),
+                $posting->fresh()->load('items'),
                 $enabled,
                 $language,
             );
@@ -336,9 +332,7 @@ class ResumeAdaptationService
 
         $language = ResumeLanguage::tryFrom((string) ($payload['language'] ?? '')) ?? ResumeLanguage::PtBr;
 
-        $adaptation = ResumeAdaptation::where('job_posting_id', $posting->id)
-            ->where('language', $language->value)
-            ->first();
+        $adaptation = $posting->resumeAdaptation($language)->first();
 
         if (! $adaptation) {
             throw new \LogicException('Gere a adaptação do currículo antes de otimizar para ATS.');
@@ -439,9 +433,7 @@ class ResumeAdaptationService
     private function assertIntegrity(ResumeAdaptationResult $result, string $resume): void
     {
         $originalConcepts = $this->resumeAnalyzer->conceptsIn($resume);
-        $adaptedConcepts = $this->resumeAnalyzer->conceptsIn($result->adaptedResume);
-
-        $invented = array_values(array_diff($adaptedConcepts, $originalConcepts));
+        $invented = $this->resumeAnalyzer->inventedConcepts($resume, $result->adaptedResume);
 
         if ($invented !== []) {
             throw new \InvalidArgumentException(sprintf(

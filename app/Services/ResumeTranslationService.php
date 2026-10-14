@@ -132,10 +132,7 @@ class ResumeTranslationService
 
     private function assertIntegrity(ResumeTranslationResult $result, string $original): void
     {
-        $originalConcepts = $this->resumeAnalyzer->conceptsIn($original);
-        $translatedConcepts = $this->resumeAnalyzer->conceptsIn($result->translatedResume);
-
-        $invented = array_values(array_diff($translatedConcepts, $originalConcepts));
+        $invented = $this->resumeAnalyzer->inventedConcepts($original, $result->translatedResume);
 
         if ($invented !== []) {
             throw new InvalidArgumentException(sprintf(
