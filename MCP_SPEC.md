@@ -204,6 +204,10 @@ Regras de camada:
   enums como string com valores do enum PHP).
 - Validação adicional no `handle()` com `$request->get(...)` + checagens de negócio
   (ownership, pré-condições). Nunca confiar apenas no schema do cliente.
+- `language`: parâmetro opcional das tools e resources de currículo, adaptação e PDF —
+  `pt-BR` (padrão quando omitido) ou `en`. Omitido equivale a `pt-BR`, então clientes atuais
+  seguem funcionando sem alterar o payload. Nos resources o idioma vem do argumento
+  `language` ou da query da URI (ex.: `jobora://resume?language=en`).
 
 ### 5.3 Resposta
 
@@ -319,8 +323,10 @@ expõe `suggested_data`, `items` e `application_methods` para a revisão.
 
 | Tool | Tipo | Pré-condições | Entrada | Saída | Efeitos |
 | ---- | ---- | ------------- | ------- | ----- | ------- |
-| `get_resume` | R | — | — | `{content, updated_at}` (ou `null`) | — |
-| `save_resume` | D | `confirm` | `content` (req), `confirm` | `{updated_at}` | `ResumeService::save()` — substitui a linha única do usuário |
+| `get_resume` | R | — | `language` (opcional) | `{content, updated_at}` (ou `null`) | `ResumeService::current($user, $language)` |
+| `save_resume` | D | `confirm` | `content` (req), `confirm`, `language` (opcional) | `{content, updated_at}` | `ResumeService::save()` — substitui a versão daquele idioma (uma por (usuário, idioma)) |
+
+`language ∈ ResumeLanguage` (`pt-BR`, `en`); omitido = `pt-BR`. Salvar um idioma não toca nos demais.
 
 ### 6.4 Mercado
 
@@ -346,11 +352,14 @@ Fontes: `MarketAnalysisService::{relativeFrequencies,pairsByCategory,periodSerie
 
 | Tool | Tipo | Pré-condições | Entrada | Saída | Efeitos |
 | ---- | ---- | ------------- | ------- | ----- | ------- |
-| `adapt_resume` | W, IA | Owned; `status = confirmed`; currículo cadastrado | `job_posting_id` | `{operation_id, status:'queued'}` | `AiOperationService::enqueueResumeAdaptation()` |
-| `get_resume_adaptation` | R | Owned; adaptação existente | `job_posting_id` | `{adapted_content, changes, covered_keywords, missing_requirements, alerts, is_ats_optimized, ats_score, ats_rationale}` | — |
-| `set_ats_optimization` | W (síncrona, sem IA) | Gate `useAtsOptimization`; adaptação existente | `job_posting_id`, `enabled` (bool) | `{is_ats_optimized}` | `ResumeAdaptationService::setAtsOptimization()` (prompt determinístico) |
-| `score_ats` | W, IA | Gate `useAtsOptimization`; adaptação existente | `job_posting_id` | `{operation_id, status:'queued'}` | `AiOperationService::enqueueAtsScore()` |
-| `export_adapted_resume_pdf` | W (arquivo) | Owned; adaptação existente; se `is_ats_optimized`, exigir `ats_consent` (espelha a rota do painel) | `job_posting_id`, `ats_consent` (bool) | `{path, mime_type, bytes, generated_at}` | `ResumePdfService::download()` → grava em `storage/app/private/mcp/pdf/` |
+| `adapt_resume` | W, IA | Owned; `status = confirmed`; currículo do idioma cadastrado | `job_posting_id`, `language` (opcional) | `{operation_id, status:'queued'}` | `AiOperationService::enqueueResumeAdaptation()` |
+| `get_resume_adaptation` | R | Owned; adaptação do idioma existente | `job_posting_id`, `language` (opcional) | `{language, adapted_content, changes, covered_keywords, missing_requirements, alerts, is_ats_optimized, ats_score, ats_rationale}` | — |
+| `set_ats_optimization` | W (síncrona, sem IA) | Gate `useAtsOptimization`; adaptação do idioma existente | `job_posting_id`, `enabled` (bool), `language` (opcional) | `{adaptation}` | `ResumeAdaptationService::setAtsOptimization()` (prompt determinístico) |
+| `score_ats` | W, IA | Gate `useAtsOptimization`; adaptação do idioma existente | `job_posting_id`, `language` (opcional) | `{operation_id, status:'queued'}` | `AiOperationService::enqueueAtsScore()` |
+| `export_adapted_resume_pdf` | W (arquivo) | Owned; adaptação do idioma existente; se `is_ats_optimized`, exigir `ats_consent` (espelha a rota do painel) | `job_posting_id`, `ats_consent` (bool), `language` (opcional) | `{path, mime_type, bytes, generated_at}` | `ResumePdfService::download()` grava em `storage/app/private/mcp/pdf/` |
+
+`language ∈ ResumeLanguage` (`pt-BR`, `en`); omitido = `pt-BR`. Cada adaptação é própria de um
+(vaga, idioma); adaptar um idioma não substitui a adaptação do outro.
 
 ### 6.7 Candidaturas
 
@@ -380,14 +389,16 @@ resolve o usuário configurado e nunca vaza dados de outro usuário.
 
 | Resource | URI | Conteúdo |
 | -------- | --- | -------- |
-| `ResumeResource` | `jobora://resume` | Texto atual do currículo + `updated_at` |
+| `ResumeResource` | `jobora://resume` | Texto do currículo no idioma pedido (`language` opcional, padrão pt-BR) + `updated_at` |
 | `ProfessionalCompetenciesResource` | `jobora://professional-competencies` | Conceitos + papel estratégico + `present`/`is_gap` |
 | `MarketSnapshotResource` | `jobora://market-snapshot` | Total de vagas confirmadas, top conceitos e principais lacunas |
 | `JobPostingResource` | `jobora://job-postings/{id}` (template) | Detalhe da vaga com itens e métodos |
-| `ResumeAdaptationResource` | `jobora://resume-adaptations/{id}` (template) | Currículo adaptado + resultados + ATS |
+| `ResumeAdaptationResource` | `jobora://resume-adaptations/{id}` (template) | Currículo adaptado no idioma pedido + resultados + ATS |
 
 Formato: JSON em `Response::json(...)` (ou texto para o currículo). Resources não disparam IA
-nem escrevem.
+nem escrevem. Os resources de currículo e adaptação aceitam o idioma opcional (padrão pt-BR)
+via argumento `language` ou query da URI (`jobora://resume?language=en`,
+`jobora://resume-adaptations/1?language=en`).
 
 ## 8. Operações de IA assíncronas
 
@@ -424,8 +435,10 @@ por posting/usuário, expiração). O MCP não reimplementa nada disso.
 
 1. Valida ownership, existência da adaptação e o `ats_consent` quando otimizado (espelha a
    rota `filament.admin.resume-pdf.download`).
-2. Chama `ResumePdfService::download($adaptation)` e grava o resultado em
-   `storage/app/private/mcp/pdf/adapted-resume-{job_posting_id}.pdf` (sem persistir em banco).
+2. Chama `ResumePdfService::download($adaptation)` — resolve a adaptação pelo `language`
+   pedido (padrão pt-BR) — e grava o resultado em
+   `storage/app/private/mcp/pdf/adapted-resume-{job_posting_id}.pdf` (versão PT-BR) ou
+   `...-{job_posting_id}-en.pdf` (versão EN), sem persistir em banco.
 3. Retorna `{ok:true, data:{path, mime_type:'application/pdf', bytes, generated_at}}`.
 
 O binário **não** trafega pelo MCP; o Hermes lê o arquivo com suas ferramentas nativas.
@@ -509,7 +522,8 @@ Padrão do projeto: **Pest**, `RefreshDatabase`, sem rede (agentes com fake, `Pd
   - **Vagas:** fluxo pending → analyze (fake) → `needs_review` → `confirm_job_posting`
     (itens/`ItemSource`/`suggested_data` limpo) → `discard`; `analyze` rejeitada em `confirmed`;
     `delete` exige `confirm`.
-  - **Currículo:** `save_resume` exige `confirm` e substitui a linha única; reflete na comparação.
+  - **Currículo:** `save_resume` exige `confirm` e substitui a versão daquele idioma (uma por
+    (usuário, idioma)); omitido o `language`, opera o pt-BR canônico, que reflete na comparação.
   - **Mercado:** cenário do PRD (2× Python, 1× React; currículo Python sem React → Python
     presente, React lacuna); `get_market_trends` com dados insuficientes.
   - **Competências:** `classify` enfileira com fake; `set_professional_competency` manual não é
@@ -564,8 +578,8 @@ T005..T008 → T009 → T010 → T011
 5. **Fluxo de vaga:** `create_job_posting` → `analyze_job_posting` (fake) → `needs_review` →
    `confirm_job_posting` persiste itens com `source` correto e limpa `suggested_data`;
    `discard` volta a `pending`; `delete` exige `confirm` e cascateia.
-6. **Currículo:** `get_resume`/`save_resume` (com `confirm`) mantêm linha única e refletem na
-   comparação.
+6. **Currículo:** `get_resume`/`save_resume` (com `confirm`) mantêm uma versão por
+   (usuário, idioma) e refletem na comparação; `language` omitido opera o pt-BR.
 7. **Mercado:** cenário do PRD (Python presente, React lacuna) correto; tendências com aviso de
    dados insuficientes quando aplicável.
 8. **Competências:** classificação enfileira e é acompanhável; papéis manuais não são
