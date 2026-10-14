@@ -21,9 +21,12 @@ use App\Filament\Widgets\StatsOverviewWidget;
 use App\Filament\Widgets\TopConceptsWidget;
 use App\Filament\Widgets\TrendsChartWidget;
 use App\Jobs\AnalyzeJobPosting;
+use App\Jobs\ProcessAiOperation;
+use App\Models\AiOperation;
 use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
 use App\Models\User;
+use App\Services\AiInputSnapshotService;
 use App\Services\CaptureTokenService;
 use App\Services\JobAnalysisService;
 use App\Services\ResumeService;
@@ -614,4 +617,70 @@ it('ordena a navegação lateral conforme o fluxo do produto', function () {
         MarketComparisonPage::class,
         MarketTrendsPage::class,
     ]);
+});
+
+it('gera a versão em inglês a partir das abas do currículo', function () {
+    Queue::fake([ProcessAiOperation::class]);
+    app(ResumeService::class)->save(auth()->user(), 'Currículo com Python.', ResumeLanguage::PtBr);
+
+    Livewire::test(ResumePage::class)
+        ->assertSuccessful()
+        ->assertSee('PT-BR')
+        ->assertSee('EN')
+        ->callAction('generateEnglish')
+        ->assertNotified();
+
+    expect(AiOperation::query()->where('operation_type', 'resume_translation')->count())->toBe(1);
+});
+
+it('recusa gerar a versão em inglês sem o currículo pt-BR', function () {
+    Livewire::test(ResumePage::class)
+        ->callAction('generateEnglish')
+        ->assertNotified();
+
+    expect(AiOperation::query()->count())->toBe(0);
+});
+
+it('salva a versão em inglês pela aba EN', function () {
+    app(ResumeService::class)->save(auth()->user(), 'Currículo com Python.', ResumeLanguage::PtBr);
+
+    Livewire::test(ResumePage::class)
+        ->set('activeTab', 'en')
+        ->fillForm(['content_en' => 'English resume with Python.'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect(app(ResumeService::class)->content(auth()->user(), ResumeLanguage::En))->toBe('English resume with Python.');
+});
+
+it('pede confirmação ao regenerar com a versão em inglês existente', function () {
+    Queue::fake([ProcessAiOperation::class]);
+    app(ResumeService::class)->save(auth()->user(), 'Currículo com Python.', ResumeLanguage::PtBr);
+    app(ResumeService::class)->save(auth()->user(), 'Existing english.', ResumeLanguage::En);
+
+    $component = Livewire::test(ResumePage::class)
+        ->mountAction('generateEnglish');
+
+    expect(AiOperation::query()->count())->toBe(0);
+
+    $component->callMountedAction();
+
+    expect(AiOperation::query()->count())->toBe(1);
+});
+
+it('avisa que a versão EN está desatualizada quando o pt-BR muda', function () {
+    $user = auth()->user();
+    app(ResumeService::class)->save($user, 'Currículo com Python.', ResumeLanguage::PtBr);
+    $fingerprint = app(AiInputSnapshotService::class)->resumeTranslation($user)['fingerprint'];
+    app(ResumeService::class)->saveTranslation($user, 'English resume with Python.', $fingerprint);
+
+    Livewire::test(ResumePage::class)
+        ->set('activeTab', 'en')
+        ->assertDontSee('desatualizada');
+
+    app(ResumeService::class)->save($user, 'Currículo atualizado com Python e Docker.', ResumeLanguage::PtBr);
+
+    Livewire::test(ResumePage::class)
+        ->set('activeTab', 'en')
+        ->assertSee('desatualizada');
 });
