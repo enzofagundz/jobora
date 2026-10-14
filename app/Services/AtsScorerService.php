@@ -26,10 +26,10 @@ class AtsScorerService
     /**
      * @return array{score: int, rationale: string}
      */
-    public function score(User $user, JobPosting $posting, ResumeLanguage $language = ResumeLanguage::PtBr): array
+    public function score(User $user, JobPosting $posting, ResumeLanguage $language): array
     {
         $this->assertAccess($user, $posting);
-        $snapshot = $this->snapshots->atsScore($posting->fresh()->load(['items', 'resumeAdaptation']), $language);
+        $snapshot = $this->snapshots->atsScore($posting->fresh()->load('items'), $language);
 
         return $this->scorePayload($user, $posting, $snapshot['payload'], $snapshot['fingerprint']);
     }
@@ -175,12 +175,12 @@ class AtsScorerService
      *
      * @return array{without: array{score:int, rationale:string}, with: array{score:int, rationale:string}}
      */
-    public function scoreComparison(User $user, JobPosting $posting, ResumeLanguage $language = ResumeLanguage::PtBr): array
+    public function scoreComparison(User $user, JobPosting $posting, ResumeLanguage $language): array
     {
         Gate::forUser($user)->authorize('useAtsOptimization');
         Gate::forUser($user)->authorize('view', $posting);
 
-        $posting = $posting->fresh()->load(['items', 'resumeAdaptation']);
+        $posting = $posting->fresh()->load('items');
         $adaptation = $posting->resumeAdaptation($language)->first();
 
         if (! $adaptation) {

@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Support;
 
+use App\Enums\ResumeLanguage;
 use App\Models\JobPosting;
 
 /**
@@ -25,9 +26,9 @@ final class JobPostingPresenter
             'collected_at' => $posting->collected_at?->toIso8601String(),
             'source_url' => $posting->source_url,
             'items_count' => $posting->items_count ?? $posting->items()->count(),
-            'has_adaptation' => $posting->relationLoaded('resumeAdaptation')
-                ? $posting->resumeAdaptation !== null
-                : $posting->resumeAdaptation()->exists(),
+            'has_adaptation' => $posting->relationLoaded('resumeAdaptations')
+                ? $posting->resumeAdaptations->isNotEmpty()
+                : $posting->resumeAdaptations()->exists(),
             'application_status' => $posting->relationLoaded('application')
                 ? $posting->application?->status?->value
                 : $posting->application()->first()?->status?->value,
@@ -40,9 +41,9 @@ final class JobPostingPresenter
      *
      * @return array<string, mixed>
      */
-    public static function detail(JobPosting $posting): array
+    public static function detail(JobPosting $posting, ResumeLanguage $language): array
     {
-        $adaptation = $posting->resumeAdaptation;
+        $adaptation = $posting->resumeAdaptation($language)->first();
         $application = $posting->application;
         $attempt = $posting->latestAttempt();
 

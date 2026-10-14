@@ -207,7 +207,7 @@ it('keeps an adaptation usable but marks it stale when current inputs changed', 
         ->handle(app(AiOperationService::class));
 
     $adaptation = ResumeAdaptation::query()->where('job_posting_id', $posting->id)->sole();
-    $currentSnapshot = app(AiInputSnapshotService::class)->resumeAdaptation($user, $posting->fresh()->load('items'));
+    $currentSnapshot = app(AiInputSnapshotService::class)->resumeAdaptation($user, $posting->fresh()->load('items'), ResumeLanguage::PtBr);
 
     expect($adaptation->adapted_content)->toBe('Currículo adaptado com PHP.')
         ->and($adaptation->source_fingerprint)->not->toBe($currentSnapshot['fingerprint'])
@@ -532,8 +532,8 @@ it('generates the same snapshot fingerprint regardless of item insertion order',
     ]);
 
     $snapshots = app(AiInputSnapshotService::class);
-    $first = $snapshots->resumeAdaptation($user, $firstPosting->fresh()->load('items'));
-    $second = $snapshots->resumeAdaptation($user, $secondPosting->fresh()->load('items'));
+    $first = $snapshots->resumeAdaptation($user, $firstPosting->fresh()->load('items'), ResumeLanguage::PtBr);
+    $second = $snapshots->resumeAdaptation($user, $secondPosting->fresh()->load('items'), ResumeLanguage::PtBr);
 
     expect($first['fingerprint'])->toBe($second['fingerprint'])
         ->and($first['payload']['positioning'])->toBe($second['payload']['positioning']);

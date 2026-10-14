@@ -83,10 +83,10 @@ class JobPosting extends Model
     }
 
     /**
-     * A adequação de um idioma. Sem argumento devolve a pt-BR, o padrão
-     * histórico da relação.
+     * A adequação de um idioma. Toda leitura declara o idioma explicitamente
+     * (ADR 0001); o default pt-BR é resolvido nos pontos de entrada MCP.
      */
-    public function resumeAdaptation(ResumeLanguage $language = ResumeLanguage::PtBr): HasOne
+    public function resumeAdaptation(ResumeLanguage $language): HasOne
     {
         return $this->hasOne(ResumeAdaptation::class)->where('language', $language->value);
     }

@@ -539,7 +539,7 @@ it('ApplicationPage abre uma vaga confirmada sem afetar currículo ou métodos e
 
     $confirmed->refresh();
     expect($confirmed->applicationMethods)->toHaveCount(1)
-        ->and($confirmed->resumeAdaptation?->adapted_content)->toBe('Versão adaptada preservada.');
+        ->and($confirmed->resumeAdaptation(ResumeLanguage::PtBr)->first()?->adapted_content)->toBe('Versão adaptada preservada.');
 });
 
 it('permite visualizar vaga aguardando revisão no detalhe', function () {

@@ -21,7 +21,7 @@ class AiInputSnapshotService
     /**
      * @return array{payload: array<string, mixed>, fingerprint: string}
      */
-    public function resumeAdaptation(User $user, JobPosting $posting, ResumeLanguage $language = ResumeLanguage::PtBr): array
+    public function resumeAdaptation(User $user, JobPosting $posting, ResumeLanguage $language): array
     {
         $resume = ResumeService::plainText($this->resumeService->content($user, $language));
         $description = ResumeService::plainText($posting->description);
@@ -113,7 +113,7 @@ class AiInputSnapshotService
     /**
      * @return array{payload: array<string, mixed>, fingerprint: string}
      */
-    public function atsScore(JobPosting $posting, ResumeLanguage $language = ResumeLanguage::PtBr, ?ResumeAdaptation $adaptation = null): array
+    public function atsScore(JobPosting $posting, ResumeLanguage $language, ?ResumeAdaptation $adaptation = null): array
     {
         $adaptation ??= $this->resolveAdaptation($posting, $language);
 
@@ -128,9 +128,13 @@ class AiInputSnapshotService
         }
 
         $items = $this->orderedItems($posting);
+        $user = $posting->user;
         $payload = [
             'language' => $language->value,
             'resume' => ResumeService::plainText($resume),
+            'source_resume' => ResumeService::plainText(
+                $user !== null ? $this->resumeService->content($user, $language) : null,
+            ),
             'job_description' => ResumeService::plainText($posting->description),
             'job_role' => $posting->role,
             'job_company' => $posting->company,
@@ -149,7 +153,7 @@ class AiInputSnapshotService
     /**
      * @return array{payload: array<string, mixed>, fingerprint: string}
      */
-    public function atsOptimization(User $user, JobPosting $posting, bool $enabled, ResumeLanguage $language = ResumeLanguage::PtBr): array
+    public function atsOptimization(User $user, JobPosting $posting, bool $enabled, ResumeLanguage $language): array
     {
         $adaptation = $this->resolveAdaptation($posting, $language);
 
@@ -194,12 +198,6 @@ class AiInputSnapshotService
 
     private function resolveAdaptation(JobPosting $posting, ResumeLanguage $language): ?ResumeAdaptation
     {
-        $loaded = $posting->relationLoaded('resumeAdaptation') ? $posting->resumeAdaptation : null;
-
-        if ($loaded instanceof ResumeAdaptation && $loaded->language === $language) {
-            return $loaded;
-        }
-
         return $posting->resumeAdaptation($language)->first();
     }
 

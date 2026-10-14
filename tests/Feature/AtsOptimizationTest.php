@@ -13,6 +13,7 @@ use App\Services\AtsScorerService;
 use App\Services\ResumeAdaptationService;
 use App\Services\ResumePdfService;
 use App\Services\ResumeService;
+use App\Support\Staleness;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Gate;
@@ -289,7 +290,7 @@ it('scores ats compatibility on demand for authorized user', function () {
     ]);
 
     $service = app(AtsScorerService::class);
-    $result = $service->score($user, $posting->fresh());
+    $result = $service->score($user, $posting->fresh(), ResumeLanguage::PtBr);
 
     expect($result['score'])->toBe(8)
         ->and($result['rationale'])->toBe('Boa compatibilidade');
@@ -321,7 +322,7 @@ it('restores persisted ATS state after a comparison', function () {
         'ats_source_fingerprint' => str_repeat('a', 64),
     ]);
 
-    $result = app(AtsScorerService::class)->scoreComparison($user, $posting->fresh());
+    $result = app(AtsScorerService::class)->scoreComparison($user, $posting->fresh(), ResumeLanguage::PtBr);
     $adaptation->refresh();
 
     expect($result['without']['score'])->toBe(4)
@@ -347,7 +348,7 @@ it('prevents unauthorized user from scoring', function () {
 
     $service = app(AtsScorerService::class);
 
-    expect(fn () => $service->score($owner, $posting->fresh()))
+    expect(fn () => $service->score($owner, $posting->fresh(), ResumeLanguage::PtBr))
         ->toThrow(AuthorizationException::class);
 });
 
@@ -589,6 +590,49 @@ it('gera o bloco ATS no idioma da adaptação', function () {
         ->and($updated->language)->toBe(ResumeLanguage::En)
         ->and($updated->ats_prompt)->toContain('Highly compatible profile')
         ->and($updated->ats_prompt)->not->toContain('Perfil altamente compatível');
+});
+
+it('marca a nota ATS como desatualizada quando o currículo do idioma muda', function () {
+    AtsScorerAgent::fake([['score' => 7, 'rationale' => 'Boa aderência.']]);
+
+    $user = User::factory()->create(['is_admin' => true]);
+    $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create([
+        'description' => 'Vaga PHP',
+        'role' => 'Dev PHP',
+    ]);
+    $posting->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
+    app(ResumeService::class)->save($user, 'Experiência com PHP.', ResumeLanguage::PtBr);
+    app(ResumeService::class)->save($user, 'Experienced with PHP.', ResumeLanguage::En);
+
+    ResumeAdaptation::create([
+        'job_posting_id' => $posting->id,
+        'adapted_content' => 'Currículo adaptado com PHP.',
+        'changes' => [],
+        'covered_keywords' => ['PHP'],
+        'missing_requirements' => [],
+        'alerts' => [],
+    ]);
+    $en = ResumeAdaptation::create([
+        'job_posting_id' => $posting->id,
+        'language' => ResumeLanguage::En,
+        'adapted_content' => 'Adapted resume with PHP.',
+        'changes' => [],
+        'covered_keywords' => ['PHP'],
+        'missing_requirements' => [],
+        'alerts' => [],
+    ]);
+
+    app(AtsScorerService::class)->score($user, $posting->fresh(), ResumeLanguage::En);
+
+    expect(Staleness::isAtsScoreStale($en->fresh()))->toBeFalse();
+
+    // O currículo do outro idioma não afeta a nota.
+    app(ResumeService::class)->save($user, 'Experiência atualizada com PHP.', ResumeLanguage::PtBr);
+    expect(Staleness::isAtsScoreStale($en->fresh()))->toBeFalse();
+
+    // Mudar o currículo do idioma invalida a nota daquele idioma.
+    app(ResumeService::class)->save($user, 'Experienced with PHP and Laravel.', ResumeLanguage::En);
+    expect(Staleness::isAtsScoreStale($en->fresh()))->toBeTrue();
 });
 
 it('persiste a nota ATS na adaptação do idioma simulado', function () {

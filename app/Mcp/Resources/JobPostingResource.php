@@ -29,7 +29,7 @@ class JobPostingResource extends JoboraResource implements HasUriTemplate
     protected function read(Request $request): Response
     {
         $posting = JobPosting::query()
-            ->with(['items', 'applicationMethods', 'resumeAdaptation', 'application'])
+            ->with(['items', 'applicationMethods', 'application'])
             ->where('user_id', $this->user()->id)
             ->whereKey((int) $request->get('id'))
             ->first();
@@ -38,6 +38,6 @@ class JobPostingResource extends JoboraResource implements HasUriTemplate
             throw ToolException::notFound('Vaga não encontrada.');
         }
 
-        return $this->ok(['job_posting' => JobPostingPresenter::detail($posting)]);
+        return $this->ok(['job_posting' => JobPostingPresenter::detail($posting, $this->language($request))]);
     }
 }

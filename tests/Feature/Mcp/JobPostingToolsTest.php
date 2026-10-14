@@ -100,6 +100,19 @@ it('lista as vagas do usuário com filtro por status e paginação', function ()
             ->etc());
 });
 
+it('reporta has_adaptation quando só existe a versão EN da adaptação', function () {
+    $user = McpTestHelpers::user();
+    $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
+    McpTestHelpers::adaptation($user, $posting, ['language' => 'en']);
+
+    JoboraServer::tool(ListJobPostingsTool::class, [])
+        ->assertOk()
+        ->assertStructuredContent(fn ($json) => $json
+            ->where('ok', true)
+            ->where('data.items.0.has_adaptation', true)
+            ->etc());
+});
+
 it('exige confirmação para excluir uma vaga', function () {
     $user = McpTestHelpers::user();
     $posting = JobPosting::factory()->for($user, 'user')->create();

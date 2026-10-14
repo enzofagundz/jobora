@@ -125,7 +125,7 @@ class AiOperationService
             throw new LogicException('A simulação ATS exige uma vaga confirmada.');
         }
 
-        $snapshot = $this->snapshots->atsScore($posting->fresh()->load(['items', 'resumeAdaptation']), $language);
+        $snapshot = $this->snapshots->atsScore($posting->fresh()->load('items'), $language);
 
         return $this->enqueue(
             $user,
@@ -153,7 +153,7 @@ class AiOperationService
 
         $snapshot = $this->snapshots->atsOptimization(
             $user,
-            $posting->fresh()->load(['items', 'resumeAdaptation']),
+            $posting->fresh()->load('items'),
             $enabled,
             $language,
         );
