@@ -2,6 +2,7 @@
 
 use App\Agents\StrategicCompetencyAgent;
 use App\Enums\ProfessionalCompetencySource;
+use App\Enums\ResumeLanguage;
 use App\Enums\StrategicRole;
 use App\Models\JobPosting;
 use App\Models\ProfessionalCompetency;
@@ -20,7 +21,7 @@ function competencyUser(): User
 
 function competencyResume(User $user, string $text): void
 {
-    app(ResumeService::class)->save($user, $text);
+    app(ResumeService::class)->save($user, $text, ResumeLanguage::PtBr);
 }
 
 function confirmedMarket(User $user, array $names): void

@@ -5,6 +5,7 @@ use App\Agents\ResumeAdaptationAgent;
 use App\Agents\StrategicCompetencyAgent;
 use App\Enums\AiOperationStatus;
 use App\Enums\AiOperationType;
+use App\Enums\ResumeLanguage;
 use App\Filament\Pages\ProfessionalCompetenciesPage;
 use App\Filament\Resources\JobPostings\Pages\ApplicationPage;
 use App\Jobs\ProcessAiOperation;
@@ -44,7 +45,7 @@ it('enqueues resume adaptation without calling the provider and stores the trigg
         'name' => 'PHP',
         'source' => 'ai',
     ]);
-    app(ResumeService::class)->save($user, 'Currículo inicial com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo inicial com PHP.', ResumeLanguage::PtBr);
 
     Livewire::actingAs($user)
         ->test(ApplicationPage::class, ['record' => $posting->id])
@@ -77,7 +78,7 @@ it('does not enqueue a duplicate adaptation while the current operation is activ
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create([
         'description' => 'Vaga para PHP e Laravel.',
     ]);
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
 
     $component = Livewire::actingAs($user)
         ->test(ApplicationPage::class, ['record' => $posting->id])
@@ -111,7 +112,7 @@ it('marks the operation failed when the queue cannot accept the job', function (
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create([
         'description' => 'Vaga para PHP.',
     ]);
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     Event::fake([DatabaseNotificationsSent::class]);
 
     expect(fn () => app(AiOperationService::class)->enqueueResumeAdaptation($user, $posting))
@@ -137,11 +138,11 @@ it('processes the trigger snapshot and persists the completed adaptation', funct
         'name' => 'PHP',
         'source' => 'ai',
     ]);
-    app(ResumeService::class)->save($user, 'Currículo original com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo original com PHP.', ResumeLanguage::PtBr);
 
     $operation = app(AiOperationService::class)->enqueueResumeAdaptation($user, $posting);
 
-    app(ResumeService::class)->save($user, 'Currículo atualizado sem o contexto anterior.');
+    app(ResumeService::class)->save($user, 'Currículo atualizado sem o contexto anterior.', ResumeLanguage::PtBr);
     $posting->update(['description' => 'Descrição atualizada da vaga.']);
 
     $capturedPrompt = null;
@@ -188,10 +189,10 @@ it('keeps an adaptation usable but marks it stale when current inputs changed', 
         'name' => 'PHP',
         'source' => 'ai',
     ]);
-    app(ResumeService::class)->save($user, 'Currículo inicial com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo inicial com PHP.', ResumeLanguage::PtBr);
 
     $operation = app(AiOperationService::class)->enqueueResumeAdaptation($user, $posting);
-    app(ResumeService::class)->save($user, 'Currículo atualizado com Laravel.');
+    app(ResumeService::class)->save($user, 'Currículo atualizado com Laravel.', ResumeLanguage::PtBr);
 
     ResumeAdaptationAgent::fake([[
         'adapted_resume' => 'Currículo adaptado com PHP.',
@@ -219,7 +220,7 @@ it('preserves the previous adaptation and sends one safe notification after term
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create([
         'description' => 'Vaga para PHP.',
     ]);
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     $adaptation = ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
         'adapted_content' => 'Versão anterior preservada.',
@@ -254,7 +255,7 @@ it('keeps an operation retryable without sending a terminal notification', funct
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create([
         'description' => 'Vaga para PHP.',
     ]);
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     $operation = app(AiOperationService::class)->enqueueResumeAdaptation($user, $posting);
 
     $calls = 0;
@@ -305,7 +306,7 @@ it('expires only queued operations that never reached a worker', function () {
     $secondPosting = JobPosting::factory()->for($user, 'user')->confirmed()->create([
         'description' => 'Segunda vaga para PHP.',
     ]);
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
 
     $queued = app(AiOperationService::class)->enqueueResumeAdaptation($user, $firstPosting);
     $queued->update([
@@ -336,7 +337,7 @@ it('retries terminal notifications left pending during the expiration sweep', fu
 
     $user = User::factory()->create();
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     $operation = app(AiOperationService::class)->enqueueResumeAdaptation($user, $posting);
     $operation->update([
         'status' => AiOperationStatus::Failed,
@@ -360,7 +361,7 @@ it('does not process an expired queued operation when its delayed job arrives', 
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create([
         'description' => 'Vaga para PHP.',
     ]);
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     $operation = app(AiOperationService::class)->enqueueResumeAdaptation($user, $posting);
     $operation->update(['expires_at' => now()->subMinute()]);
 
@@ -381,7 +382,7 @@ it('enqueues strategic competency classification with a profile snapshot', funct
     Queue::fake([ProcessAiOperation::class]);
 
     $user = User::factory()->create();
-    app(ResumeService::class)->save($user, 'Currículo com PHP e Laravel.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP e Laravel.', ResumeLanguage::PtBr);
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
     $posting->items()->create([
         'category' => 'skill',
@@ -415,7 +416,7 @@ it('processes strategic classification from its snapshot and fingerprints AI row
     Queue::fake([ProcessAiOperation::class]);
 
     $user = User::factory()->create();
-    app(ResumeService::class)->save($user, 'Currículo original com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo original com PHP.', ResumeLanguage::PtBr);
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
     $posting->items()->create([
         'category' => 'skill',
@@ -423,7 +424,7 @@ it('processes strategic classification from its snapshot and fingerprints AI row
         'source' => 'ai',
     ]);
     $operation = app(AiOperationService::class)->enqueueStrategicCompetencyClassification($user);
-    app(ResumeService::class)->save($user, 'Currículo atualizado com Laravel.');
+    app(ResumeService::class)->save($user, 'Currículo atualizado com Laravel.', ResumeLanguage::PtBr);
 
     $capturedPrompt = null;
     StrategicCompetencyAgent::fake(function (string $prompt) use (&$capturedPrompt): array {
@@ -458,7 +459,7 @@ it('marks an AI competency stale when the profile changes after classification',
     Queue::fake([ProcessAiOperation::class]);
 
     $user = User::factory()->create();
-    app(ResumeService::class)->save($user, 'Currículo original com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo original com PHP.', ResumeLanguage::PtBr);
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
     $posting->items()->create([
         'category' => 'skill',
@@ -476,7 +477,7 @@ it('marks an AI competency stale when the profile changes after classification',
     (new ProcessAiOperation($operation->id, $operation->run_token))
         ->handle(app(AiOperationService::class));
 
-    app(ResumeService::class)->save($user, 'Currículo atualizado com Laravel.');
+    app(ResumeService::class)->save($user, 'Currículo atualizado com Laravel.', ResumeLanguage::PtBr);
     $competency = ProfessionalCompetency::query()->where('user_id', $user->id)->sole();
 
     expect(Staleness::isCompetencyStale($competency))->toBeTrue();
@@ -486,7 +487,7 @@ it('does not mark a fingerprinted result stale when the input content is unchang
     Queue::fake([ProcessAiOperation::class]);
 
     $user = User::factory()->create();
-    app(ResumeService::class)->save($user, 'Currículo original com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo original com PHP.', ResumeLanguage::PtBr);
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create([
         'description' => 'Vaga para PHP.',
     ]);
@@ -504,14 +505,14 @@ it('does not mark a fingerprinted result stale when the input content is unchang
         ->handle(app(AiOperationService::class));
 
     $adaptation = ResumeAdaptation::query()->where('job_posting_id', $posting->id)->sole();
-    app(ResumeService::class)->save($user, 'Currículo original com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo original com PHP.', ResumeLanguage::PtBr);
 
     expect(Staleness::isAdaptationStale($adaptation->fresh()))->toBeFalse();
 });
 
 it('generates the same snapshot fingerprint regardless of item insertion order', function () {
     $user = User::factory()->create();
-    app(ResumeService::class)->save($user, 'Currículo com PHP e Laravel.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP e Laravel.', ResumeLanguage::PtBr);
 
     $firstPosting = JobPosting::factory()->for($user, 'user')->confirmed()->create([
         'description' => 'Vaga para PHP e Laravel.',
@@ -551,7 +552,7 @@ it('enqueues ATS scoring without calling the provider and captures the adapted r
         'name' => 'PHP',
         'source' => 'ai',
     ]);
-    app(ResumeService::class)->save($user, 'Currículo original com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo original com PHP.', ResumeLanguage::PtBr);
     ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
         'adapted_content' => 'Currículo adaptado com PHP.',
@@ -598,7 +599,7 @@ it('processes ATS scoring from its snapshot and persists the score on the adapta
         'name' => 'PHP',
         'source' => 'ai',
     ]);
-    app(ResumeService::class)->save($user, 'Currículo original com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo original com PHP.', ResumeLanguage::PtBr);
     $adaptation = ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
         'adapted_content' => 'Currículo adaptado original com PHP.',
@@ -653,7 +654,7 @@ it('enqueues ATS optimization changes without running them in the request', func
         'name' => 'PHP',
         'source' => 'ai',
     ]);
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
         'adapted_content' => 'Currículo adaptado com PHP.',
@@ -694,7 +695,7 @@ it('does not enable ATS optimization when the resume has no matching keywords', 
         'name' => 'Laravel',
         'source' => 'ai',
     ]);
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
         'adapted_content' => 'Currículo adaptado com PHP.',
@@ -717,7 +718,7 @@ it('does not enqueue ATS optimization when the required adaptation is absent', f
 
     $user = User::factory()->create(['is_admin' => true]);
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
 
     Livewire::actingAs($user)
         ->test(ApplicationPage::class, ['record' => $posting->id])
@@ -743,7 +744,7 @@ it('applies the queued ATS optimization snapshot only when its worker runs', fun
         'name' => 'PHP',
         'source' => 'ai',
     ]);
-    app(ResumeService::class)->save($user, 'Currículo original com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo original com PHP.', ResumeLanguage::PtBr);
     $adaptation = ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
         'adapted_content' => 'Currículo adaptado com PHP.',
@@ -754,7 +755,7 @@ it('applies the queued ATS optimization snapshot only when its worker runs', fun
     ]);
 
     $operation = app(AiOperationService::class)->enqueueAtsOptimization($user, $posting, true);
-    app(ResumeService::class)->save($user, 'Currículo atualizado sem o contexto do snapshot.');
+    app(ResumeService::class)->save($user, 'Currículo atualizado sem o contexto do snapshot.', ResumeLanguage::PtBr);
     Event::fake([DatabaseNotificationsSent::class]);
 
     (new ProcessAiOperation($operation->id, $operation->run_token))
@@ -783,7 +784,7 @@ it('coordinates adaptation and ATS operations per posting', function () {
         'name' => 'PHP',
         'source' => 'ai',
     ]);
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
         'adapted_content' => 'Currículo adaptado com PHP.',
@@ -813,7 +814,7 @@ it('keeps the ATS score usable but marks it stale when its source changes', func
         'name' => 'PHP',
         'source' => 'ai',
     ]);
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     $adaptation = ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
         'adapted_content' => 'Currículo adaptado com PHP.',
@@ -844,7 +845,7 @@ it('uses the timestamp fallback for legacy ATS scores without a fingerprint', fu
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create([
         'description' => 'Vaga para PHP.',
     ]);
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     $adaptation = ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
         'adapted_content' => 'Currículo adaptado com PHP.',
@@ -872,7 +873,7 @@ it('marks the queued ATS prompt stale when its captured profile changes', functi
         'name' => 'PHP',
         'source' => 'ai',
     ]);
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
         'adapted_content' => 'Currículo adaptado com PHP.',
@@ -887,7 +888,7 @@ it('marks the queued ATS prompt stale when its captured profile changes', functi
         ->handle(app(AiOperationService::class));
 
     $adaptation = ResumeAdaptation::query()->where('job_posting_id', $posting->id)->sole();
-    app(ResumeService::class)->save($user, 'Currículo atualizado sem PHP.');
+    app(ResumeService::class)->save($user, 'Currículo atualizado sem PHP.', ResumeLanguage::PtBr);
 
     expect($adaptation->is_ats_optimized)->toBeTrue()
         ->and(Staleness::isAtsPromptStale($adaptation->fresh()))->toBeTrue();
@@ -906,7 +907,7 @@ it('reclaims a running operation left behind after a worker timeout', function (
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create([
         'description' => 'Vaga para PHP.',
     ]);
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     $operation = app(AiOperationService::class)->enqueueResumeAdaptation($user, $posting);
     $operation->update([
         'status' => AiOperationStatus::Running,
@@ -942,7 +943,7 @@ it('does not let a stale worker overwrite a recovered ATS score', function () {
         'name' => 'PHP',
         'source' => 'ai',
     ]);
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
         'adapted_content' => 'Currículo adaptado com PHP.',
@@ -1003,7 +1004,7 @@ it('fails a final reclaimed timeout without accepting an older queue attempt', f
 
     $user = User::factory()->create();
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     $operation = app(AiOperationService::class)->enqueueResumeAdaptation($user, $posting);
     $originalAttemptToken = $operation->attempt_token;
     $operation->update([
@@ -1037,7 +1038,7 @@ it('shows polling and the active operation state on the application page', funct
 
     $user = User::factory()->create();
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
 
     $component = Livewire::actingAs($user)
         ->test(ApplicationPage::class, ['record' => $posting->id])
@@ -1059,7 +1060,7 @@ it('clears ATS consent when an asynchronous adaptation source changes', function
         'name' => 'PHP',
         'source' => 'ai',
     ]);
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
         'adapted_content' => 'Currículo adaptado com PHP.',
@@ -1088,7 +1089,7 @@ it('clears ATS consent when an asynchronous adaptation source changes', function
 it('renders a persisted ATS score after the page refreshes', function () {
     $user = User::factory()->create(['is_admin' => true]);
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
         'adapted_content' => 'Currículo adaptado com PHP.',
@@ -1113,7 +1114,7 @@ it('shows polling and the active classification state on the competencies page',
     Queue::fake([ProcessAiOperation::class]);
 
     $user = User::factory()->create();
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
     $posting->items()->create([
         'category' => 'skill',

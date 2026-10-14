@@ -2,6 +2,7 @@
 
 use App\Agents\AtsScorerAgent;
 use App\Agents\ResumeAdaptationAgent;
+use App\Enums\ResumeLanguage;
 use App\Filament\Pages\ManageAtsUsers;
 use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Filament\Resources\JobPostings\Pages\ApplicationPage;
@@ -78,7 +79,7 @@ it('allows authorized user to enable ats optimization per posting', function () 
         ['category' => 'skill', 'name' => 'Laravel', 'source' => 'ai'],
     ]);
 
-    app(ResumeService::class)->save($user, 'Experiência com PHP e Laravel');
+    app(ResumeService::class)->save($user, 'Experiência com PHP e Laravel', ResumeLanguage::PtBr);
 
     $adaptation = ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
@@ -103,7 +104,7 @@ it('prevents unauthorized user from toggling ats optimization', function () {
     $other = User::factory()->create();
     $posting = JobPosting::factory()->for($owner, 'user')->confirmed()->create();
     $posting->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
-    app(ResumeService::class)->save($owner, 'PHP');
+    app(ResumeService::class)->save($owner, 'PHP', ResumeLanguage::PtBr);
     ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
         'adapted_content' => 'teste',
@@ -121,7 +122,7 @@ it('prevents unauthorized user from toggling ats optimization', function () {
     $plainOwner = User::factory()->create();
     $posting2 = JobPosting::factory()->for($plainOwner, 'user')->confirmed()->create();
     $posting2->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
-    app(ResumeService::class)->save($plainOwner, 'PHP');
+    app(ResumeService::class)->save($plainOwner, 'PHP', ResumeLanguage::PtBr);
     ResumeAdaptation::create([
         'job_posting_id' => $posting2->id,
         'adapted_content' => 'teste',
@@ -142,7 +143,7 @@ it('toggles ats optimization off and clears prompt', function () {
         'company' => 'Co',
     ]);
     $posting->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
-    app(ResumeService::class)->save($user, 'PHP');
+    app(ResumeService::class)->save($user, 'PHP', ResumeLanguage::PtBr);
 
     ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
@@ -185,7 +186,7 @@ it('regenerates ats prompt when re-adapting with optimization active', function 
         'company' => 'Co',
     ]);
     $posting->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
-    app(ResumeService::class)->save($user, 'Experiencia com PHP e Laravel');
+    app(ResumeService::class)->save($user, 'Experiencia com PHP e Laravel', ResumeLanguage::PtBr);
 
     $service = app(ResumeAdaptationService::class);
     $service->adapt($user, $posting->fresh());
@@ -208,7 +209,7 @@ it('regenerates ats prompt when re-adapting with optimization active', function 
 it('requires adaptation before enabling optimization', function () {
     $user = User::factory()->create(['is_admin' => true]);
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
-    app(ResumeService::class)->save($user, 'PHP');
+    app(ResumeService::class)->save($user, 'PHP', ResumeLanguage::PtBr);
 
     $service = app(ResumeAdaptationService::class);
 
@@ -225,7 +226,7 @@ it('injects hidden ats prompt into PDF when optimized', function () {
         'company' => 'Acme',
     ]);
     $posting->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
-    app(ResumeService::class)->save($user, 'PHP');
+    app(ResumeService::class)->save($user, 'PHP', ResumeLanguage::PtBr);
 
     $adaptation = ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
@@ -276,7 +277,7 @@ it('scores ats compatibility on demand for authorized user', function () {
         'role' => 'Dev PHP',
     ]);
     $posting->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
-    app(ResumeService::class)->save($user, 'Experiencia PHP');
+    app(ResumeService::class)->save($user, 'Experiencia PHP', ResumeLanguage::PtBr);
 
     ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
@@ -306,7 +307,7 @@ it('restores persisted ATS state after a comparison', function () {
         'role' => 'Dev PHP',
     ]);
     $posting->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
-    app(ResumeService::class)->save($user, 'Experiencia PHP');
+    app(ResumeService::class)->save($user, 'Experiencia PHP', ResumeLanguage::PtBr);
 
     $adaptation = ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
@@ -379,7 +380,7 @@ it('shows toggle for authorized user with adaptation', function () {
         'missing_requirements' => [],
         'alerts' => [],
     ]);
-    app(ResumeService::class)->save($user, 'PHP');
+    app(ResumeService::class)->save($user, 'PHP', ResumeLanguage::PtBr);
 
     Livewire::actingAs($user)
         ->test(ApplicationPage::class, ['record' => $posting->id])
@@ -395,7 +396,7 @@ it('toggles ats optimization via filament action and shows preview', function ()
         'company' => 'Acme',
     ]);
     $posting->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
-    app(ResumeService::class)->save($user, 'Experiencia com PHP');
+    app(ResumeService::class)->save($user, 'Experiencia com PHP', ResumeLanguage::PtBr);
 
     ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
@@ -432,7 +433,7 @@ it('simulates ats score via filament action', function () {
         'company' => 'Co',
     ]);
     $posting->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
-    app(ResumeService::class)->save($user, 'PHP');
+    app(ResumeService::class)->save($user, 'PHP', ResumeLanguage::PtBr);
 
     ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
@@ -484,7 +485,7 @@ it('allows admin to see users table and plain sees empty', function () {
 it('requires consent before downloading optimized pdf', function () {
     $user = User::factory()->create(['is_admin' => true]);
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
-    app(ResumeService::class)->save($user, 'PHP');
+    app(ResumeService::class)->save($user, 'PHP', ResumeLanguage::PtBr);
     ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
         'adapted_content' => 'Curriculo',
@@ -541,7 +542,7 @@ it('rejects an optimized PDF when the adapted source is stale', function () {
 
     $user = User::factory()->create(['is_admin' => true]);
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
-    app(ResumeService::class)->save($user, 'PHP');
+    app(ResumeService::class)->save($user, 'PHP', ResumeLanguage::PtBr);
     ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
         'adapted_content' => 'Curriculo',

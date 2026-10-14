@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\ProfessionalCompetencySource;
+use App\Enums\ResumeLanguage;
 use App\Enums\StrategicRole;
 use App\Models\JobPosting;
 use App\Models\ProfessionalCompetency;
@@ -28,11 +29,11 @@ it('salva o currículo em linha única e substitui a versão anterior', function
     $user = User::factory()->create();
     $service = app(ResumeService::class);
 
-    $service->save($user, 'Experiência com Python e Django.');
-    $service->save($user, 'Experiência com React e TypeScript.');
+    $service->save($user, 'Experiência com Python e Django.', ResumeLanguage::PtBr);
+    $service->save($user, 'Experiência com React e TypeScript.', ResumeLanguage::PtBr);
 
-    expect(Resume::query()->where('user_id', $user->id)->count())->toBe(1)
-        ->and($service->content($user))->toBe('Experiência com React e TypeScript.');
+    expect(Resume::query()->where('user_id', $user->id)->where('language', ResumeLanguage::PtBr->value)->count())->toBe(1)
+        ->and($service->content($user, ResumeLanguage::PtBr))->toBe('Experiência com React e TypeScript.');
 });
 
 it('reflete a atualização do currículo na comparação', function () {
@@ -41,11 +42,11 @@ it('reflete a atualização do currículo na comparação', function () {
     confirmedWithItems(['React'], $user);
 
     $service = app(ResumeService::class);
-    $service->save($user, 'Currículo sem nenhuma tecnologia citada.');
+    $service->save($user, 'Currículo sem nenhuma tecnologia citada.', ResumeLanguage::PtBr);
 
     expect(collect(app(MarketComparisonService::class)->table($user))->firstWhere('name', 'Python')['present'])->toBeFalse();
 
-    $service->save($user, 'Currículo com Python.');
+    $service->save($user, 'Currículo com Python.', ResumeLanguage::PtBr);
     $rows = app(MarketComparisonService::class)->table($user);
 
     expect(collect($rows)->firstWhere('name', 'Python')['present'])->toBeTrue()
@@ -57,7 +58,7 @@ it('cenário do PRD: Python presente no currículo, React ausente, frequências 
     confirmedWithItems(['Python', 'React'], $user);
     confirmedWithItems(['Python'], $user);
 
-    app(ResumeService::class)->save($user, 'Currículo: desenvolvedor Python com foco em automação.');
+    app(ResumeService::class)->save($user, 'Currículo: desenvolvedor Python com foco em automação.', ResumeLanguage::PtBr);
 
     $table = collect(app(MarketComparisonService::class)->table($user));
 
@@ -79,7 +80,7 @@ it('lacunas listam apenas itens frequentes e ausentes do currículo', function (
     confirmedWithItems(['Python', 'React'], $user);
     confirmedWithItems(['React'], $user);
 
-    app(ResumeService::class)->save($user, 'Currículo com Python.');
+    app(ResumeService::class)->save($user, 'Currículo com Python.', ResumeLanguage::PtBr);
 
     $gaps = collect(app(MarketComparisonService::class)->gaps($user));
 
@@ -89,7 +90,7 @@ it('lacunas listam apenas itens frequentes e ausentes do currículo', function (
 
 it('retorna tabela vazia sem vagas confirmadas', function () {
     $user = User::factory()->create();
-    app(ResumeService::class)->save($user, 'Currículo qualquer.');
+    app(ResumeService::class)->save($user, 'Currículo qualquer.', ResumeLanguage::PtBr);
 
     expect(app(MarketComparisonService::class)->table($user))->toBe([]);
 });
@@ -99,7 +100,7 @@ it('itens com nome cru refletem o currículo salvo', function () {
     confirmedWithItems(['github'], $user);
     confirmedWithItems(['clean code'], $user);
 
-    app(ResumeService::class)->save($user, 'Currículo com GitHub e Clean Code.');
+    app(ResumeService::class)->save($user, 'Currículo com GitHub e Clean Code.', ResumeLanguage::PtBr);
 
     $table = collect(app(MarketComparisonService::class)->table($user));
 
@@ -113,11 +114,11 @@ it('competência removida volta a ser lacuna', function () {
     $user = User::factory()->create();
     confirmedWithItems(['clean code'], $user);
 
-    app(ResumeService::class)->save($user, 'Aplico Clean Code.');
+    app(ResumeService::class)->save($user, 'Aplico Clean Code.', ResumeLanguage::PtBr);
 
     expect(collect(app(MarketComparisonService::class)->gaps($user))->pluck('name')->all())->not->toContain('clean code');
 
-    app(ResumeService::class)->save($user, 'Currículo sem menções.');
+    app(ResumeService::class)->save($user, 'Currículo sem menções.', ResumeLanguage::PtBr);
 
     expect(collect(app(MarketComparisonService::class)->gaps($user))->pluck('name')->all())->toContain('clean code');
 });
@@ -127,7 +128,7 @@ it('linha de mercado carrega papel e origem quando classificada e permanece lacu
     $this->actingAs($user);
 
     confirmedWithItems(['Python'], $user);
-    app(ResumeService::class)->save($user, 'Currículo sem tecnologias citadas.');
+    app(ResumeService::class)->save($user, 'Currículo sem tecnologias citadas.', ResumeLanguage::PtBr);
 
     ProfessionalCompetency::factory()->create([
         'user_id' => $user->id,
@@ -149,7 +150,7 @@ it('linha de mercado carrega papel e origem quando classificada e permanece lacu
 it('linha de mercado sem classificação não recebe papel', function () {
     $user = User::factory()->create();
     confirmedWithItems(['Python'], $user);
-    app(ResumeService::class)->save($user, 'Currículo com Python.');
+    app(ResumeService::class)->save($user, 'Currículo com Python.', ResumeLanguage::PtBr);
 
     $row = collect(app(MarketComparisonService::class)->table($user))->firstWhere('name', 'Python');
 
@@ -164,7 +165,7 @@ it('papel da linha resolve aliases do item de mercado legado', function () {
     $this->actingAs($user);
 
     confirmedWithItems(['postgres'], $user);
-    app(ResumeService::class)->save($user, 'Currículo com PostgreSQL.');
+    app(ResumeService::class)->save($user, 'Currículo com PostgreSQL.', ResumeLanguage::PtBr);
 
     ProfessionalCompetency::factory()->create([
         'user_id' => $user->id,

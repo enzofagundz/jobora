@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\ResumeLanguage;
 use App\Mcp\Resources\JobPostingResource;
 use App\Mcp\Resources\ResumeResource;
 use App\Mcp\Servers\JoboraServer;
@@ -12,7 +13,7 @@ uses(RefreshDatabase::class);
 
 it('expõe o currículo atual como resource', function () {
     $user = McpTestHelpers::user();
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
 
     JoboraServer::resource(ResumeResource::class)
         ->assertOk()

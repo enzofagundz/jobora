@@ -3,6 +3,7 @@
 use App\Agents\JobExtractionAgent;
 use App\Agents\ResumeAdaptationAgent;
 use App\Enums\JobPostingStatus;
+use App\Enums\ResumeLanguage;
 use App\Filament\Pages\CaptureSetupPage;
 use App\Filament\Pages\JobSearchPage;
 use App\Filament\Pages\MarketComparisonPage;
@@ -97,7 +98,7 @@ it('renderiza a página do currículo e salva o texto', function () {
         ->assertHasNoFormErrors()
         ->assertSet('data.content', fn (mixed $value): bool => is_string($value));
 
-    expect(app(ResumeService::class)->content(auth()->user()))->toBe('Currículo com Python e Docker.');
+    expect(app(ResumeService::class)->content(auth()->user(), ResumeLanguage::PtBr))->toBe('Currículo com Python e Docker.');
 });
 
 it('renderiza a comparação mercado × currículo com dados do PRD', function () {
@@ -109,7 +110,7 @@ it('renderiza a comparação mercado × currículo com dados do PRD', function (
     $p2 = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
     $p2->items()->create(['category' => 'skill', 'name' => 'Python', 'source' => 'ai']);
 
-    app(ResumeService::class)->save(auth()->user(), 'Currículo com Python.');
+    app(ResumeService::class)->save(auth()->user(), 'Currículo com Python.', ResumeLanguage::PtBr);
 
     $component = Livewire::test(MarketComparisonPage::class);
 
@@ -154,7 +155,7 @@ it('widgets exibem dados corretos', function () {
     Livewire::test(TopConceptsWidget::class)
         ->assertSee('Python');
 
-    app(ResumeService::class)->save(auth()->user(), 'Currículo sem menção a nenhuma tecnologia.');
+    app(ResumeService::class)->save(auth()->user(), 'Currículo sem menção a nenhuma tecnologia.', ResumeLanguage::PtBr);
 
     Livewire::test(ComparisonSummaryWidget::class)
         ->assertSee('Python');
@@ -238,7 +239,7 @@ it('renderiza a página de adequação e gera a adaptação pela ação', functi
         ['category' => 'skill', 'name' => 'Python', 'source' => 'ai'],
         ['category' => 'skill', 'name' => 'React', 'source' => 'ai'],
     ]);
-    app(ResumeService::class)->save(auth()->user(), 'Currículo com Python.');
+    app(ResumeService::class)->save(auth()->user(), 'Currículo com Python.', ResumeLanguage::PtBr);
 
     Livewire::test(ApplicationPage::class, ['record' => $posting->id])
         ->assertSuccessful()
@@ -269,7 +270,7 @@ it('renderiza o currículo adaptado como texto na adequação', function () {
 
 it('renderiza o currículo original como texto na adequação', function () {
     $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
-    app(ResumeService::class)->save(auth()->user(), '<p><strong>Currículo</strong> com <em>Laravel</em>.</p>');
+    app(ResumeService::class)->save(auth()->user(), '<p><strong>Currículo</strong> com <em>Laravel</em>.</p>', ResumeLanguage::PtBr);
 
     Livewire::test(ApplicationPage::class, ['record' => $posting->id])
         ->assertSuccessful()
@@ -401,7 +402,7 @@ it('ApplicationPage sem currículo cadastrado mostra empty state e continua abri
 });
 
 it('ApplicationPage sem adaptação mostra empty state de adequação', function () {
-    app(ResumeService::class)->save(auth()->user(), 'Currículo base.');
+    app(ResumeService::class)->save(auth()->user(), 'Currículo base.', ResumeLanguage::PtBr);
     $confirmed = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
 
     Livewire::test(ApplicationPage::class, ['record' => $confirmed->id])

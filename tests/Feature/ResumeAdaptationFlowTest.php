@@ -1,6 +1,7 @@
 <?php
 
 use App\Agents\ResumeAdaptationAgent;
+use App\Enums\ResumeLanguage;
 use App\Models\JobPosting;
 use App\Models\Resume;
 use App\Models\ResumeAdaptation;
@@ -27,7 +28,7 @@ function adaptationPosting(?User $user = null): JobPosting
 
 function adaptationResume(User $user): void
 {
-    app(ResumeService::class)->save($user, 'Currículo com Python e Laravel.');
+    app(ResumeService::class)->save($user, 'Currículo com Python e Laravel.', ResumeLanguage::PtBr);
 }
 
 function validAdaptationResponse(): array
@@ -113,8 +114,8 @@ it('never alters the original resume', function () {
 
     app(ResumeAdaptationService::class)->adapt($user, $posting);
 
-    expect(Resume::count())->toBe(1)
-        ->and(app(ResumeService::class)->content($user))->toBe('Currículo com Python e Laravel.');
+    expect(Resume::query()->where('language', ResumeLanguage::PtBr->value)->count())->toBe(1)
+        ->and(app(ResumeService::class)->content($user, ResumeLanguage::PtBr))->toBe('Currículo com Python e Laravel.');
 });
 
 it('rejects an adapted resume with an invented concept', function () {

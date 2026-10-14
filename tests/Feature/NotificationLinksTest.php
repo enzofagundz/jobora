@@ -5,6 +5,7 @@ use App\Agents\JobTriageAgent;
 use App\Enums\AiOperationStatus;
 use App\Enums\JobCaptureTriageStatus;
 use App\Enums\JobPostingStatus;
+use App\Enums\ResumeLanguage;
 use App\Jobs\AnalyzeJobPosting;
 use App\Jobs\TriageJobCaptures;
 use App\Models\JobCapture;
@@ -42,7 +43,7 @@ it('AiOperation ResumeAdaptation completed notification has Ver candidatura link
         'description' => notificationLinksDescription(),
     ]);
     $posting->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
 
     $operation = app(AiOperationService::class)->enqueueResumeAdaptation($user, $posting);
     $operation->update([
@@ -74,7 +75,7 @@ it('AiOperation ResumeAdaptation failed notification has Ver candidatura link', 
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create([
         'description' => notificationLinksDescription(),
     ]);
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
 
     $operation = app(AiOperationService::class)->enqueueResumeAdaptation($user, $posting);
     $operation->update([
@@ -103,7 +104,7 @@ it('AiOperation StrategicCompetencyClassification completed has Ver competência
     Event::fake([DatabaseNotificationsSent::class]);
 
     $user = User::factory()->create();
-    app(ResumeService::class)->save($user, 'Currículo com PHP e Laravel.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP e Laravel.', ResumeLanguage::PtBr);
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
     $posting->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
 
@@ -137,7 +138,7 @@ it('AiOperation AtsScore completed has Ver candidatura link', function () {
         'description' => notificationLinksDescription(),
     ]);
     $posting->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
         'adapted_content' => 'Currículo adaptado com PHP.',
@@ -173,7 +174,7 @@ it('AiOperation AtsOptimization completed has Ver candidatura link', function ()
     $user = User::factory()->create(['is_admin' => true]);
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
     $posting->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     ResumeAdaptation::create([
         'job_posting_id' => $posting->id,
         'adapted_content' => 'Currículo adaptado com PHP.',
@@ -393,7 +394,7 @@ it('AiOperation StrategicCompetencyClassification failed has Ver competências l
     Event::fake([DatabaseNotificationsSent::class]);
 
     $user = User::factory()->create();
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
     $posting->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
 

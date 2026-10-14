@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\ResumeLanguage;
 use App\Jobs\ProcessAiOperation;
 use App\Mcp\Resources\ResumeAdaptationResource;
 use App\Mcp\Servers\JoboraServer;
@@ -43,7 +44,7 @@ it('retorna not_found quando a vaga não tem adaptação', function () {
 it('enfileira a adaptação do currículo de uma vaga confirmada', function () {
     $user = McpTestHelpers::user();
     Queue::fake();
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
     McpTestHelpers::item($posting, 'PHP');
 
@@ -68,7 +69,7 @@ it('recusa adaptar sem currículo cadastrado', function () {
 
 it('ativa a otimização ATS de uma adaptação', function () {
     $user = McpTestHelpers::user(['can_use_ats_optimization' => true]);
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
     McpTestHelpers::item($posting, 'PHP');
     McpTestHelpers::adaptation($user, $posting);
@@ -86,7 +87,7 @@ it('ativa a otimização ATS de uma adaptação', function () {
 
 it('nega a otimização ATS sem permissão', function () {
     $user = McpTestHelpers::user();
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
     McpTestHelpers::item($posting, 'PHP');
     McpTestHelpers::adaptation($user, $posting);
@@ -100,7 +101,7 @@ it('nega a otimização ATS sem permissão', function () {
 it('enfileira a nota ATS de uma adaptação', function () {
     $user = McpTestHelpers::user(['can_use_ats_optimization' => true]);
     Queue::fake();
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
     McpTestHelpers::item($posting, 'PHP');
     McpTestHelpers::adaptation($user, $posting);
@@ -117,7 +118,7 @@ it('enfileira a nota ATS de uma adaptação', function () {
 
 it('nega a nota ATS sem permissão', function () {
     $user = McpTestHelpers::user();
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
     McpTestHelpers::item($posting, 'PHP');
     McpTestHelpers::adaptation($user, $posting);
@@ -146,7 +147,7 @@ it('exporta o PDF da adaptação para um arquivo', function () {
 
 it('exige consentimento para exportar o PDF otimizado', function () {
     $user = McpTestHelpers::user(['can_use_ats_optimization' => true]);
-    app(ResumeService::class)->save($user, 'Currículo com PHP.');
+    app(ResumeService::class)->save($user, 'Currículo com PHP.', ResumeLanguage::PtBr);
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
     McpTestHelpers::item($posting, 'PHP');
     McpTestHelpers::adaptation($user, $posting, [
