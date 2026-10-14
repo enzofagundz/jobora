@@ -8,6 +8,16 @@ enum ResumeLanguage: string
     case En = 'en';
 
     /**
+     * Idioma a partir de um valor de entrada opcional; ausente ou não
+     * reconhecido equivale a pt-BR. A validação (`Rule::enum`) já rejeita
+     * valores inválidos antes da conversão nos pontos de entrada MCP.
+     */
+    public static function fromInput(mixed $value): self
+    {
+        return self::tryFrom((string) $value) ?? self::PtBr;
+    }
+
+    /**
      * Rótulo do documento no idioma da versão: o currículo canônico é
      * "Currículo"; a versão em inglês é "Resume".
      */

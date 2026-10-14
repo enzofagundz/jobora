@@ -38,7 +38,7 @@ class ExportAdaptedResumePdfTool extends JoboraTool
             'language' => ['nullable', Rule::enum(ResumeLanguage::class)],
         ]);
 
-        $language = ResumeLanguage::tryFrom((string) ($validated['language'] ?? '')) ?? ResumeLanguage::PtBr;
+        $language = $this->language($request);
 
         $user = $this->user();
 

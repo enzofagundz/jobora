@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools;
 
+use App\Enums\ResumeLanguage;
 use App\Mcp\Support\McpUserResolver;
 use App\Mcp\Support\ToolException;
 use App\Models\User;
@@ -68,6 +69,15 @@ abstract class JoboraTool extends Tool
     protected function user(): User
     {
         return $this->users->resolve();
+    }
+
+    /**
+     * Idioma de currículo/adaptação da chamada; ausente equivale a pt-BR.
+     * Resolução compartilhada pelas tools com parâmetro `language`.
+     */
+    protected function language(Request $request): ResumeLanguage
+    {
+        return ResumeLanguage::fromInput($request->get('language'));
     }
 
     /**

@@ -69,7 +69,7 @@ abstract class JoboraResource extends Resource
             $value = $query['language'] ?? null;
         }
 
-        return ResumeLanguage::tryFrom((string) $value) ?? ResumeLanguage::PtBr;
+        return ResumeLanguage::fromInput($value);
     }
 
     /**

@@ -31,7 +31,7 @@ class GetResumeTool extends JoboraTool
             'language' => ['nullable', Rule::enum(ResumeLanguage::class)],
         ]);
 
-        $language = ResumeLanguage::tryFrom((string) ($validated['language'] ?? '')) ?? ResumeLanguage::PtBr;
+        $language = $this->language($request);
 
         $resume = $this->resumes->current($this->user(), $language);
 

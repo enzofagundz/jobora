@@ -40,7 +40,7 @@ class SaveResumeTool extends JoboraTool
             throw ToolException::validation('O currículo não pode ficar vazio.');
         }
 
-        $language = ResumeLanguage::tryFrom((string) ($validated['language'] ?? '')) ?? ResumeLanguage::PtBr;
+        $language = $this->language($request);
 
         $resume = $this->resumes->save($this->user(), $validated['content'], $language);
 

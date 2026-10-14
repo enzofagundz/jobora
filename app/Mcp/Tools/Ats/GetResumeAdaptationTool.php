@@ -26,7 +26,7 @@ class GetResumeAdaptationTool extends JoboraTool
             'language' => ['nullable', Rule::enum(ResumeLanguage::class)],
         ]);
 
-        $language = ResumeLanguage::tryFrom((string) ($validated['language'] ?? '')) ?? ResumeLanguage::PtBr;
+        $language = $this->language($request);
 
         $posting = JobPosting::query()
             ->where('user_id', $this->user()->id)
