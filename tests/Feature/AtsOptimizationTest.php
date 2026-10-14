@@ -505,6 +505,7 @@ it('requires consent before downloading optimized pdf', function () {
         ->assertActionVisible('downloadPdf')
         ->assertActionHasUrl('downloadPdf', route('filament.admin.resume-pdf.download', [
             'posting' => $posting,
+            'language' => 'pt-BR',
             'ats_consent' => '1',
         ]));
 });

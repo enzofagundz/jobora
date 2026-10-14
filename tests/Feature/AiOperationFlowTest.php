@@ -50,7 +50,7 @@ it('enqueues resume adaptation without calling the provider and stores the trigg
 
     Livewire::actingAs($user)
         ->test(ApplicationPage::class, ['record' => $posting->id])
-        ->callAction('adapt')
+        ->callAction('adaptPtBr')
         ->assertSuccessful()
         ->assertNotified();
 
@@ -83,11 +83,11 @@ it('does not enqueue a duplicate adaptation while the current operation is activ
 
     $component = Livewire::actingAs($user)
         ->test(ApplicationPage::class, ['record' => $posting->id])
-        ->callAction('adapt')
+        ->callAction('adaptPtBr')
         ->assertSuccessful();
 
     $component
-        ->callAction('adapt')
+        ->callAction('adaptPtBr')
         ->assertSuccessful();
 
     expect(AiOperation::query()->count())->toBe(1);
@@ -1043,7 +1043,7 @@ it('shows polling and the active operation state on the application page', funct
 
     $component = Livewire::actingAs($user)
         ->test(ApplicationPage::class, ['record' => $posting->id])
-        ->callAction('adapt')
+        ->callAction('adaptPtBr')
         ->assertSuccessful();
 
     expect($component->html())
