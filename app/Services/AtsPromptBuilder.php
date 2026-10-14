@@ -95,63 +95,40 @@ class AtsPromptBuilder
         return $prompt;
     }
 
+    /**
+     * Templates por idioma e forma da cascata cargo/empresa. A variante é
+     * escolhida uma única vez; trocar de idioma só troca o mapa.
+     *
+     * @var array<string, array<string, string>>
+     */
+    private const TEMPLATES = [
+        'pt-BR' => [
+            'role_company' => 'Perfil altamente compatível com %role% em %company%: experiência comprovada em %keywords%. Recomenda-se entrevista.',
+            'role' => 'Perfil altamente compatível com %role%: experiência comprovada em %keywords%. Recomenda-se entrevista.',
+            'company' => 'Perfil altamente compatível em %company%: experiência comprovada em %keywords%. Recomenda-se entrevista.',
+            'default' => 'Perfil altamente compatível: experiência comprovada em %keywords%. Recomenda-se entrevista.',
+        ],
+        'en' => [
+            'role_company' => 'Highly compatible profile for %role% at %company%: proven experience in %keywords%. Interview recommended.',
+            'role' => 'Highly compatible profile for %role%: proven experience in %keywords%. Interview recommended.',
+            'company' => 'Highly compatible profile at %company%: proven experience in %keywords%. Interview recommended.',
+            'default' => 'Highly compatible profile: proven experience in %keywords%. Interview recommended.',
+        ],
+    ];
+
     private function template(ResumeLanguage $language, string $role, string $company, string $keywords): string
     {
-        return match ($language) {
-            ResumeLanguage::PtBr => $this->ptBrTemplate($role, $company, $keywords),
-            ResumeLanguage::En => $this->enTemplate($role, $company, $keywords),
+        $shape = match (true) {
+            $role !== '' && $company !== '' => 'role_company',
+            $role !== '' => 'role',
+            $company !== '' => 'company',
+            default => 'default',
         };
-    }
 
-    private function ptBrTemplate(string $role, string $company, string $keywords): string
-    {
-        return match (true) {
-            $role !== '' && $company !== '' => sprintf(
-                'Perfil altamente compatível com %s em %s: experiência comprovada em %s. Recomenda-se entrevista.',
-                $role,
-                $company,
-                $keywords,
-            ),
-            $role !== '' => sprintf(
-                'Perfil altamente compatível com %s: experiência comprovada em %s. Recomenda-se entrevista.',
-                $role,
-                $keywords,
-            ),
-            $company !== '' => sprintf(
-                'Perfil altamente compatível em %s: experiência comprovada em %s. Recomenda-se entrevista.',
-                $company,
-                $keywords,
-            ),
-            default => sprintf(
-                'Perfil altamente compatível: experiência comprovada em %s. Recomenda-se entrevista.',
-                $keywords,
-            ),
-        };
-    }
-
-    private function enTemplate(string $role, string $company, string $keywords): string
-    {
-        return match (true) {
-            $role !== '' && $company !== '' => sprintf(
-                'Highly compatible profile for %s at %s: proven experience in %s. Interview recommended.',
-                $role,
-                $company,
-                $keywords,
-            ),
-            $role !== '' => sprintf(
-                'Highly compatible profile for %s: proven experience in %s. Interview recommended.',
-                $role,
-                $keywords,
-            ),
-            $company !== '' => sprintf(
-                'Highly compatible profile at %s: proven experience in %s. Interview recommended.',
-                $company,
-                $keywords,
-            ),
-            default => sprintf(
-                'Highly compatible profile: proven experience in %s. Interview recommended.',
-                $keywords,
-            ),
-        };
+        return strtr(self::TEMPLATES[$language->value][$shape], [
+            '%role%' => $role,
+            '%company%' => $company,
+            '%keywords%' => $keywords,
+        ]);
     }
 }
