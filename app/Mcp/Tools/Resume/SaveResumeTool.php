@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools\Resume;
 
+use App\Enums\ResumeLanguage;
 use App\Mcp\Support\McpUserResolver;
 use App\Mcp\Support\ToolException;
 use App\Mcp\Tools\JoboraTool;
@@ -37,7 +38,7 @@ class SaveResumeTool extends JoboraTool
             throw ToolException::validation('O currículo não pode ficar vazio.');
         }
 
-        $resume = $this->resumes->save($this->user(), $validated['content']);
+        $resume = $this->resumes->save($this->user(), $validated['content'], ResumeLanguage::PtBr);
 
         return $this->ok([
             'content' => $resume->content,

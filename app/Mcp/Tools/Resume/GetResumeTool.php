@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Tools\Resume;
 
+use App\Enums\ResumeLanguage;
 use App\Mcp\Support\McpUserResolver;
 use App\Mcp\Tools\JoboraTool;
 use App\Services\ResumeService;
@@ -25,7 +26,7 @@ class GetResumeTool extends JoboraTool
 
     protected function execute(Request $request): Response|ResponseFactory
     {
-        $resume = $this->resumes->current($this->user());
+        $resume = $this->resumes->current($this->user(), ResumeLanguage::PtBr);
 
         return $this->ok([
             'content' => $resume?->content,

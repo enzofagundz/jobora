@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use App\Enums\ResumeLanguage;
 use App\Models\JobCapture;
 use App\Models\JobPosting;
 use App\Models\ProfessionalCompetency;
@@ -36,7 +37,7 @@ final class Staleness
             }
         }
 
-        $resume = $user?->resume()->first();
+        $resume = $user?->resumes()->where('language', ResumeLanguage::PtBr->value)->first();
 
         // Fallback: if adaptation has no posting/user, fallback to null check
         if ($resume !== null && $adaptation->updated_at->lt($resume->updated_at)) {
@@ -70,7 +71,7 @@ final class Staleness
             }
         }
 
-        $resume = $user?->resume()->first();
+        $resume = $user?->resumes()->where('language', ResumeLanguage::PtBr->value)->first();
 
         if ($resume !== null && $competency->updated_at->lt($resume->updated_at)) {
             return true;
@@ -154,7 +155,7 @@ final class Staleness
             return true;
         }
 
-        $resume = $user->resume()->first();
+        $resume = $user->resumes()->where('language', ResumeLanguage::PtBr->value)->first();
 
         if ($resume !== null && $adaptation->updated_at->lt($resume->updated_at)) {
             return true;

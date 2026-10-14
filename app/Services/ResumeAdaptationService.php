@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Agents\ResumeAdaptationAgent;
 use App\DTO\ResumeAdaptationResult;
 use App\Enums\JobPostingStatus;
+use App\Enums\ResumeLanguage;
 use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
 use App\Models\User;
@@ -417,14 +418,14 @@ class ResumeAdaptationService
             throw new \LogicException('A adequação exige uma vaga confirmada.');
         }
 
-        if (blank($this->resumeService->content($user))) {
+        if (blank($this->resumeService->content($user, ResumeLanguage::PtBr))) {
             throw new \LogicException('Cadastre o currículo antes de adequá-lo a uma vaga.');
         }
     }
 
     private function buildPayload(User $user, JobPosting $posting): array
     {
-        $resume = ResumeService::plainText($this->resumeService->content($user));
+        $resume = ResumeService::plainText($this->resumeService->content($user, ResumeLanguage::PtBr));
         $description = ResumeService::plainText($posting->description);
 
         $positioning = $posting->items

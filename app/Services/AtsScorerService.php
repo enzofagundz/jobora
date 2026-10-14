@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Agents\AtsScorerAgent;
+use App\Enums\ResumeLanguage;
 use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
 use App\Models\User;
@@ -189,7 +190,7 @@ class AtsScorerService
             ? $adaptation->ats_prompt
             : app(AtsPromptBuilder::class)->build(
                 $posting,
-                ResumeService::plainText($this->resumeService->content($user) ?? ''),
+                ResumeService::plainText($this->resumeService->content($user, ResumeLanguage::PtBr) ?? ''),
             );
 
         return [

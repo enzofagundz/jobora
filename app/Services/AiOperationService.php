@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\AiOperationStatus;
 use App\Enums\AiOperationType;
 use App\Enums\JobPostingStatus;
+use App\Enums\ResumeLanguage;
 use App\Filament\Pages\ProfessionalCompetenciesPage;
 use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Jobs\ProcessAiOperation;
@@ -50,7 +51,7 @@ class AiOperationService
             throw new LogicException('A adequação exige uma vaga confirmada.');
         }
 
-        if (blank($this->resumeService->content($user))) {
+        if (blank($this->resumeService->content($user, ResumeLanguage::PtBr))) {
             throw new LogicException('Cadastre o currículo antes de adequá-lo a uma vaga.');
         }
 
@@ -69,7 +70,7 @@ class AiOperationService
 
     public function enqueueStrategicCompetencyClassification(User $user): AiOperation
     {
-        if (blank($this->resumeService->content($user))) {
+        if (blank($this->resumeService->content($user, ResumeLanguage::PtBr))) {
             throw new LogicException('Cadastre o currículo antes de classificar as competências.');
         }
 

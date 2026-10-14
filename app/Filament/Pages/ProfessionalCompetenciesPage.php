@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Enums\AiOperationType;
 use App\Enums\ProfessionalCompetencySource;
+use App\Enums\ResumeLanguage;
 use App\Enums\StrategicRole;
 use App\Models\AiOperation;
 use App\Services\AiOperationService;
@@ -156,7 +157,7 @@ class ProfessionalCompetenciesPage extends Page implements HasSchemas, HasTable
                 ->requiresConfirmation()
                 ->modalHeading('Classificar com IA')
                 ->modalDescription('O currículo e os itens do mercado confirmado serão enviados ao modelo de linguagem. Custo de uma chamada de IA por execução. Classificações manuais não são alteradas.')
-                ->disabled(fn (): bool => blank(app(ResumeService::class)->content(auth()->user())) || $this->activeAiOperation() !== null)
+                ->disabled(fn (): bool => blank(app(ResumeService::class)->content(auth()->user(), ResumeLanguage::PtBr)) || $this->activeAiOperation() !== null)
                 ->tooltip('Cadastre o currículo antes de classificar com IA.')
                 ->action(function (): void {
                     try {

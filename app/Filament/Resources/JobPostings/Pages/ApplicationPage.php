@@ -6,6 +6,7 @@ use App\Enums\AiOperationType;
 use App\Enums\ApplicationMethodType;
 use App\Enums\ApplicationStatus;
 use App\Enums\JobPostingStatus;
+use App\Enums\ResumeLanguage;
 use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Filament\Resources\JobPostings\Schemas\ApplicationMethodForm;
 use App\Models\AiOperation;
@@ -79,7 +80,7 @@ class ApplicationPage extends Page implements HasTable
         }
 
         $this->form->fill([
-            'original_resume' => ResumeService::plainText(app(ResumeService::class)->content(auth()->user())),
+            'original_resume' => ResumeService::plainText(app(ResumeService::class)->content(auth()->user(), ResumeLanguage::PtBr)),
         ]);
 
         $this->fillAdaptedForm();
@@ -132,7 +133,7 @@ class ApplicationPage extends Page implements HasTable
 
     public function originalResume(): ?string
     {
-        return app(ResumeService::class)->content(auth()->user());
+        return app(ResumeService::class)->content(auth()->user(), ResumeLanguage::PtBr);
     }
 
     public function adaptation(): ?ResumeAdaptation

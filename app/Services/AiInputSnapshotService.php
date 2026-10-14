@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\ResumeLanguage;
 use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
 use App\Models\User;
@@ -22,7 +23,7 @@ class AiInputSnapshotService
      */
     public function resumeAdaptation(User $user, JobPosting $posting): array
     {
-        $resume = ResumeService::plainText($this->resumeService->content($user));
+        $resume = ResumeService::plainText($this->resumeService->content($user, ResumeLanguage::PtBr));
         $description = ResumeService::plainText($posting->description);
         $items = $this->orderedItems($posting);
 
@@ -54,7 +55,7 @@ class AiInputSnapshotService
      */
     public function strategicCompetency(User $user): array
     {
-        $plainResume = ResumeService::plainText($this->resumeService->content($user));
+        $plainResume = ResumeService::plainText($this->resumeService->content($user, ResumeLanguage::PtBr));
         $resumeConcepts = $this->resumeAnalyzer->conceptsIn($plainResume);
 
         $marketItems = array_map(function (array $row) use ($plainResume): array {
@@ -138,7 +139,7 @@ class AiInputSnapshotService
             throw new LogicException('Gere a adaptação do currículo antes de otimizar para ATS.');
         }
 
-        $resume = ResumeService::plainText($this->resumeService->content($user));
+        $resume = ResumeService::plainText($this->resumeService->content($user, ResumeLanguage::PtBr));
         $items = $this->orderedItems($posting);
         $prompt = $enabled
             ? $this->atsPromptBuilder->build($posting, $resume)

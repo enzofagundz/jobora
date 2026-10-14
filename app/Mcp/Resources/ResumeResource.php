@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Resources;
 
+use App\Enums\ResumeLanguage;
 use App\Mcp\Support\McpUserResolver;
 use App\Services\ResumeService;
 use Laravel\Mcp\Request;
@@ -22,7 +23,7 @@ class ResumeResource extends JoboraResource
 
     protected function read(Request $request): Response
     {
-        $resume = $this->resumes->current($this->user());
+        $resume = $this->resumes->current($this->user(), ResumeLanguage::PtBr);
 
         return $this->ok([
             'content' => $resume?->content,

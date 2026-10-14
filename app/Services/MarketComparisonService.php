@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\ConceptCategory;
+use App\Enums\ResumeLanguage;
 use App\Models\User;
 
 class MarketComparisonService
@@ -20,7 +21,7 @@ class MarketComparisonService
      */
     public function table(User $user, ?ConceptCategory $category = null): array
     {
-        $content = $this->resumes->content($user);
+        $content = $this->resumes->content($user, ResumeLanguage::PtBr);
         $roleMap = $this->competencies->roleMap($user);
         $rows = $this->analysis->relativeFrequencies($user, $category);
 
