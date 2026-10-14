@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[IsReadOnly]
-#[Description('Devolve o currículo atual do usuário configurado (texto e data de atualização). Vazio quando ainda não cadastrado.')]
+#[Description('Devolve o currículo do usuário configurado, no idioma pedido (padrão pt-BR): texto e data de atualização. Vazio quando ainda não cadastrado.')]
 class GetResumeTool extends JoboraTool
 {
     public function __construct(

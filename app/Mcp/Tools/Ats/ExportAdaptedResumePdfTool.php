@@ -20,7 +20,7 @@ use Laravel\Mcp\ResponseFactory;
 use Laravel\Mcp\Server\Attributes\Description;
 use Throwable;
 
-#[Description('Gera o PDF da adaptação de currículo de uma vaga confirmada e devolve o caminho do arquivo. Quando a adaptação está otimizada para ATS, exige ats_consent=true e rejeita otimização desatualizada.')]
+#[Description('Gera o PDF da adaptação de currículo do idioma pedido (padrão pt-BR) de uma vaga confirmada e devolve o caminho do arquivo. Quando a adaptação está otimizada para ATS, exige ats_consent=true e rejeita otimização desatualizada.')]
 class ExportAdaptedResumePdfTool extends JoboraTool
 {
     public function __construct(

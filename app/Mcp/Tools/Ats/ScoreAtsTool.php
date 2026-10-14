@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tools\Annotations\IsOpenWorld;
 
 #[IsOpenWorld]
-#[Description('Enfileira a nota de aderência ATS (0–10) da adaptação de uma vaga confirmada. Requer permissão de ATS. Assíncrona: acompanhe com get_ai_operation.')]
+#[Description('Enfileira a nota de aderência ATS (0–10) da adaptação do idioma pedido (padrão pt-BR) de uma vaga confirmada. Requer permissão de ATS. Assíncrona: acompanhe com get_ai_operation.')]
 class ScoreAtsTool extends JoboraTool
 {
     public function __construct(

@@ -16,7 +16,7 @@ use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
 use Laravel\Mcp\Server\Attributes\Description;
 
-#[Description('Ativa ou desativa a otimização ATS da adaptação de uma vaga confirmada. Requer permissão de ATS. Síncrona (o bloco ATS é determinístico, sem IA).')]
+#[Description('Ativa ou desativa a otimização ATS da adaptação do idioma pedido (padrão pt-BR) de uma vaga confirmada. Requer permissão de ATS. Síncrona (o bloco ATS é determinístico, sem IA).')]
 class SetAtsOptimizationTool extends JoboraTool
 {
     public function __construct(

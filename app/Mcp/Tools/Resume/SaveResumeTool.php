@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 
 #[IsDestructive]
-#[Description('Define o currículo atual do usuário configurado (texto puro). Substitui a versão anterior — não há histórico. Operação de sobrescrita: exige confirm=true.')]
+#[Description('Define o currículo do usuário configurado (texto puro) no idioma pedido (padrão pt-BR). Substitui a versão daquele idioma — não há histórico e os demais idiomas não são tocados. Operação de sobrescrita: exige confirm=true.')]
 class SaveResumeTool extends JoboraTool
 {
     public function __construct(

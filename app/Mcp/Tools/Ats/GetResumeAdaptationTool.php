@@ -16,7 +16,7 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[IsReadOnly]
-#[Description('Devolve a última adaptação de currículo de uma vaga do usuário configurado: texto adaptado, alterações, contemplados, lacunas, alertas e estado ATS.')]
+#[Description('Devolve a adaptação de currículo do idioma pedido (padrão pt-BR) de uma vaga do usuário configurado: texto adaptado, alterações, contemplados, lacunas, alertas e estado ATS.')]
 class GetResumeAdaptationTool extends JoboraTool
 {
     protected function execute(Request $request): Response|ResponseFactory

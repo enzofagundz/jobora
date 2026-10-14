@@ -17,7 +17,7 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tools\Annotations\IsOpenWorld;
 
 #[IsOpenWorld]
-#[Description('Enfileira a adaptação do currículo do usuário configurado para uma vaga confirmada. Assíncrona: acompanhe com get_ai_operation e leia o resultado com get_resume_adaptation.')]
+#[Description('Enfileira a adaptação do currículo do usuário configurado para uma vaga confirmada, no idioma pedido (padrão pt-BR). Assíncrona: acompanhe com get_ai_operation e leia o resultado com get_resume_adaptation.')]
 class AdaptResumeTool extends JoboraTool
 {
     public function __construct(
