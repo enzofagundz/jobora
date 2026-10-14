@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Resources;
 
+use App\Enums\ResumeLanguage;
 use App\Mcp\Support\McpUserResolver;
 use App\Mcp\Support\ToolException;
 use App\Models\User;
@@ -51,6 +52,24 @@ abstract class JoboraResource extends Resource
     protected function user(): User
     {
         return $this->users->resolve();
+    }
+
+    /**
+     * Idioma opcional da leitura. Aceita o argumento `language` da chamada
+     * ou a query da URI do resource (ex.: jobora://resume?language=en);
+     * omitido equivale a pt-BR.
+     */
+    protected function language(Request $request): ResumeLanguage
+    {
+        $value = $request->get('language');
+
+        if ($value === null) {
+            $query = [];
+            parse_str((string) parse_url((string) $request->uri(), PHP_URL_QUERY), $query);
+            $value = $query['language'] ?? null;
+        }
+
+        return ResumeLanguage::tryFrom((string) $value) ?? ResumeLanguage::PtBr;
     }
 
     /**

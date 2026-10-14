@@ -7,6 +7,7 @@ use App\Mcp\Support\McpUserResolver;
 use App\Mcp\Tools\JoboraTool;
 use App\Services\ResumeService;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Illuminate\Validation\Rule;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
@@ -26,7 +27,13 @@ class GetResumeTool extends JoboraTool
 
     protected function execute(Request $request): Response|ResponseFactory
     {
-        $resume = $this->resumes->current($this->user(), ResumeLanguage::PtBr);
+        $validated = $request->validate([
+            'language' => ['nullable', Rule::enum(ResumeLanguage::class)],
+        ]);
+
+        $language = ResumeLanguage::tryFrom((string) ($validated['language'] ?? '')) ?? ResumeLanguage::PtBr;
+
+        $resume = $this->resumes->current($this->user(), $language);
 
         return $this->ok([
             'content' => $resume?->content,
@@ -39,6 +46,8 @@ class GetResumeTool extends JoboraTool
      */
     public function schema(JsonSchema $schema): array
     {
-        return [];
+        return [
+            'language' => $schema->string()->description('Idioma do currículo: pt-BR (padrão) ou en.'),
+        ];
     }
 }

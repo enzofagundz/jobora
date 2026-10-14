@@ -20,6 +20,20 @@ it('expõe o currículo atual como resource', function () {
         ->assertSee(['Currículo com PHP.']);
 });
 
+it('expõe o currículo do idioma pedido como resource', function () {
+    $user = McpTestHelpers::user();
+    app(ResumeService::class)->save($user, 'Currículo em português.', ResumeLanguage::PtBr);
+    app(ResumeService::class)->save($user, 'Resume in English.', ResumeLanguage::En);
+
+    JoboraServer::resource(ResumeResource::class)
+        ->assertOk()
+        ->assertSee(['Currículo em português.']);
+
+    JoboraServer::resource(ResumeResource::class, ['language' => 'en'])
+        ->assertOk()
+        ->assertSee(['Resume in English.']);
+});
+
 it('expõe o detalhe de uma vaga como resource', function () {
     $user = McpTestHelpers::user();
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create(['role' => 'Dev PHP']);

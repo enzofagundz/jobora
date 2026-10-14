@@ -8,6 +8,7 @@ use App\Mcp\Support\ToolException;
 use App\Mcp\Tools\JoboraTool;
 use App\Services\ResumeService;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Illuminate\Validation\Rule;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
@@ -30,6 +31,7 @@ class SaveResumeTool extends JoboraTool
         $validated = $request->validate([
             'content' => ['required', 'string', 'max:50000'],
             'confirm' => ['nullable', 'boolean'],
+            'language' => ['nullable', Rule::enum(ResumeLanguage::class)],
         ]);
 
         $this->requireConfirm($request);
@@ -38,7 +40,9 @@ class SaveResumeTool extends JoboraTool
             throw ToolException::validation('O currículo não pode ficar vazio.');
         }
 
-        $resume = $this->resumes->save($this->user(), $validated['content'], ResumeLanguage::PtBr);
+        $language = ResumeLanguage::tryFrom((string) ($validated['language'] ?? '')) ?? ResumeLanguage::PtBr;
+
+        $resume = $this->resumes->save($this->user(), $validated['content'], $language);
 
         return $this->ok([
             'content' => $resume->content,
@@ -54,6 +58,7 @@ class SaveResumeTool extends JoboraTool
         return [
             'content' => $schema->string()->required()->description('Texto completo do currículo.'),
             'confirm' => $schema->boolean()->required()->description('Envie true para confirmar a substituição do currículo.'),
+            'language' => $schema->string()->description('Idioma do currículo: pt-BR (padrão) ou en. Não altera as outras versões.'),
         ];
     }
 }
