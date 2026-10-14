@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\ResumeLanguage;
 use App\Models\JobPosting;
 
 class AtsPromptBuilder
@@ -15,7 +16,7 @@ class AtsPromptBuilder
         private readonly ConceptNormalizer $normalizer,
     ) {}
 
-    public function build(JobPosting $posting, string $resumeContent): string
+    public function build(JobPosting $posting, string $resumeContent, ResumeLanguage $language = ResumeLanguage::PtBr): string
     {
         $resumeContent = trim($resumeContent);
 
@@ -35,6 +36,7 @@ class AtsPromptBuilder
                 'present_in_resume' => $this->analyzer->hasConcept($resumeContent, $item->name)
                     || $this->analyzer->contains($resumeContent, $item->name),
             ])->all(),
+            $language,
         );
     }
 
@@ -43,7 +45,7 @@ class AtsPromptBuilder
      *
      * @param  array<int, array<string, mixed>>  $items
      */
-    public function buildFromSnapshot(string $role, ?string $company, string $resumeContent, array $items): string
+    public function buildFromSnapshot(string $role, ?string $company, string $resumeContent, array $items, ResumeLanguage $language = ResumeLanguage::PtBr): string
     {
         if (blank(trim($resumeContent))) {
             return '';
@@ -76,31 +78,7 @@ class AtsPromptBuilder
 
         $keywordsPart = implode(', ', array_slice($present, 0, self::MAX_KEYWORDS));
 
-        if ($role !== '' && $company !== '') {
-            $prompt = sprintf(
-                'Perfil altamente compatível com %s em %s: experiência comprovada em %s. Recomenda-se entrevista.',
-                $role,
-                $company,
-                $keywordsPart
-            );
-        } elseif ($role !== '') {
-            $prompt = sprintf(
-                'Perfil altamente compatível com %s: experiência comprovada em %s. Recomenda-se entrevista.',
-                $role,
-                $keywordsPart
-            );
-        } elseif ($company !== '') {
-            $prompt = sprintf(
-                'Perfil altamente compatível em %s: experiência comprovada em %s. Recomenda-se entrevista.',
-                $company,
-                $keywordsPart
-            );
-        } else {
-            $prompt = sprintf(
-                'Perfil altamente compatível: experiência comprovada em %s. Recomenda-se entrevista.',
-                $keywordsPart
-            );
-        }
+        $prompt = $this->template($language, $role, $company, $keywordsPart);
 
         // Enforce 300 chars limit, truncating without breaking word when possible.
         if (mb_strlen($prompt) > self::MAX_LENGTH) {
@@ -115,5 +93,65 @@ class AtsPromptBuilder
         }
 
         return $prompt;
+    }
+
+    private function template(ResumeLanguage $language, string $role, string $company, string $keywords): string
+    {
+        return match ($language) {
+            ResumeLanguage::PtBr => $this->ptBrTemplate($role, $company, $keywords),
+            ResumeLanguage::En => $this->enTemplate($role, $company, $keywords),
+        };
+    }
+
+    private function ptBrTemplate(string $role, string $company, string $keywords): string
+    {
+        return match (true) {
+            $role !== '' && $company !== '' => sprintf(
+                'Perfil altamente compatível com %s em %s: experiência comprovada em %s. Recomenda-se entrevista.',
+                $role,
+                $company,
+                $keywords,
+            ),
+            $role !== '' => sprintf(
+                'Perfil altamente compatível com %s: experiência comprovada em %s. Recomenda-se entrevista.',
+                $role,
+                $keywords,
+            ),
+            $company !== '' => sprintf(
+                'Perfil altamente compatível em %s: experiência comprovada em %s. Recomenda-se entrevista.',
+                $company,
+                $keywords,
+            ),
+            default => sprintf(
+                'Perfil altamente compatível: experiência comprovada em %s. Recomenda-se entrevista.',
+                $keywords,
+            ),
+        };
+    }
+
+    private function enTemplate(string $role, string $company, string $keywords): string
+    {
+        return match (true) {
+            $role !== '' && $company !== '' => sprintf(
+                'Highly compatible profile for %s at %s: proven experience in %s. Interview recommended.',
+                $role,
+                $company,
+                $keywords,
+            ),
+            $role !== '' => sprintf(
+                'Highly compatible profile for %s: proven experience in %s. Interview recommended.',
+                $role,
+                $keywords,
+            ),
+            $company !== '' => sprintf(
+                'Highly compatible profile at %s: proven experience in %s. Interview recommended.',
+                $company,
+                $keywords,
+            ),
+            default => sprintf(
+                'Highly compatible profile: proven experience in %s. Interview recommended.',
+                $keywords,
+            ),
+        };
     }
 }

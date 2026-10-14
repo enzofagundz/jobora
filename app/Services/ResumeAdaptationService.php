@@ -29,7 +29,7 @@ class ResumeAdaptationService
         private readonly ?AtsPromptBuilder $atsBuilder = null,
     ) {}
 
-    public function adapt(User $user, JobPosting $posting): ResumeAdaptation
+    public function adapt(User $user, JobPosting $posting, ResumeLanguage $language = ResumeLanguage::PtBr): ResumeAdaptation
     {
         Gate::forUser($user)->authorize('update', $posting);
 
@@ -37,11 +37,11 @@ class ResumeAdaptationService
             throw new \LogicException('Vaga não pertence ao usuário.');
         }
 
-        $this->assertEligible($user, $posting);
+        $this->assertEligible($user, $posting, $language);
 
-        $payload = $this->buildPayload($user, $posting);
+        $snapshot = $this->snapshots->resumeAdaptation($user, $posting, $language);
 
-        return $this->adaptPayload($user, $posting, $payload, $this->snapshots->fingerprint($payload));
+        return $this->adaptPayload($user, $posting, $snapshot['payload'], $snapshot['fingerprint']);
     }
 
     /**
@@ -85,6 +85,8 @@ class ResumeAdaptationService
         ?Closure $persistWithinAttempt = null,
     ): ResumeAdaptation {
 
+        $language = ResumeLanguage::tryFrom((string) ($payload['language'] ?? '')) ?? ResumeLanguage::PtBr;
+
         $started = microtime(true);
         $inputChars = 0;
         $usage = null;
@@ -124,7 +126,9 @@ class ResumeAdaptationService
 
             $this->assertIntegrity($result, (string) $payload['resume']);
 
-            $existingAdaptation = ResumeAdaptation::where('job_posting_id', $posting->id)->first();
+            $existingAdaptation = ResumeAdaptation::where('job_posting_id', $posting->id)
+                ->where('language', $language->value)
+                ->first();
             $wasOptimized = (bool) ($existingAdaptation?->is_ats_optimized ?? false);
 
             $prompt = '';
@@ -139,6 +143,7 @@ class ResumeAdaptationService
                         is_string($payload['job_company'] ?? null) ? $payload['job_company'] : null,
                         (string) ($payload['resume'] ?? ''),
                         $positioning,
+                        $language,
                     )
                     : '';
                 $promptFingerprint = $prompt !== ''
@@ -146,9 +151,9 @@ class ResumeAdaptationService
                     : null;
             }
 
-            $persist = function () use ($fingerprint, $posting, $prompt, $promptFingerprint, $result, $wasOptimized): ResumeAdaptation {
+            $persist = function () use ($fingerprint, $posting, $language, $prompt, $promptFingerprint, $result, $wasOptimized): ResumeAdaptation {
                 $adaptation = ResumeAdaptation::updateOrCreate(
-                    ['job_posting_id' => $posting->id],
+                    ['job_posting_id' => $posting->id, 'language' => $language->value],
                     [
                         'adapted_content' => $result->adaptedResume,
                         'changes' => $result->changes,
@@ -218,7 +223,7 @@ class ResumeAdaptationService
         }
     }
 
-    public function setAtsOptimization(User $user, JobPosting $posting, bool $enabled): ResumeAdaptation
+    public function setAtsOptimization(User $user, JobPosting $posting, bool $enabled, ResumeLanguage $language = ResumeLanguage::PtBr): ResumeAdaptation
     {
         Gate::forUser($user)->authorize('useAtsOptimization');
         Gate::forUser($user)->authorize('update', $posting);
@@ -231,7 +236,9 @@ class ResumeAdaptationService
             throw new \LogicException('A otimização exige uma vaga confirmada.');
         }
 
-        $adaptation = ResumeAdaptation::where('job_posting_id', $posting->id)->first();
+        $adaptation = ResumeAdaptation::where('job_posting_id', $posting->id)
+            ->where('language', $language->value)
+            ->first();
 
         if (! $adaptation) {
             throw new \LogicException('Gere a adaptação do currículo antes de otimizar para ATS.');
@@ -255,6 +262,7 @@ class ResumeAdaptationService
                 $user,
                 $posting->fresh()->load(['items', 'resumeAdaptation']),
                 $enabled,
+                $language,
             );
             $prompt = $snapshot['payload']['ats_prompt'];
 
@@ -326,7 +334,11 @@ class ResumeAdaptationService
             throw new \LogicException('O snapshot da otimização ATS não informa o estado solicitado.');
         }
 
-        $adaptation = $posting->resumeAdaptation()->first();
+        $language = ResumeLanguage::tryFrom((string) ($payload['language'] ?? '')) ?? ResumeLanguage::PtBr;
+
+        $adaptation = ResumeAdaptation::where('job_posting_id', $posting->id)
+            ->where('language', $language->value)
+            ->first();
 
         if (! $adaptation) {
             throw new \LogicException('Gere a adaptação do currículo antes de otimizar para ATS.');
@@ -404,6 +416,7 @@ class ResumeAdaptationService
 
         return $this->snapshots->fingerprint([
             'enabled' => true,
+            'language' => $payload['language'] ?? ResumeLanguage::PtBr->value,
             'resume' => $payload['resume'] ?? '',
             'job_role' => $payload['job_role'] ?? null,
             'job_company' => $payload['job_company'] ?? null,
@@ -412,39 +425,15 @@ class ResumeAdaptationService
         ]);
     }
 
-    private function assertEligible(User $user, JobPosting $posting): void
+    private function assertEligible(User $user, JobPosting $posting, ResumeLanguage $language): void
     {
         if ($posting->status !== JobPostingStatus::Confirmed) {
             throw new \LogicException('A adequação exige uma vaga confirmada.');
         }
 
-        if (blank($this->resumeService->content($user, ResumeLanguage::PtBr))) {
-            throw new \LogicException('Cadastre o currículo antes de adequá-lo a uma vaga.');
+        if (blank($this->resumeService->content($user, $language))) {
+            throw new \LogicException($language->missingResumeGuidance());
         }
-    }
-
-    private function buildPayload(User $user, JobPosting $posting): array
-    {
-        $resume = ResumeService::plainText($this->resumeService->content($user, ResumeLanguage::PtBr));
-        $description = ResumeService::plainText($posting->description);
-
-        $positioning = $posting->items
-            ->sortBy(fn ($item): string => mb_strtolower($item->category->value.'|'.$item->name))
-            ->map(fn ($item): array => [
-                'name' => $item->name,
-                'category' => $item->category->value,
-                'present_in_resume' => $this->resumeAnalyzer->hasConcept($resume, $item->name),
-            ])
-            ->values()
-            ->all();
-
-        return [
-            'resume' => $resume,
-            'job_description' => $description,
-            'job_role' => $posting->role,
-            'job_company' => $posting->company,
-            'positioning' => $positioning,
-        ];
     }
 
     private function assertIntegrity(ResumeAdaptationResult $result, string $resume): void

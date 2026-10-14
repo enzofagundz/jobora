@@ -1,9 +1,10 @@
 @php
     $blocks = \App\Support\AdaptedResumeParser::parse($adaptation->adapted_content);
-    $name = ($blocks[0]['type'] ?? null) === 'header' ? $blocks[0]['lines'][0] : 'Currículo';
+    $documentLabel = $label ?? 'Currículo';
+    $name = ($blocks[0]['type'] ?? null) === 'header' ? $blocks[0]['lines'][0] : $documentLabel;
 @endphp
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="{{ $language ?? 'pt-BR' }}">
 <head>
     <meta charset="utf-8">
     <title>{{ $name }}</title>

@@ -562,3 +562,68 @@ it('rejects an optimized PDF when the adapted source is stale', function () {
         ]))
         ->assertRedirect(JobPostingResource::getUrl('application', ['record' => $posting]));
 });
+
+it('gera o bloco ATS no idioma da adaptação', function () {
+    $user = User::factory()->create(['is_admin' => true]);
+    $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create([
+        'role' => 'Backend Engineer',
+        'company' => 'Acme',
+    ]);
+    $posting->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
+    app(ResumeService::class)->save($user, 'Experienced with PHP.', ResumeLanguage::En);
+
+    $adaptation = ResumeAdaptation::create([
+        'job_posting_id' => $posting->id,
+        'language' => ResumeLanguage::En,
+        'adapted_content' => 'Adapted resume with PHP.',
+        'changes' => [],
+        'covered_keywords' => ['PHP'],
+        'missing_requirements' => [],
+        'alerts' => [],
+    ]);
+
+    $updated = app(ResumeAdaptationService::class)->setAtsOptimization($user, $posting->fresh(), true, ResumeLanguage::En);
+
+    expect($updated->id)->toBe($adaptation->id)
+        ->and($updated->language)->toBe(ResumeLanguage::En)
+        ->and($updated->ats_prompt)->toContain('Highly compatible profile')
+        ->and($updated->ats_prompt)->not->toContain('Perfil altamente compatível');
+});
+
+it('persiste a nota ATS na adaptação do idioma simulado', function () {
+    AtsScorerAgent::fake([
+        ['score' => 7, 'rationale' => 'Boa aderência.'],
+    ]);
+
+    $user = User::factory()->create(['is_admin' => true]);
+    $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create([
+        'description' => 'Vaga PHP',
+        'role' => 'Dev PHP',
+    ]);
+    $posting->items()->create(['category' => 'skill', 'name' => 'PHP', 'source' => 'ai']);
+    app(ResumeService::class)->save($user, 'Experiência com PHP.', ResumeLanguage::PtBr);
+    app(ResumeService::class)->save($user, 'Experienced with PHP.', ResumeLanguage::En);
+
+    $ptBr = ResumeAdaptation::create([
+        'job_posting_id' => $posting->id,
+        'adapted_content' => 'Currículo adaptado com PHP.',
+        'changes' => [],
+        'covered_keywords' => ['PHP'],
+        'missing_requirements' => [],
+        'alerts' => [],
+    ]);
+    $en = ResumeAdaptation::create([
+        'job_posting_id' => $posting->id,
+        'language' => ResumeLanguage::En,
+        'adapted_content' => 'Adapted resume with PHP.',
+        'changes' => [],
+        'covered_keywords' => ['PHP'],
+        'missing_requirements' => [],
+        'alerts' => [],
+    ]);
+
+    app(AtsScorerService::class)->score($user, $posting->fresh(), ResumeLanguage::En);
+
+    expect($en->refresh()->ats_score)->toBe(7)
+        ->and($ptBr->refresh()->ats_score)->toBeNull();
+});

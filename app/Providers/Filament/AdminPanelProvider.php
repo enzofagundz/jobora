@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Enums\ResumeLanguage;
 use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Models\JobPosting;
 use App\Services\ResumePdfService;
@@ -88,7 +89,10 @@ class AdminPanelProvider extends PanelProvider
                 Route::get('/job-postings/{posting}/resume-pdf', function (JobPosting $posting) {
                     Gate::authorize('view', $posting);
 
-                    $adaptation = $posting->resumeAdaptation()->firstOrFail();
+                    $language = ResumeLanguage::tryFrom((string) request()->query('language', ResumeLanguage::PtBr->value))
+                        ?? ResumeLanguage::PtBr;
+
+                    $adaptation = $posting->resumeAdaptation($language)->firstOrFail();
 
                     if ($adaptation->is_ats_optimized) {
                         Gate::authorize('useAtsOptimization');

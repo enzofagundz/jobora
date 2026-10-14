@@ -21,9 +21,9 @@ class AiInputSnapshotService
     /**
      * @return array{payload: array<string, mixed>, fingerprint: string}
      */
-    public function resumeAdaptation(User $user, JobPosting $posting): array
+    public function resumeAdaptation(User $user, JobPosting $posting, ResumeLanguage $language = ResumeLanguage::PtBr): array
     {
-        $resume = ResumeService::plainText($this->resumeService->content($user, ResumeLanguage::PtBr));
+        $resume = ResumeService::plainText($this->resumeService->content($user, $language));
         $description = ResumeService::plainText($posting->description);
         $items = $this->orderedItems($posting);
 
@@ -37,6 +37,7 @@ class AiInputSnapshotService
             ->all();
 
         $payload = [
+            'language' => $language->value,
             'resume' => $resume,
             'job_description' => $description,
             'job_role' => $posting->role,
@@ -112,11 +113,9 @@ class AiInputSnapshotService
     /**
      * @return array{payload: array<string, mixed>, fingerprint: string}
      */
-    public function atsScore(JobPosting $posting): array
+    public function atsScore(JobPosting $posting, ResumeLanguage $language = ResumeLanguage::PtBr, ?ResumeAdaptation $adaptation = null): array
     {
-        $adaptation = $posting->relationLoaded('resumeAdaptation')
-            ? $posting->resumeAdaptation
-            : $posting->resumeAdaptation()->first();
+        $adaptation ??= $this->resolveAdaptation($posting, $language);
 
         if (! $adaptation instanceof ResumeAdaptation) {
             throw new LogicException('Gere a adaptação do currículo antes de simular a nota.');
@@ -130,6 +129,7 @@ class AiInputSnapshotService
 
         $items = $this->orderedItems($posting);
         $payload = [
+            'language' => $language->value,
             'resume' => ResumeService::plainText($resume),
             'job_description' => ResumeService::plainText($posting->description),
             'job_role' => $posting->role,
@@ -149,23 +149,22 @@ class AiInputSnapshotService
     /**
      * @return array{payload: array<string, mixed>, fingerprint: string}
      */
-    public function atsOptimization(User $user, JobPosting $posting, bool $enabled): array
+    public function atsOptimization(User $user, JobPosting $posting, bool $enabled, ResumeLanguage $language = ResumeLanguage::PtBr): array
     {
-        $adaptation = $posting->relationLoaded('resumeAdaptation')
-            ? $posting->resumeAdaptation
-            : $posting->resumeAdaptation()->first();
+        $adaptation = $this->resolveAdaptation($posting, $language);
 
         if (! $adaptation instanceof ResumeAdaptation) {
             throw new LogicException('Gere a adaptação do currículo antes de otimizar para ATS.');
         }
 
-        $resume = ResumeService::plainText($this->resumeService->content($user, ResumeLanguage::PtBr));
+        $resume = ResumeService::plainText($this->resumeService->content($user, $language));
         $items = $this->orderedItems($posting);
         $prompt = $enabled
-            ? $this->atsPromptBuilder->build($posting, $resume)
+            ? $this->atsPromptBuilder->build($posting, $resume, $language)
             : null;
         $payload = [
             'enabled' => $enabled,
+            'language' => $language->value,
             'resume' => $resume,
             'job_role' => $posting->role,
             'job_company' => $posting->company,
@@ -191,6 +190,17 @@ class AiInputSnapshotService
             'sha256',
             json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
         );
+    }
+
+    private function resolveAdaptation(JobPosting $posting, ResumeLanguage $language): ?ResumeAdaptation
+    {
+        $loaded = $posting->relationLoaded('resumeAdaptation') ? $posting->resumeAdaptation : null;
+
+        if ($loaded instanceof ResumeAdaptation && $loaded->language === $language) {
+            return $loaded;
+        }
+
+        return $posting->resumeAdaptation($language)->first();
     }
 
     private function orderedItems(JobPosting $posting): Collection
