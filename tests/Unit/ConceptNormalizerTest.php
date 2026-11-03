@@ -69,3 +69,12 @@ it('returns no keywords for unknown canonical names', function () {
 
     expect($normalizer->keywordsFor('Inexistente'))->toBe([]);
 });
+
+it('resolves keywords and categories for canonical names containing a dot', function () {
+    $normalizer = new ConceptNormalizer;
+
+    expect($normalizer->keywordsFor('Vue.js'))->toContain('vue.js')
+        ->and($normalizer->keywordsFor('Node.js'))->toContain('node.js')
+        ->and($normalizer->ownerCategory('Vue.js'))->toBe('skill')
+        ->and($normalizer->ownerCategory('Node.js'))->toBe('skill');
+});

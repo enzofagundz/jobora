@@ -45,7 +45,7 @@ class ConceptNormalizer
      */
     public function keywordsFor(string $canonicalName): array
     {
-        return config('concepts.'.$canonicalName)['keywords'] ?? [];
+        return config('concepts')[$canonicalName]['keywords'] ?? [];
     }
 
     /**
@@ -54,7 +54,7 @@ class ConceptNormalizer
      */
     public function ownerCategory(string $canonicalName): ?string
     {
-        $category = config('concepts.'.$canonicalName)['category'] ?? null;
+        $category = config('concepts')[$canonicalName]['category'] ?? null;
 
         if (! is_string($category)) {
             return null;

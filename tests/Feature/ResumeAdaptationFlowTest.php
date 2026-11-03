@@ -150,6 +150,24 @@ it('rejects a covered keyword absent from the original resume', function () {
     app(ResumeAdaptationService::class)->adapt($user, $posting);
 })->throws(RuntimeException::class, 'covered_keywords');
 
+it('accepts a covered keyword whose canonical name contains a dot', function () {
+    ResumeAdaptationAgent::fake([[
+        'adapted_resume' => 'Currículo adaptado com Vue.js.',
+        'changes' => [],
+        'covered_keywords' => ['Vue.js'],
+        'missing_requirements' => [],
+        'alerts' => [],
+    ]]);
+
+    $user = User::factory()->create();
+    $posting = adaptationPosting($user);
+    app(ResumeService::class)->save($user, 'Currículo com Vue.js e Laravel.', ResumeLanguage::PtBr);
+
+    $adaptation = app(ResumeAdaptationService::class)->adapt($user, $posting);
+
+    expect($adaptation->covered_keywords)->toBe(['Vue.js']);
+});
+
 it('rejects a missing requirement that is present in the original resume', function () {
     ResumeAdaptationAgent::fake([[
         'adapted_resume' => 'Currículo adaptado com Python.',

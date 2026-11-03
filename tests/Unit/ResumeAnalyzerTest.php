@@ -16,6 +16,12 @@ it('detects concepts by keyword substring', function () {
         ->not->toContain('Kubernetes');
 });
 
+it('detects canonical concepts whose name contains a dot', function () {
+    $content = 'Front-end em Vue.js e back-end em Node.js.';
+
+    expect(analyzer()->conceptsIn($content))->toContain('Vue.js', 'Node.js');
+});
+
 it('matches multiword keywords', function () {
     $content = 'Migração de infraestrutura para Google Cloud Platform.';
 
