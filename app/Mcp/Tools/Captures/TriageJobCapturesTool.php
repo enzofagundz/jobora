@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tools\Annotations\IsOpenWorld;
 
 #[IsOpenWorld]
-#[Description('Dispara a triagem por IA das capturas elegíveis (não promovidas, pendentes ou com falha) do usuário configurado. Assíncrona: acompanhe com get_job_capture. Lote de no máximo 50.')]
+#[Description('Dispara a triagem das capturas elegíveis (não promovidas, pendentes ou com falha) do usuário configurado. Cada captura passa por um pré-filtro de IA (1 chamada por captura); as aprovadas seguem para a triagem completa (1 chamada por lote). Assíncrona: acompanhe com get_job_capture. Lote de no máximo 50.')]
 class TriageJobCapturesTool extends JoboraTool
 {
     public function __construct(

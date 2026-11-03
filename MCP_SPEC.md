@@ -291,12 +291,12 @@ Legenda: **R** = read-only · **W** = escrita · **D** = destrutiva/sobrescrita 
 | `capture_job` | W, idempotente | Ao menos um de `external_id`/`url`/`description` | `source` (req, ≤50), `external_id`, `url`, `search_url`, `title`, `company`, `location`, `description` (≤100000), `author_name`, `author_profile_url`, `captured_at` | `{capture, duplicate}` | `JobCaptureService::store()`; dedup por `dedup_key` |
 | `list_job_captures` | R | — | `triage_status`, `triage_result`, `promoted` (bool), `source`, `from`, `to`, `limit`, `offset` | lista | — |
 | `get_job_capture` | R | Owned | `id` | captura completa | — |
-| `triage_job_captures` | W, IA | Owned; não promovidas; `triage_status ∈ {pending,failed}`; lote ≤ 50 | `ids` (opcional), `max` (default 20, ≤50) | `{claimed_ids, batch_size, state:'processing'}` | `JobTriageService::startBatch()` → despacha `TriageJobCaptures` |
+| `triage_job_captures` | W, IA | Owned; não promovidas; `triage_status ∈ {pending,failed}`; lote ≤ 50 | `ids` (opcional), `max` (default 20, ≤50) | `{claimed_ids, batch_size, state:'processing'}` | `JobTriageService::startBatch()` → despacha `PrefilterJobCaptures` (flag ligada; se tudo barrado, não despacha `TriageJobCaptures`) → `TriageJobCaptures` apenas com as aprovadas |
 | `promote_job_capture` | W, IA | Owned; não promovida; `description ≥ 20`; `triage_completed` + `result ∈ {relevant,uncertain}` | `id` | `{job_posting_id, status:'pending'}` | `JobPromotionService::promote()` → cria vaga + despacha `AnalyzeJobPosting` |
 | `promote_eligible_job_captures` | W, IA | Igual acima, em lote | `max` (default 20, ≤50) | `{promoted_count, job_posting_ids}` | `JobPromotionService::promoteEligible()` |
 | `delete_job_capture` | D | Owned; `confirm` | `id`, `confirm` | `{deleted:true}` | Soft delete (`JobCapture`) |
 
-**Acompanhamento:** o estado da triagem vive em `JobCapture.triage_status`/`triage_result`;
+**Acompanhamento:** o estado da triagem vive em `JobCapture.triage_status`/`triage_result`/`triage_origin`; `prefilter` indica que a captura foi barrada antes do LLM;
 consultar com `get_job_capture`/`list_job_captures`. A promoção cria a vaga em `pending`;
 consultar com `get_job_posting`.
 
@@ -408,7 +408,7 @@ O sistema já roda IA em fila (`jobs` + `AiOperation`). O MCP não bloqueia agua
    (`{operation_id, status:'queued'}` quando `AiOperation`; `{job_posting_id, status:'pending'}`
    para análise/triagem).
 2. O agente acompanha por leitura:
-   - **Triagem**: `get_job_capture` → `triage_status`/`triage_result`/`triage_error`.
+   - **Triagem**: `get_job_capture` → `triage_status`/`triage_result`/`triage_origin`/`triage_error`.
    - **Análise**: `get_job_posting` → `status`/`suggested_data`/`error_message`.
    - **Adaptação, ATS e competências**: `get_ai_operation` → `status`/`failure_code`.
 3. **Worker ativo é pré-requisito.** Sem `php artisan dev`/`queue:work`, as operações ficam
@@ -419,7 +419,7 @@ Mapeamento gatilho → acompanhamento:
 
 | Gatilho | Enfileira | Acompanhar com |
 | ------- | --------- | -------------- |
-| `triage_job_captures` | `TriageJobCaptures` | `get_job_capture` |
+| `triage_job_captures` | `PrefilterJobCaptures` → `TriageJobCaptures` (só aprovadas; flag ligada) | `get_job_capture` |
 | `analyze_job_posting` / `promote_job_capture` | `AnalyzeJobPosting` | `get_job_posting` |
 | `adapt_resume` | `AiOperation(resume_adaptation)` | `get_ai_operation` |
 | `score_ats` | `AiOperation(ats_score)` | `get_ai_operation` |

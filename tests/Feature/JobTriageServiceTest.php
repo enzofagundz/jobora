@@ -3,12 +3,17 @@
 use App\Agents\JobTriageAgent;
 use App\Enums\JobCaptureTriageResult;
 use App\Enums\JobCaptureTriageStatus;
+use App\Enums\TriageOrigin;
+use App\Jobs\PrefilterJobCaptures;
+use App\Jobs\TriageJobCaptures;
 use App\Models\JobCapture;
 use App\Models\ScreeningPreference;
 use App\Models\User;
 use App\Services\JobTriageService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Queue;
 
 uses(RefreshDatabase::class);
 
@@ -164,4 +169,95 @@ it('marks all captures failed when the provider throws', function () {
         expect($capture->refresh()->triage_status)->toBe(JobCaptureTriageStatus::Failed)
             ->and($capture->refresh()->triage_error)->toContain('Provider indisponível');
     }
+});
+
+it('records the llm origin on every agent decision', function (): void {
+    $captures = triageCaptures(2);
+    [$c1, $c2] = $captures->all();
+    $user = $c1->user;
+
+    JobTriageAgent::fake([[
+        'results' => [
+            ['capture_id' => $c1->id, 'is_job' => true, 'result' => 'relevant', 'reason' => 'Vaga de Laravel.'],
+            ['capture_id' => $c2->id, 'is_job' => false, 'result' => 'not_a_job', 'reason' => 'Artigo sobre carreira.'],
+        ],
+    ]]);
+
+    app(JobTriageService::class)->triageBatch(collect([$c1, $c2]), $user);
+
+    expect($c1->refresh()->triage_origin)->toBe(TriageOrigin::Llm)
+        ->and($c2->refresh()->triage_origin)->toBe(TriageOrigin::Llm);
+});
+
+it('does not record an origin when the agent does not decide the capture', function (): void {
+    $captures = triageCaptures(1);
+    [$c1] = $captures->all();
+    $user = $c1->user;
+
+    JobTriageAgent::fake([['results' => []]]);
+
+    app(JobTriageService::class)->triageBatch(collect([$c1]), $user);
+
+    expect($c1->refresh()->triage_status)->toBe(JobCaptureTriageStatus::Failed)
+        ->and($c1->refresh()->triage_origin)->toBeNull();
+});
+
+it('requeues prefilter-barred captures straight to the llm', function () {
+    Queue::fake();
+
+    $user = User::factory()->create();
+    $barred = JobCapture::factory()->for($user, 'user')->create([
+        'triage_status' => JobCaptureTriageStatus::Completed,
+        'triage_result' => JobCaptureTriageResult::NotAJob,
+        'triage_origin' => TriageOrigin::Prefilter,
+        'triage_reason' => 'Pré-filtro: Outro conteúdo que não anuncia vaga (p=0,10)',
+    ]);
+    $decidedByAi = JobCapture::factory()->for($user, 'user')->create([
+        'triage_status' => JobCaptureTriageStatus::Completed,
+        'triage_result' => JobCaptureTriageResult::NotAJob,
+        'triage_origin' => TriageOrigin::Llm,
+    ]);
+
+    $claimed = app(JobTriageService::class)->requeuePrefilterBarred(collect([$barred, $decidedByAi]), $user);
+
+    expect($claimed->pluck('id')->all())->toBe([$barred->id])
+        ->and($barred->refresh()->triage_status)->toBe(JobCaptureTriageStatus::Processing)
+        ->and($barred->refresh()->triage_result)->toBeNull()
+        ->and($barred->refresh()->triage_origin)->toBeNull()
+        ->and($decidedByAi->refresh()->triage_status)->toBe(JobCaptureTriageStatus::Completed)
+        ->and($decidedByAi->refresh()->triage_origin)->toBe(TriageOrigin::Llm);
+
+    Queue::assertPushed(TriageJobCaptures::class, function (TriageJobCaptures $job) use ($barred): bool {
+        return $job->captureIds === [$barred->id] && $job->triageIds === null;
+    });
+    Queue::assertNotPushed(PrefilterJobCaptures::class);
+});
+
+it('does not reset captures when the triage lock is held', function () {
+    Queue::fake();
+
+    $user = User::factory()->create();
+    $barred = JobCapture::factory()->for($user, 'user')->create([
+        'triage_status' => JobCaptureTriageStatus::Completed,
+        'triage_result' => JobCaptureTriageResult::NotAJob,
+        'triage_origin' => TriageOrigin::Prefilter,
+        'triage_reason' => 'Pré-filtro: Outro conteúdo que não anuncia vaga (p=0,10)',
+    ]);
+
+    $store = config('cache.lock_store', config('cache.default', 'file'));
+    $lock = Cache::store($store)->lock('triage:start:'.$user->id, 10);
+    expect($lock->get())->toBeTrue();
+
+    try {
+        expect(fn () => app(JobTriageService::class)->requeuePrefilterBarred(collect([$barred]), $user))
+            ->toThrow(RuntimeException::class, 'Triagem em andamento');
+    } finally {
+        $lock->release();
+    }
+
+    Queue::assertNothingPushed();
+
+    expect($barred->refresh()->triage_status)->toBe(JobCaptureTriageStatus::Completed)
+        ->and($barred->refresh()->triage_result)->toBe(JobCaptureTriageResult::NotAJob)
+        ->and($barred->refresh()->triage_origin)->toBe(TriageOrigin::Prefilter);
 });

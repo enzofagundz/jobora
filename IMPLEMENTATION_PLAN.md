@@ -2,7 +2,7 @@
 
 > Documento de execução derivado de `TECHNICAL_PLAN.md` (fonte técnica) e `PRD.md` (fonte de produto).
 > O repositório já contém a maior parte do MVP implementada (verificado em 2026-08-13). Cada tarefa indica o estado atual: **verificar/aceitar** (validar o que existe contra critérios objetivos) ou **implementar** (criar o que falta). Não refazer trabalho existente. Ordem de execução segue o TECHNICAL_PLAN §16.
-> Restrições fixas: Laravel 13 + Filament 5 + Laravel AI SDK (provider `opencode_zen`, modelo `mimo-v2.5-free`); SQLite; single-user; vagas como fonte de dados (não gerenciador de vagas/candidaturas); sem scraping; sem Redis/filas/Elasticsearch; comparação agregada mercado × currículo; sem Ollama; sem chamadas HTTP próprias ao OpenCode Zen (toda comunicação via Laravel AI SDK). F6 (adequação de currículo): IA via mesmo provider `opencode_zen`/`mimo-v2.5-free` — **Cloudflare não é provedor de IA**, atua apenas como driver de PDF (`spatie/laravel-pdf`); persistência de uma versão adaptada por (vaga, idioma) — PT-BR e EN — (sem histórico); currículo original nunca substituído; PDF não persistido (derivado sob demanda); sem DOCX no MVP; sem CRUD para a adaptação.
+> Restrições fixas: Laravel 13 + Filament 5 + Laravel AI SDK (provider `opencode_zen`, modelo `mimo-v2.5-free`); SQLite; single-user; vagas como fonte de dados (não gerenciador de vagas/candidaturas); sem scraping; sem Redis/filas/Elasticsearch; comparação agregada mercado × currículo; sem Ollama; sem chamadas HTTP próprias ao OpenCode Zen (toda comunicação via Laravel AI SDK); a exceção é o pré-filtro de triagem, que chama o Workers AI por HTTP direto (ADR 0002). F6 (adequação de currículo): IA via mesmo provider `opencode_zen`/`mimo-v2.5-free` — a Cloudflare não participa da adequação, mas é provedora de IA apenas no pré-filtro de triagem (Workers AI) e driver de PDF (`spatie/laravel-pdf`); persistência de uma versão adaptada por (vaga, idioma) — PT-BR e EN — (sem histórico); currículo original nunca substituído; PDF não persistido (derivado sob demanda); sem DOCX no MVP; sem CRUD para a adaptação.
 
 ## 1. Estratégia de implementação
 
@@ -81,7 +81,7 @@ Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAn
 
 #### T004 — Instalação e configuração do Laravel AI SDK + provider OpenCode Zen
 
-**Objetivo:** chamada ao modelo via SDK funcionando (smoke com chave real), sem HTTP direto da aplicação.
+**Objetivo:** chamada ao modelo via SDK funcionando (smoke com chave real), sem HTTP direto ao OpenCode Zen (o pré-filtro de triagem usa HTTP direto ao Workers AI — ADR 0002).
 
 **Contexto:** TP §16 etapa 4 + §7. Estado: **implementado — verificar/aceitar, com smoke a executar**. `laravel/ai ^0.10.3` em `require`; `config/ai.php` define default `opencode_zen` e provider `opencode_zen` (driver `openai-compatible`, `key` = env `OPENCODE_ZEN_API_KEY`, `models.text.default` = env `OPENCODE_ZEN_MODEL` default `mimo-v2.5-free`). O SDK usa o driver `openai-compatible` com a base `https://opencode.ai/zen/v1` (configurada via `OPENCODE_ZEN_BASE_URL`; o SDK acrescenta `/chat/completions`).
 
@@ -431,7 +431,7 @@ Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAn
 
 ### Fase L — Adequação de currículo para ATS (F6)
 
-**Objetivo da fase:** implementar a F6 ponta a ponta conforme TP etapas 15–17: persistência de uma versão adaptada por (vaga, idioma), agente de adequação (mesmo provider `opencode_zen`/`mimo-v2.5-free`), validação de integridade em 2 camadas, página de resultado não-CRUD e exportação PDF via `spatie/laravel-pdf` com driver `cloudflare` (Cloudflare Browser Run). Cloudflare **não** é provedor de IA. Nenhum teste depende de chamadas reais (fakes do Agent e `Pdf::fake()`).
+**Objetivo da fase:** implementar a F6 ponta a ponta conforme TP etapas 15–17: persistência de uma versão adaptada por (vaga, idioma), agente de adequação (mesmo provider `opencode_zen`/`mimo-v2.5-free`), validação de integridade em 2 camadas, página de resultado não-CRUD e exportação PDF via `spatie/laravel-pdf` com driver `cloudflare` (Cloudflare Browser Run). A Cloudflare não participa da adequação (F6); é provedora de IA apenas no pré-filtro de triagem (ADR 0002). Nenhum teste depende de chamadas reais (fakes do Agent e `Pdf::fake()`).
 
 **Decisões de implementação registradas:** o download do PDF é uma **rota GET autenticada do painel** (`filament.admin.resume-pdf.download`), não uma ação Livewire — retornos de arquivo de ações são serializados no snapshot JSON e bytes binários quebram o encode (erro "Malformed UTF-8"). A autorização do Resource/ações/páginas/rota é explícita via `App\Policies\JobPostingPolicy` (single-user: todos os métodos permitem; a fronteira fica testável). `AnalyzeJobPosting` implementa `ShouldQueueAfterCommit` (o job só é disparado após o commit da transação). A análise em segundo plano exige worker ativo (`php artisan dev` ou `queue:work`).
 
@@ -482,11 +482,11 @@ Arquitetura alvo (TP §3): Models Eloquent + Enums string-backed + 1 DTO (`JobAn
 - `App\Agents\ResumeAdaptationAgent` implementa `Laravel\Ai\Contracts\Agent` com trait `Promptable`: `provider()` → `opencode_zen`; `model()` → `config('ai.providers.opencode_zen.models.text.default')` (`OPENCODE_ZEN_MODEL`); `timeout()` → 120.
 - `instructions()` em pt-BR: analisar a vaga em relação ao currículo (terminologia, palavras-chave, organização, destaque de experiências relevantes, priorização de competências); **reformular/organizar/reordenar apenas informações existentes — nunca inventar** (experiências, tecnologias, cargos, certificações, resultados, projetos, responsabilidades, formação); requisitos ausentes vão para `missing_requirements`; alertas quando uma adaptação exigiria inventar; embute o contrato JSON da F6 (TP §8); exige JSON cru, sem markdown e **sem HTML**.
 - **Não** implementa `HasStructuredOutput` (contrato JSON embutido nas instruções e validado na aplicação pelos DTOs, sem `response_format: json_schema` nativo — TP §7).
-- Sem chamadas HTTP próprias; nenhuma referência à Cloudflare na parte de IA.
+- Sem chamadas HTTP próprias ao OpenCode Zen; a Cloudflare não participa da adequação (F6).
 
 **Dependências:** T004 (SDK + provider), T024 (contrato).
 
-**Critérios de conclusão:** provider/model/timeout corretos; instructions com regra de integridade + schema F6; sem `HasStructuredOutput`; sem referência a Cloudflare/HTML.
+**Critérios de conclusão:** provider/model/timeout corretos; instructions com regra de integridade + schema F6; sem `HasStructuredOutput`; sem referência à Cloudflare na adequação (F6); sem HTML.
 
 **Testes:** uso via fakes (T028/T031); nenhuma chamada real.
 
@@ -753,7 +753,7 @@ T032 Refinamentos F6
 | T022 | Smoke real ponta-a-ponta + Definition of Done | K — Testes | T021 | Fluxo real validado; DoD do MVP 100% |
 | T023 | Persistência da adequação (migration + Model `ResumeAdaptation`) | L — F6 | T005, T006 | Tabela com UNIQUE (`job_posting_id`, `language`) — uma por (vaga, idioma), sem histórico; `resumes` intocada |
 | T024 | DTO `ResumeAdaptationResult` | L — F6 | — (paralelo a T023) | Resposta da IA validada estruturalmente (5 campos, limites, sem HTML) |
-| T025 | Agent `ResumeAdaptationAgent` | L — F6 | T004, T024 | Agent opencode_zen/mimo-v2.5-free com regra de integridade; sem Cloudflare/HTML |
+| T025 | Agent `ResumeAdaptationAgent` | L — F6 | T004, T024 | Agent opencode_zen/mimo-v2.5-free com regra de integridade; sem Cloudflare na adequação (F6); sem HTML |
 | T026 | Validação de integridade (2 camadas) | L — F6 | T016, T018, T024 | Conceitos do adaptado ⊆ original; keywords/ausentes consistentes |
 | T027 | Service `ResumeAdaptationService` | L — F6 | T023, T024, T025, T026, T015, T018, T014 | Fluxo completo com UPSERT por (vaga, idioma); falha não persiste nada |
 | T028 | Testes do domínio F6 (DTO, integridade, UPSERT, original intocado) | L — F6 | T023, T024, T026, T027 | Cenários verdes com fakes, sem rede |

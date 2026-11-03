@@ -80,7 +80,7 @@ it('notifica triagem concluída com contagem correta apenas ao destinatário', f
     expect($notification)->not->toBeNull()
         ->and($notification->data['format'])->toBe('filament')
         ->and($notification->data['title'])->toBe('Triagem concluída')
-        ->and($notification->data['body'])->toBe('2 captura(s) processada(s) com sucesso.')
+        ->and($notification->data['body'])->toBe('2 captura(s) encaminhada(s) à IA, 0 barrada(s) pelo pré-filtro e 0 falha(s).')
         ->and($notification->read_at)->toBeNull();
 
     expect($userB->notifications()->count())->toBe(0);
@@ -234,7 +234,7 @@ it('triagem mista gera warning com contagem correta', function () {
 
     $notification = $user->notifications()->first();
     expect($notification->data['title'])->toBe('Triagem concluída com erros')
-        ->and($notification->data['body'])->toBe('1 captura(s) processada(s); 1 falha(s).');
+        ->and($notification->data['body'])->toBe('2 captura(s) encaminhada(s) à IA, 0 barrada(s) pelo pré-filtro e 1 falha(s).');
 });
 
 it('renderiza o listener de broadcast mesmo com estado vazio', function () {
@@ -251,4 +251,23 @@ it('renderiza o listener de broadcast mesmo com estado vazio', function () {
 
 it('mantém polling de fallback para notificações persistentes', function () {
     expect(Filament::getPanel('admin')->getDatabaseNotificationsPollingInterval())->toBe('30s');
+});
+
+it('notifies a total agent failure with the three batch counts', function () {
+    Event::fake([DatabaseNotificationsSent::class]);
+
+    $user = User::factory()->create();
+    $first = JobCapture::factory()->for($user, 'user')->create(['description' => str_repeat('Vaga PHP. ', 5)]);
+    $second = JobCapture::factory()->for($user, 'user')->create(['description' => str_repeat('Vaga PHP. ', 5)]);
+
+    JobTriageAgent::fake(fn () => throw new RuntimeException('Serviço indisponível'));
+
+    (new TriageJobCaptures([$first->id, $second->id], $user->id))->handle(app(JobTriageService::class));
+
+    $notification = $user->notifications()->sole();
+
+    expect($notification->data['title'])->toBe('Falha na triagem')
+        ->and($notification->data['body'])->toBe('2 captura(s) encaminhada(s) à IA, 0 barrada(s) pelo pré-filtro e 2 falha(s).')
+        ->and($notification->data['actions'])->toHaveCount(1)
+        ->and($notification->data['actions'][0]['label'])->toBe('Ver capturas');
 });

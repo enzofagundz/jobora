@@ -4,7 +4,10 @@ namespace App\Services;
 
 use App\Agents\JobTriageAgent;
 use App\DTO\JobTriageResult;
+use App\Enums\JobCaptureTriageResult;
 use App\Enums\JobCaptureTriageStatus;
+use App\Enums\TriageOrigin;
+use App\Jobs\PrefilterJobCaptures;
 use App\Jobs\TriageJobCaptures;
 use App\Models\JobCapture;
 use App\Models\User;
@@ -13,6 +16,7 @@ use App\Support\Ai\AiUsageHelper;
 use App\Support\Ai\TransientAiClassifier;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
 use Throwable;
@@ -40,11 +44,12 @@ final class JobTriageService
      * como processing e despacha o job. Rejeita lotes acima do limite.
      *
      * @param  Collection<int, JobCapture>  $captures
+     * @param  bool  $skipPrefilter  reavaliação manda direto ao LLM
      * @return Collection<int, JobCapture> capturas elegíveis enviadas
      *
      * @throws InvalidArgumentException quando a seleção excede MAX_BATCH_SIZE
      */
-    public function startBatch(Collection $captures, User $user): Collection
+    public function startBatch(Collection $captures, User $user, bool $skipPrefilter = false): Collection
     {
         // Filtrar seleção por usuário — nunca processar coleção estrangeira.
         $captures = $captures->filter(fn (JobCapture $c): bool => $c->user_id === $user->id);
@@ -93,7 +98,11 @@ final class JobTriageService
                 'triage_error' => null,
             ]);
 
-            TriageJobCaptures::dispatch($claimed, (int) $user->id);
+            if (! $skipPrefilter && (bool) config('triage.prefilter.enabled')) {
+                PrefilterJobCaptures::dispatch($claimed, (int) $user->id);
+            } else {
+                TriageJobCaptures::dispatch($claimed, (int) $user->id);
+            }
 
             return $eligible->whereIn('id', $claimed)->values();
         } finally {
@@ -102,6 +111,52 @@ final class JobTriageService
             } catch (Throwable) {
             }
         }
+    }
+
+    /**
+     * Reabre as capturas barradas pelo pré-filtro e reenfileira a triagem
+     * pelo caminho normal, pulando o pré-filtro.
+     *
+     * @param  Collection<int, JobCapture>  $captures
+     * @return Collection<int, JobCapture>
+     *
+     * @throws InvalidArgumentException quando a seleção excede MAX_BATCH_SIZE
+     * @throws \RuntimeException quando já há triagem em andamento para o usuário
+     */
+    public function requeuePrefilterBarred(Collection $captures, User $user): Collection
+    {
+        $eligible = $user->jobCaptures()
+            ->whereIn('id', $captures->pluck('id')->all())
+            ->whereNull('job_posting_id')
+            ->where('triage_result', JobCaptureTriageResult::NotAJob->value)
+            ->where('triage_origin', TriageOrigin::Prefilter->value)
+            ->get();
+
+        if ($eligible->isEmpty()) {
+            return collect();
+        }
+
+        if ($eligible->count() > self::MAX_BATCH_SIZE) {
+            throw new InvalidArgumentException('Selecione no máximo '.self::MAX_BATCH_SIZE.' capturas por lote.');
+        }
+
+        $ids = $eligible->pluck('id')->all();
+
+        return DB::transaction(function () use ($ids, $user): Collection {
+            $user->jobCaptures()->whereIn('id', $ids)->update([
+                'triage_status' => JobCaptureTriageStatus::Pending,
+                'triage_result' => null,
+                'triage_reason' => null,
+                'triage_origin' => null,
+                'triage_error' => null,
+            ]);
+
+            return $this->startBatch(
+                $user->jobCaptures()->whereIn('id', $ids)->get(),
+                $user,
+                skipPrefilter: true,
+            );
+        });
     }
 
     /**
@@ -192,6 +247,7 @@ final class JobTriageService
                         'triage_status' => JobCaptureTriageStatus::Failed,
                         'triage_result' => null,
                         'triage_reason' => null,
+                        'triage_origin' => null,
                         'triage_error' => 'A resposta da IA não contém um resultado válido para esta captura.',
                     ]);
 
@@ -202,6 +258,7 @@ final class JobTriageService
                     'triage_status' => JobCaptureTriageStatus::Completed,
                     'triage_result' => $decision->result,
                     'triage_reason' => $decision->reason,
+                    'triage_origin' => TriageOrigin::Llm,
                     'triage_error' => null,
                 ]);
             }
@@ -240,6 +297,7 @@ final class JobTriageService
                     'triage_status' => JobCaptureTriageStatus::Failed,
                     'triage_result' => null,
                     'triage_reason' => null,
+                    'triage_origin' => null,
                     'triage_error' => $e->getMessage(),
                 ]);
             }

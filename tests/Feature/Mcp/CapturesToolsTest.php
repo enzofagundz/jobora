@@ -2,8 +2,9 @@
 
 use App\Enums\JobCaptureTriageResult;
 use App\Enums\JobCaptureTriageStatus;
+use App\Enums\TriageOrigin;
 use App\Jobs\AnalyzeJobPosting;
-use App\Jobs\TriageJobCaptures;
+use App\Jobs\PrefilterJobCaptures;
 use App\Mcp\Servers\JoboraServer;
 use App\Mcp\Tools\Captures\CaptureJobTool;
 use App\Mcp\Tools\Captures\DeleteJobCaptureTool;
@@ -16,6 +17,7 @@ use App\Models\JobCapture;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
+use Laravel\Mcp\Server\Attributes\Description;
 use Tests\Feature\Mcp\McpTestHelpers;
 
 uses(RefreshDatabase::class);
@@ -160,7 +162,7 @@ it('dispara a triagem das capturas elegíveis e as marca como em processamento',
             ->where('data.state', 'processing')
             ->etc());
 
-    Queue::assertPushed(TriageJobCaptures::class);
+    Queue::assertPushed(PrefilterJobCaptures::class);
 
     JoboraServer::tool(GetJobCaptureTool::class, ['id' => $a->id])
         ->assertOk()
@@ -257,4 +259,32 @@ it('promove em lote todas as capturas elegíveis', function () {
             ->etc());
 
     Queue::assertPushed(AnalyzeJobPosting::class, 2);
+});
+
+it('describes the real prefilter and triage cost in the tool description', function () {
+    $description = (new ReflectionClass(TriageJobCapturesTool::class))
+        ->getAttributes(Description::class)[0]
+        ->newInstance()
+        ->value;
+
+    expect($description)->toContain('1 chamada por captura')
+        ->and($description)->toContain('1 chamada por lote');
+});
+
+it('devolve a origem da triagem na captura', function () {
+    $user = McpTestHelpers::user();
+
+    $capture = JobCapture::factory()->for($user, 'user')->create([
+        'triage_status' => JobCaptureTriageStatus::Completed,
+        'triage_result' => JobCaptureTriageResult::NotAJob,
+        'triage_origin' => TriageOrigin::Prefilter,
+        'triage_reason' => 'Pré-filtro: Outro conteúdo que não anuncia vaga (p=0,10)',
+    ]);
+
+    JoboraServer::tool(GetJobCaptureTool::class, ['id' => $capture->id])
+        ->assertOk()
+        ->assertStructuredContent(fn ($json) => $json
+            ->where('ok', true)
+            ->where('data.capture.triage_origin', 'prefilter')
+            ->etc());
 });

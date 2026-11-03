@@ -29,6 +29,7 @@ final class JobCapturePresenter
             'captured_at' => $capture->captured_at?->toIso8601String(),
             'triage_status' => $capture->triage_status?->value,
             'triage_result' => $capture->triage_result?->value,
+            'triage_origin' => $capture->triage_origin?->value,
             'triage_reason' => $capture->triage_reason,
             'triage_error' => $capture->triage_error,
             'job_posting_id' => $capture->job_posting_id,

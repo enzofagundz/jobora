@@ -4,6 +4,7 @@ namespace App\Filament\Resources\JobCaptures\Tables;
 
 use App\Enums\JobCaptureTriageResult;
 use App\Enums\JobCaptureTriageStatus;
+use App\Enums\TriageOrigin;
 use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Models\JobCapture;
 use App\Services\JobPromotionService;
@@ -22,6 +23,7 @@ use Filament\Tables\Table;
 use Illuminate\Support\Collection;
 use InvalidArgumentException;
 use LogicException;
+use RuntimeException;
 
 class JobCapturesTable
 {
@@ -69,8 +71,13 @@ class JobCapturesTable
                         JobCaptureTriageResult::Uncertain => 'warning',
                         default => 'gray',
                     })
+                    ->formatStateUsing(fn (?JobCaptureTriageResult $state, JobCapture $record): ?string => $state === null
+                        ? null
+                        : $state->getLabel().($record->triage_origin === TriageOrigin::Prefilter ? ' · pré' : ''))
                     ->tooltip(function (JobCapture $record, ?JobCaptureTriageResult $state): ?string {
-                        return $state === JobCaptureTriageResult::Rejected ? $record->triage_reason : null;
+                        return in_array($state, [JobCaptureTriageResult::Rejected, JobCaptureTriageResult::NotAJob], true)
+                            ? $record->triage_reason
+                            : null;
                     }),
                 TextColumn::make('triage_reason')
                     ->label('Justificativa')
@@ -153,7 +160,7 @@ class JobCapturesTable
                         ->authorizeIndividualRecords('triage')
                         ->requiresConfirmation()
                         ->modalHeading('Enviar para triagem')
-                        ->modalDescription('As capturas selecionadas serão avaliadas por IA em lote. Custo de 1 chamada de IA por lote.')
+                        ->modalDescription('As capturas passam por um pré-filtro de IA (1 chamada por captura) e só as aprovadas seguem para a triagem completa (1 chamada por lote).')
                         ->action(function (BulkAction $action, Collection $records): void {
                             try {
                                 $eligible = app(JobTriageService::class)->startBatch($records, auth()->user());
@@ -179,6 +186,44 @@ class JobCapturesTable
                                 ->info()
                                 ->title('Triagem em andamento')
                                 ->body(count($eligible).' captura(s) enviada(s) para triagem em lote.')
+                                ->send();
+                        }),
+                    BulkAction::make('retriage')
+                        ->label('Reavaliar com IA')
+                        ->icon(Heroicon::OutlinedArrowPath)
+                        ->color('warning')
+                        ->authorizeIndividualRecords('triage')
+                        ->requiresConfirmation()
+                        ->modalHeading('Reavaliar com IA')
+                        ->modalDescription('As capturas barradas pelo pré-filtro voltam para a triagem completa por IA. Custo de 1 chamada de IA por lote; o pré-filtro é ignorado.')
+                        ->action(function (Collection $records): void {
+                            try {
+                                $claimed = app(JobTriageService::class)->requeuePrefilterBarred(
+                                    $records,
+                                    auth()->user(),
+                                );
+                            } catch (InvalidArgumentException|RuntimeException $e) {
+                                Notification::make()
+                                    ->warning()
+                                    ->title($e->getMessage())
+                                    ->send();
+
+                                return;
+                            }
+
+                            if ($claimed->isEmpty()) {
+                                Notification::make()
+                                    ->warning()
+                                    ->title('Nenhuma captura elegível para reavaliação.')
+                                    ->send();
+
+                                return;
+                            }
+
+                            Notification::make()
+                                ->info()
+                                ->title('Reavaliação em andamento')
+                                ->body(count($claimed).' captura(s) enviada(s) para a triagem por IA.')
                                 ->send();
                         }),
                     BulkAction::make('promoteSelected')

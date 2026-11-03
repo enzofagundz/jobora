@@ -3,8 +3,10 @@
 use App\Agents\JobTriageAgent;
 use App\Enums\JobCaptureTriageResult;
 use App\Enums\JobCaptureTriageStatus;
+use App\Enums\TriageOrigin;
 use App\Filament\Resources\JobCaptures\Pages\ListJobCaptures;
 use App\Jobs\AnalyzeJobPosting;
+use App\Jobs\PrefilterJobCaptures;
 use App\Jobs\TriageJobCaptures;
 use App\Models\JobCapture;
 use App\Models\JobPosting;
@@ -28,14 +30,14 @@ function triageCapture(array $overrides = []): JobCapture
     ], $overrides));
 }
 
-it('marks captures as processing and dispatches TriageJobCaptures with the ids', function () {
+it('marks captures as processing and dispatches the prefilter job with the ids', function () {
     $c1 = triageCapture();
     $c2 = triageCapture();
 
     Livewire::test(ListJobCaptures::class)
         ->callTableBulkAction('triage', [$c1, $c2]);
 
-    Queue::assertPushed(TriageJobCaptures::class, function (TriageJobCaptures $job) use ($c1, $c2): bool {
+    Queue::assertPushed(PrefilterJobCaptures::class, function (PrefilterJobCaptures $job) use ($c1, $c2): bool {
         $ids = $job->captureIds;
         sort($ids);
 
@@ -60,7 +62,7 @@ it('ignores ineligible captures in the selection', function () {
     Livewire::test(ListJobCaptures::class)
         ->callTableBulkAction('triage', [$pending, $completed, $processing, $promoted]);
 
-    Queue::assertPushed(TriageJobCaptures::class, fn (TriageJobCaptures $job): bool => $job->captureIds === [$pending->id] && $job->userId === auth()->id());
+    Queue::assertPushed(PrefilterJobCaptures::class, fn (PrefilterJobCaptures $job): bool => $job->captureIds === [$pending->id] && $job->userId === auth()->id());
 
     expect(JobCapture::find($pending->id)->triage_status)->toBe(JobCaptureTriageStatus::Processing);
 });
@@ -166,4 +168,120 @@ it('runs the triage end to end through the job', function () {
         ->and(JobCapture::find($c1->id)->triage_result)->toBe(JobCaptureTriageResult::Relevant)
         ->and(JobCapture::find($c2->id)->triage_status)->toBe(JobCaptureTriageStatus::Completed)
         ->and(JobCapture::find($c2->id)->triage_result)->toBe(JobCaptureTriageResult::NotAJob);
+});
+
+it('marks prefilter-barred results and shows the reason for non-job badges', function () {
+    triageCapture([
+        'triage_status' => JobCaptureTriageStatus::Completed,
+        'triage_result' => JobCaptureTriageResult::NotAJob,
+        'triage_origin' => TriageOrigin::Prefilter,
+        'triage_reason' => 'Pré-filtro: Artigo, dica, tutorial, curso, evento ou novidade (p=0,12)',
+    ]);
+    triageCapture([
+        'triage_status' => JobCaptureTriageStatus::Completed,
+        'triage_result' => JobCaptureTriageResult::NotAJob,
+        'triage_origin' => TriageOrigin::Llm,
+        'triage_reason' => 'Conteúdo editorial.',
+    ]);
+
+    $html = Livewire::test(ListJobCaptures::class)
+        ->filterTable('triage_result', 'all')
+        ->assertSee('Não é uma vaga · pré')
+        ->html();
+
+    expect($html)->toContain("content: 'Pré-filtro: Artigo, dica, tutorial, curso, evento ou novidade (p=0,12)'")
+        ->and($html)->toContain("content: 'Conteúdo editorial.'");
+});
+
+it('shows the triage origin in the capture infolist', function () {
+    $capture = triageCapture([
+        'triage_status' => JobCaptureTriageStatus::Completed,
+        'triage_result' => JobCaptureTriageResult::NotAJob,
+        'triage_origin' => TriageOrigin::Prefilter,
+        'triage_reason' => 'Pré-filtro: Outro conteúdo que não anuncia vaga (p=0,10)',
+    ]);
+
+    $modalHtml = Livewire::test(ListJobCaptures::class)
+        ->filterTable('triage_result', 'all')
+        ->mountTableAction('view', $capture)
+        ->assertActionMounted()
+        ->getMountedActionModalHtml();
+
+    expect($modalHtml)->toContain('Origem da triagem')
+        ->and($modalHtml)->toContain('Pré-filtro Clef');
+});
+
+it('re-evaluates only prefilter-barred non-jobs without the prefilter', function () {
+    $barred = triageCapture([
+        'triage_status' => JobCaptureTriageStatus::Completed,
+        'triage_result' => JobCaptureTriageResult::NotAJob,
+        'triage_origin' => TriageOrigin::Prefilter,
+        'triage_reason' => 'Pré-filtro: Outro conteúdo que não anuncia vaga (p=0,10)',
+        'triage_error' => 'erro antigo',
+    ]);
+    $decidedByAi = triageCapture([
+        'triage_status' => JobCaptureTriageStatus::Completed,
+        'triage_result' => JobCaptureTriageResult::NotAJob,
+        'triage_origin' => TriageOrigin::Llm,
+    ]);
+    $promoted = triageCapture([
+        'job_posting_id' => JobPosting::factory()->create()->id,
+        'triage_status' => JobCaptureTriageStatus::Completed,
+        'triage_result' => JobCaptureTriageResult::NotAJob,
+        'triage_origin' => TriageOrigin::Prefilter,
+    ]);
+
+    Livewire::test(ListJobCaptures::class)
+        ->filterTable('triage_result', 'all')
+        ->callTableBulkAction('retriage', [$barred, $decidedByAi, $promoted]);
+
+    $barred->refresh();
+
+    expect($barred->triage_status)->toBe(JobCaptureTriageStatus::Processing)
+        ->and($barred->triage_result)->toBeNull()
+        ->and($barred->triage_reason)->toBeNull()
+        ->and($barred->triage_origin)->toBeNull()
+        ->and($barred->triage_error)->toBeNull()
+        ->and($decidedByAi->refresh()->triage_status)->toBe(JobCaptureTriageStatus::Completed)
+        ->and($decidedByAi->refresh()->triage_origin)->toBe(TriageOrigin::Llm)
+        ->and($promoted->refresh()->triage_status)->toBe(JobCaptureTriageStatus::Completed);
+
+    Queue::assertPushed(TriageJobCaptures::class, function (TriageJobCaptures $job) use ($barred): bool {
+        return $job->captureIds === [$barred->id] && $job->triageIds === null;
+    });
+    Queue::assertNotPushed(PrefilterJobCaptures::class);
+});
+
+it('warns and dispatches nothing when no selected capture is eligible for re-evaluation', function () {
+    $decidedByAi = triageCapture([
+        'triage_status' => JobCaptureTriageStatus::Completed,
+        'triage_result' => JobCaptureTriageResult::NotAJob,
+        'triage_origin' => TriageOrigin::Llm,
+    ]);
+
+    Livewire::test(ListJobCaptures::class)
+        ->filterTable('triage_result', 'all')
+        ->callTableBulkAction('retriage', [$decidedByAi])
+        ->assertNotified('Nenhuma captura elegível para reavaliação.');
+
+    Queue::assertNothingPushed();
+});
+
+it('keeps the batch limit for re-evaluation without resetting the captures', function () {
+    $captures = collect(range(1, 51))->map(fn (): JobCapture => triageCapture([
+        'triage_status' => JobCaptureTriageStatus::Completed,
+        'triage_result' => JobCaptureTriageResult::NotAJob,
+        'triage_origin' => TriageOrigin::Prefilter,
+        'triage_reason' => 'Pré-filtro: Outro conteúdo que não anuncia vaga (p=0,10)',
+    ]));
+
+    Livewire::test(ListJobCaptures::class)
+        ->filterTable('triage_result', 'all')
+        ->callTableBulkAction('retriage', $captures->all())
+        ->assertNotified('Selecione no máximo 50 capturas por lote.');
+
+    Queue::assertNothingPushed();
+
+    expect($captures->first()->refresh()->triage_status)->toBe(JobCaptureTriageStatus::Completed)
+        ->and($captures->first()->refresh()->triage_origin)->toBe(TriageOrigin::Prefilter);
 });

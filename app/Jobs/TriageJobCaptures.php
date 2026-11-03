@@ -3,12 +3,11 @@
 namespace App\Jobs;
 
 use App\Enums\JobCaptureTriageStatus;
-use App\Filament\Resources\JobCaptures\JobCaptureResource;
+use App\Enums\TriageOrigin;
 use App\Models\JobCapture;
 use App\Models\User;
 use App\Services\JobTriageService;
-use Filament\Actions\Action;
-use Filament\Notifications\Notification;
+use App\Services\Triage\TriageBatchNotifier;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueueAfterCommit;
@@ -27,11 +26,13 @@ class TriageJobCaptures implements ShouldBeUnique, ShouldQueueAfterCommit
     public array $backoff = [10, 30, 60];
 
     /**
-     * @param  array<int, int>  $captureIds
+     * @param  array<int, int>  $captureIds  lote completo, usado no aviso final
+     * @param  array<int, int>|null  $triageIds  capturas encaminhadas ao LLM; null = todas
      */
     public function __construct(
         public array $captureIds,
         public int $userId,
+        public ?array $triageIds = null,
     ) {}
 
     public function uniqueId(): string
@@ -65,13 +66,17 @@ class TriageJobCaptures implements ShouldBeUnique, ShouldQueueAfterCommit
 
     public function handle(JobTriageService $service): void
     {
+        $notifier = app(TriageBatchNotifier::class);
+
         $user = User::find($this->userId);
 
         if (! $user) {
             return;
         }
 
-        $captures = $user->jobCaptures()->whereIn('id', $this->captureIds)->get();
+        $triageIds = $this->triageIds ?? $this->captureIds;
+
+        $captures = $user->jobCaptures()->whereIn('id', $triageIds)->get();
 
         if ($captures->isEmpty()) {
             return;
@@ -88,34 +93,13 @@ class TriageJobCaptures implements ShouldBeUnique, ShouldQueueAfterCommit
             return;
         }
 
-        $completed = $fresh->where('triage_status', JobCaptureTriageStatus::Completed)->count();
+        $forwarded = $fresh->whereIn('id', $triageIds)->count();
+        $barred = $fresh
+            ->filter(fn (JobCapture $capture): bool => $capture->triage_origin === TriageOrigin::Prefilter)
+            ->count();
         $failed = $fresh->where('triage_status', JobCaptureTriageStatus::Failed)->count();
 
-        $triageUrl = JobCaptureResource::getUrl('index');
-        $triageAction = [Action::make('view')->label('Ver capturas')->url($triageUrl)->markAsRead()];
-
-        if ($failed === 0 && $completed > 0) {
-            Notification::make()
-                ->success()
-                ->title('Triagem concluída')
-                ->body("{$completed} captura(s) processada(s) com sucesso.")
-                ->actions($triageAction)
-                ->sendToDatabase($user, isEventDispatched: true);
-        } elseif ($completed > 0 && $failed > 0) {
-            Notification::make()
-                ->warning()
-                ->title('Triagem concluída com erros')
-                ->body("{$completed} captura(s) processada(s); {$failed} falha(s).")
-                ->actions($triageAction)
-                ->sendToDatabase($user, isEventDispatched: true);
-        } elseif ($completed === 0 && $failed > 0) {
-            Notification::make()
-                ->danger()
-                ->title('Falha na triagem')
-                ->body('Nenhuma captura foi processada com sucesso.')
-                ->actions($triageAction)
-                ->sendToDatabase($user, isEventDispatched: true);
-        }
+        $notifier->send($user, $forwarded, $barred, $failed);
     }
 
     /**
@@ -136,14 +120,7 @@ class TriageJobCaptures implements ShouldBeUnique, ShouldQueueAfterCommit
         $recipient = User::find($this->userId);
 
         if ($recipient) {
-            Notification::make()
-                ->danger()
-                ->title('Falha na triagem')
-                ->body('Nenhuma captura foi processada com sucesso.')
-                ->actions([
-                    Action::make('view')->label('Ver capturas')->url(JobCaptureResource::getUrl('index'))->markAsRead(),
-                ])
-                ->sendToDatabase($recipient, isEventDispatched: true);
+            app(TriageBatchNotifier::class)->sendFailure($recipient);
         }
     }
 }

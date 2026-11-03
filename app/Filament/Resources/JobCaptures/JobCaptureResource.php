@@ -88,6 +88,9 @@ class JobCaptureResource extends Resource
                 TextEntry::make('triage_result')
                     ->label('Resultado')
                     ->placeholder('—'),
+                TextEntry::make('triage_origin')
+                    ->label('Origem da triagem')
+                    ->placeholder('—'),
                 TextEntry::make('triage_reason')
                     ->label('Justificativa')
                     ->placeholder('—')

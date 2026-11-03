@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\JobCaptureTriageResult;
 use App\Enums\JobCaptureTriageStatus;
+use App\Enums\TriageOrigin;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -32,6 +33,7 @@ class JobCapture extends Model
         'triage_status',
         'triage_result',
         'triage_reason',
+        'triage_origin',
         'triage_error',
     ];
 
@@ -41,6 +43,7 @@ class JobCapture extends Model
             'captured_at' => 'datetime',
             'triage_status' => JobCaptureTriageStatus::class,
             'triage_result' => JobCaptureTriageResult::class,
+            'triage_origin' => TriageOrigin::class,
         ];
     }
 
