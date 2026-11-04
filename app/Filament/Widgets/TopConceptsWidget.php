@@ -27,6 +27,7 @@ class TopConceptsWidget extends TableWidget
     public function table(Table $table): Table
     {
         return $table
+            ->defaultKeySort(false)
             ->query(
                 JobPostingItem::query()
                     ->join('job_postings', 'job_postings.id', '=', 'job_posting_items.job_posting_id')

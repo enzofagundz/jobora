@@ -4,22 +4,37 @@ use App\Models\JobPosting;
 use App\Models\JobPostingItem;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 
 uses(RefreshDatabase::class);
 
 function createOrphanItem(): JobPostingItem
 {
-    // Inserção fora da transação do RefreshDatabase via PDO separado,
-    // pois PRAGMA foreign_keys não pode ser alterado dentro de transação.
-    $pdo = new PDO('sqlite:'.database_path('database.testing.sqlite'));
-    $pdo->exec('PRAGMA busy_timeout = 5000');
-    $pdo->exec('PRAGMA foreign_keys = OFF');
-    $pdo->exec('DELETE FROM job_posting_items WHERE job_posting_id = 999999');
-    $pdo->exec("INSERT INTO job_posting_items (job_posting_id, category, name, created_at, updated_at) VALUES (999999, 'skill', 'laravel', datetime('now'), datetime('now'))");
-    $id = $pdo->lastInsertId();
-    $pdo->exec('PRAGMA foreign_keys = ON');
+    $connection = DB::connection();
+    $driver = $connection->getDriverName();
 
-    // Recarregar via Eloquent na conexão de teste
+    if ($driver === 'pgsql') {
+        $connection->unprepared('SET session_replication_role = replica');
+    } else {
+        $connection->unprepared('PRAGMA defer_foreign_keys = ON');
+    }
+
+    try {
+        $id = $connection->table('job_posting_items')->insertGetId([
+            'job_posting_id' => 999999,
+            'category' => 'skill',
+            'name' => 'laravel',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    } finally {
+        if ($driver === 'pgsql') {
+            $connection->unprepared('SET session_replication_role = origin');
+        } else {
+            $connection->unprepared('PRAGMA defer_foreign_keys = OFF');
+        }
+    }
+
     return JobPostingItem::find((int) $id);
 }
 
