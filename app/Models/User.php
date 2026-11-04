@@ -13,13 +13,15 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use Laravel\Passport\Contracts\OAuthenticatable;
+use Laravel\Passport\HasApiTokens;
 
 #[Fillable(['name', 'email', 'password', 'is_admin', 'can_use_ats_optimization'])]
 #[Hidden(['password', 'remember_token', 'capture_token_hash', 'capture_token_last_four', 'disabled_at'])]
-class User extends Authenticatable implements FilamentUser, MustVerifyEmail
+class User extends Authenticatable implements FilamentUser, MustVerifyEmail, OAuthenticatable
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, Notifiable;
+    use HasApiTokens, HasFactory, Notifiable;
 
     protected $attributes = [
         'is_admin' => false,
@@ -67,6 +69,11 @@ class User extends Authenticatable implements FilamentUser, MustVerifyEmail
     public function resumes(): HasMany
     {
         return $this->hasMany(Resume::class);
+    }
+
+    public function agentIntegrations(): HasMany
+    {
+        return $this->hasMany(AgentIntegration::class);
     }
 
     /**

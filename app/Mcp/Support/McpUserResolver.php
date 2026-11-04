@@ -17,6 +17,10 @@ final class McpUserResolver
 
     public function resolve(): User
     {
+        if (app()->bound(AgentIntegrationContext::class)) {
+            return app(AgentIntegrationContext::class)->user;
+        }
+
         $key = trim((string) config('jobora.mcp.user'));
 
         if ($this->resolved !== null && $this->resolvedKey === $key) {
