@@ -380,10 +380,10 @@ it('sends extraction requests to the OpenCode Zen OpenAI-compatible endpoint', f
     app(JobAnalysisService::class)->analyze($user, $posting);
 
     Http::assertSent(function (Request $request) {
-        return (string) $request->url() === 'https://opencode.ai/zen/v1/chat/completions'
+        return (string) $request->url() === rtrim(config('ai.providers.opencode_zen.url'), '/').'/chat/completions'
             && $request->method() === 'POST'
             && $request->hasHeader('Authorization', 'Bearer test-zen-key')
-            && $request->data()['model'] === 'mimo-v2.5-free';
+            && $request->data()['model'] === config('ai.providers.opencode_zen.models.text.default');
     });
 
     $posting->refresh();
