@@ -11,7 +11,7 @@ export function countPosts(root: ParentNode = document): number {
 
 export function getLastPost(root: ParentNode = document): Element | null {
   const posts = Array.from(root.querySelectorAll('[role="listitem"]')).filter(isPost);
-  return posts.length > 0 ? posts[posts.length - 1] : null;
+  return posts.at(-1) ?? null;
 }
 
 export type JumpResult = 'completed' | 'cancelled' | 'aborted' | 'empty';

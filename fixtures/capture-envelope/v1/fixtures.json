@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "fixtures": [
+    {
+      "file": "linkedin-publications.json",
+      "source": "linkedin",
+      "surface": "linkedin_publications",
+      "coverage": "complete"
+    },
+    {
+      "file": "linkedin-jobs.json",
+      "source": "linkedin",
+      "surface": "linkedin_jobs",
+      "coverage": "complete"
+    },
+    {
+      "file": "indeed-jobs.json",
+      "source": "indeed",
+      "surface": "indeed_jobs",
+      "coverage": "complete"
+    },
+    {
+      "file": "indeed-jobs-partial.json",
+      "source": "indeed",
+      "surface": "indeed_jobs",
+      "coverage": "partial"
+    }
+  ]
+}

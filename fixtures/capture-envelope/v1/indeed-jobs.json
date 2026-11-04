@@ -1,0 +1,38 @@
+{
+  "format": "jobora.capture-envelope",
+  "version": 1,
+  "capture": {
+    "idempotency_key": "fixture-indeed-jobs-v1",
+    "execution_id": "exec-exemplo-indeed-jobs",
+    "source": "indeed",
+    "surface": "indeed_jobs",
+    "initial_url": "https://br.indeed.com/jobs?q=desenvolvedor%20exemplo",
+    "final_url": "https://br.indeed.com/jobs?q=desenvolvedor%20exemplo&vjk=exemplo0001",
+    "captured_at": "2026-01-15T12:02:00Z",
+    "coverage": {
+      "status": "complete",
+      "reason": null,
+      "blocks_expected": 2,
+      "blocks_captured": 2
+    },
+    "html": "<!DOCTYPE html>\n<html lang=\"pt-BR\">\n<head><meta charset=\"utf-8\"><title>Indeed vagas — fixture sintética</title></head>\n<body>\n<main data-capture-surface=\"indeed_jobs\" data-capture-version=\"1\">\n  <article data-block-id=\"card-1\" data-kind=\"card\" data-platform-id=\"exemplo0001\" data-permalink=\"https://br.indeed.com/viewjob?jk=exemplo0001\" data-detail-block-id=\"detail-1\">\n    <h2>Vaga Exemplo Indeed</h2>\n    <p>Empresa Exemplo</p>\n    <p>Remoto</p>\n    <a href=\"https://br.indeed.com/viewjob?jk=exemplo0001\">Ver vaga</a>\n  </article>\n  <section data-block-id=\"detail-1\" data-kind=\"detail\" data-platform-id=\"exemplo0001\" data-permalink=\"https://br.indeed.com/viewjob?jk=exemplo0001\" data-card-block-id=\"card-1\">\n    <h1>Vaga Exemplo Indeed</h1>\n    <p>Descrição sintética da vaga de exemplo no Indeed.</p>\n    <ul><li>PHP</li><li>Laravel</li></ul>\n  </section>\n</main>\n</body>\n</html>"
+  },
+  "blocks": [
+    {
+      "block_id": "card-1",
+      "kind": "card",
+      "platform_id": "exemplo0001",
+      "permalink": "https://br.indeed.com/viewjob?jk=exemplo0001",
+      "card_block_id": null,
+      "detail_block_id": "detail-1"
+    },
+    {
+      "block_id": "detail-1",
+      "kind": "detail",
+      "platform_id": "exemplo0001",
+      "permalink": "https://br.indeed.com/viewjob?jk=exemplo0001",
+      "card_block_id": "card-1",
+      "detail_block_id": null
+    }
+  ]
+}
