@@ -1,0 +1,54 @@
+{
+  "format": "jobora.capture-envelope",
+  "version": 1,
+  "capture": {
+    "idempotency_key": "fixture-linkedin-jobs-v1",
+    "execution_id": "exec-exemplo-linkedin-jobs",
+    "source": "linkedin",
+    "surface": "linkedin_jobs",
+    "initial_url": "https://www.linkedin.com/jobs/search/?keywords=desenvolvedor%20exemplo",
+    "final_url": "https://www.linkedin.com/jobs/search/?keywords=desenvolvedor%20exemplo&currentJobId=9000000000000000101",
+    "captured_at": "2026-01-15T12:01:00Z",
+    "coverage": {
+      "status": "complete",
+      "reason": null,
+      "blocks_expected": 4,
+      "blocks_captured": 4
+    },
+    "html": "<!DOCTYPE html>\n<html lang=\"pt-BR\">\n<head><meta charset=\"utf-8\"><title>LinkedIn vagas — fixture sintética</title></head>\n<body>\n<main data-capture-surface=\"linkedin_jobs\" data-capture-version=\"1\">\n  <article data-block-id=\"card-1\" data-kind=\"card\" data-platform-id=\"9000000000000000101\" data-permalink=\"https://www.linkedin.com/jobs/view/9000000000000000101\" data-detail-block-id=\"detail-1\">\n    <h2>Vaga Exemplo PHP</h2>\n    <p>Empresa Exemplo</p>\n    <p>Remoto</p>\n    <a href=\"https://www.linkedin.com/jobs/view/9000000000000000101\">Ver vaga</a>\n  </article>\n  <section data-block-id=\"detail-1\" data-kind=\"detail\" data-platform-id=\"9000000000000000101\" data-permalink=\"https://www.linkedin.com/jobs/view/9000000000000000101\" data-card-block-id=\"card-1\">\n    <h1>Vaga Exemplo PHP</h1>\n    <p>Descrição sintética da vaga de exemplo.</p>\n    <ul><li>Laravel</li><li>PostgreSQL</li></ul>\n  </section>\n  <article data-block-id=\"card-2\" data-kind=\"card\" data-platform-id=\"9000000000000000102\" data-permalink=\"https://www.linkedin.com/jobs/view/9000000000000000102\" data-detail-block-id=\"detail-2\">\n    <h2>Vaga Exemplo Node.js</h2>\n    <p>Empresa Exemplo Dois</p>\n    <p>Híbrido</p>\n    <a href=\"https://www.linkedin.com/jobs/view/9000000000000000102\">Ver vaga</a>\n  </article>\n  <section data-block-id=\"detail-2\" data-kind=\"detail\" data-platform-id=\"9000000000000000102\" data-permalink=\"https://www.linkedin.com/jobs/view/9000000000000000102\" data-card-block-id=\"card-2\">\n    <h1>Vaga Exemplo Node.js</h1>\n    <p>Outra descrição sintética de vaga de exemplo.</p>\n    <ul><li>Node.js</li><li>TypeScript</li></ul>\n  </section>\n</main>\n</body>\n</html>"
+  },
+  "blocks": [
+    {
+      "block_id": "card-1",
+      "kind": "card",
+      "platform_id": "9000000000000000101",
+      "permalink": "https://www.linkedin.com/jobs/view/9000000000000000101",
+      "card_block_id": null,
+      "detail_block_id": "detail-1"
+    },
+    {
+      "block_id": "detail-1",
+      "kind": "detail",
+      "platform_id": "9000000000000000101",
+      "permalink": "https://www.linkedin.com/jobs/view/9000000000000000101",
+      "card_block_id": "card-1",
+      "detail_block_id": null
+    },
+    {
+      "block_id": "card-2",
+      "kind": "card",
+      "platform_id": "9000000000000000102",
+      "permalink": "https://www.linkedin.com/jobs/view/9000000000000000102",
+      "card_block_id": null,
+      "detail_block_id": "detail-2"
+    },
+    {
+      "block_id": "detail-2",
+      "kind": "detail",
+      "platform_id": "9000000000000000102",
+      "permalink": "https://www.linkedin.com/jobs/view/9000000000000000102",
+      "card_block_id": "card-2",
+      "detail_block_id": null
+    }
+  ]
+}

@@ -118,8 +118,8 @@ describe('capture-session (regressão 11 cards)', () => {
     for (const id of ids) session.claim(id);
 
     // 10 criadas + 1 duplicada do backend.
-    for (let i = 0; i < 10; i++) session.applyResult(ids[i], { ok: true, duplicate: false });
-    session.applyResult(ids[10], { ok: true, duplicate: true, status: 200 });
+    for (const id of ids.slice(0, 10)) session.applyResult(id, { ok: true, duplicate: false });
+    for (const id of ids.slice(10)) session.applyResult(id, { ok: true, duplicate: true, status: 200 });
 
     expect(session.counters).toMatchObject({
       found: 11,
@@ -130,7 +130,7 @@ describe('capture-session (regressão 11 cards)', () => {
     });
 
     // Resultado repetido (clone que passou antes do claim?) é ignorado.
-    session.applyResult(ids[0], { ok: true, duplicate: false });
+    for (const id of ids.slice(0, 1)) session.applyResult(id, { ok: true, duplicate: false });
     expect(session.counters.processed).toBe(11);
     expect(session.counters.sent).toBe(10);
   });

@@ -1,0 +1,38 @@
+{
+  "format": "jobora.capture-envelope",
+  "version": 1,
+  "capture": {
+    "idempotency_key": "fixture-linkedin-publications-v1",
+    "execution_id": "exec-exemplo-linkedin-publications",
+    "source": "linkedin",
+    "surface": "linkedin_publications",
+    "initial_url": "https://www.linkedin.com/search/results/content/?keywords=desenvolvedor%20exemplo",
+    "final_url": "https://www.linkedin.com/search/results/content/?keywords=desenvolvedor%20exemplo",
+    "captured_at": "2026-01-15T12:00:00Z",
+    "coverage": {
+      "status": "complete",
+      "reason": null,
+      "blocks_expected": 2,
+      "blocks_captured": 2
+    },
+    "html": "<!DOCTYPE html>\n<html lang=\"pt-BR\">\n<head><meta charset=\"utf-8\"><title>LinkedIn publicações — fixture sintética</title></head>\n<body>\n<main data-capture-surface=\"linkedin_publications\" data-capture-version=\"1\">\n  <article data-block-id=\"post-1\" data-kind=\"post\" data-platform-id=\"urn:li:activity:9000000000000000011\" data-permalink=\"https://www.linkedin.com/feed/update/urn:li:activity:9000000000000000011\">\n    <h2>Publicação Exemplo 1</h2>\n    <p>Autor Exemplo A publicou uma vaga sintética em PHP.</p>\n    <p>Requisitos de exemplo: Laravel e PostgreSQL.</p>\n  </article>\n  <article data-block-id=\"post-2\" data-kind=\"post\" data-platform-id=\"urn:li:activity:9000000000000000012\" data-permalink=\"https://www.linkedin.com/feed/update/urn:li:activity:9000000000000000012\">\n    <h2>Publicação Exemplo 2</h2>\n    <p>Autor Exemplo B publicou uma oportunidade sintética em QA.</p>\n    <p>Requisitos de exemplo: Cypress e Playwright.</p>\n  </article>\n</main>\n</body>\n</html>"
+  },
+  "blocks": [
+    {
+      "block_id": "post-1",
+      "kind": "post",
+      "platform_id": "urn:li:activity:9000000000000000011",
+      "permalink": "https://www.linkedin.com/feed/update/urn:li:activity:9000000000000000011",
+      "card_block_id": null,
+      "detail_block_id": null
+    },
+    {
+      "block_id": "post-2",
+      "kind": "post",
+      "platform_id": "urn:li:activity:9000000000000000012",
+      "permalink": "https://www.linkedin.com/feed/update/urn:li:activity:9000000000000000012",
+      "card_block_id": null,
+      "detail_block_id": null
+    }
+  ]
+}
