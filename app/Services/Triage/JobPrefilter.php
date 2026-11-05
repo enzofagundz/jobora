@@ -9,6 +9,10 @@ interface JobPrefilter
      */
     public function classify(PrefilterInput $input): PrefilterVerdict;
 
+    public function configuredModel(): string;
+
+    public function classifierIdentifier(): string;
+
     /**
      * Classifica as publicações em paralelo e devolve, para cada índice,
      * um veredito ou a falha daquela captura (fail-open por captura).

@@ -2,6 +2,8 @@
 
 namespace App\Jobs;
 
+use App\Enums\AiOperationType;
+use App\Models\AiOperation;
 use App\Services\AiOperationService;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -25,18 +27,21 @@ class ProcessAiOperation implements ShouldBeUnique, ShouldQueueAfterCommit
 
     public function uniqueFor(): int
     {
-        return 600;
+        return AiOperation::query()->whereKey($this->operationId)->first()?->operation_type === AiOperationType::PublicationTriage
+            ? 300
+            : 600;
     }
 
     public function __construct(
         public int $operationId,
         public string $runToken,
         public ?string $attemptToken = null,
+        public ?string $recoveryToken = null,
     ) {}
 
     public function uniqueId(): string
     {
-        return 'ai-operation:'.$this->operationId.':'.$this->runToken;
+        return 'ai-operation:'.$this->operationId.':'.$this->runToken.':'.($this->recoveryToken ?? 'initial');
     }
 
     public function uniqueVia(): CacheRepository

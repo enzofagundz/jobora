@@ -53,6 +53,8 @@ function prefilterCapture(User $user, string $description, JobCaptureTriageStatu
 function prefilterResponse(float $isJob = 0.87, array $overrides = []): array
 {
     return array_replace_recursive([
+        'errors' => [],
+        'messages' => [],
         'result' => [
             'answers' => [
                 'is_job' => ['type' => 'noul', 'noul' => $isJob],

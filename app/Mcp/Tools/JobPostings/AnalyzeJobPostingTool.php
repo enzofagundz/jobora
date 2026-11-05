@@ -34,6 +34,10 @@ class AnalyzeJobPostingTool extends JoboraTool
             throw ToolException::notFound('Vaga não encontrada.');
         }
 
+        if ($posting->isStructuredOpportunity()) {
+            throw ToolException::precondition('Oportunidades estruturadas não podem usar análise V1.');
+        }
+
         if ($posting->status === JobPostingStatus::Confirmed) {
             throw ToolException::conflict('Vaga já confirmada; não é reanalisada.');
         }

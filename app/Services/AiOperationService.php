@@ -9,10 +9,14 @@ use App\Enums\ResumeLanguage;
 use App\Filament\Pages\ProfessionalCompetenciesPage;
 use App\Filament\Pages\ResumePage;
 use App\Filament\Resources\JobPostings\JobPostingResource;
+use App\Jobs\ClassifyPublicationWithClef;
 use App\Jobs\ProcessAiOperation;
 use App\Models\AiOperation;
 use App\Models\JobPosting;
 use App\Models\PageCapture;
+use App\Models\Publication;
+use App\Models\PublicationClefResult;
+use App\Models\PublicationTriageResult;
 use App\Models\User;
 use App\Services\Discovery\PublicationExtractionException;
 use App\Services\Discovery\PublicationExtractionProcessor;
@@ -43,6 +47,7 @@ class AiOperationService
         private readonly StrategicCompetencyService $strategicCompetency,
         private readonly AtsScorerService $atsScorer,
         private readonly PublicationExtractionProcessor $publicationExtraction,
+        private readonly PublicationTriageProcessor $publicationTriage,
     ) {}
 
     public function enqueueResumeAdaptation(User $user, JobPosting $posting, ResumeLanguage $language = ResumeLanguage::PtBr): AiOperation
@@ -208,6 +213,245 @@ class AiOperationService
         );
     }
 
+    public function enqueuePublicationTriage(
+        User $user,
+        int $publicationId,
+        int $contentVersion,
+        bool $retry = false,
+        bool $bypassClef = false,
+        ?string $reason = null,
+    ): AiOperation {
+        if ($retry) {
+            if ($bypassClef || filled($reason)) {
+                throw new LogicException('Retry reutiliza a decisão e o motivo do snapshot original.');
+            }
+
+            return $this->retryPublicationTriage($user, $publicationId, $contentVersion);
+        }
+
+        if ($bypassClef && blank($reason)) {
+            throw new LogicException('Informe motivo para ignorar a decisão Clef.');
+        }
+
+        if (! $bypassClef && filled($reason)) {
+            throw new LogicException('Motivo só pode ser informado junto com bypass_clef=true.');
+        }
+
+        if ($reason !== null && mb_strlen(trim($reason)) > 500) {
+            throw new LogicException('Motivo do bypass deve ter até 500 caracteres.');
+        }
+
+        $publication = Publication::query()
+            ->where('user_id', $user->id)
+            ->whereKey($publicationId)
+            ->first();
+
+        if ($publication === null) {
+            throw new LogicException('Publicação não encontrada para este usuário.');
+        }
+
+        if ($publication->content_version !== $contentVersion) {
+            throw new LogicException('A versão informada não é a versão atual da publicação.');
+        }
+
+        $operationKey = "user:{$user->id}:publication_triage:publication:{$publication->id}:version:{$contentVersion}";
+        $completedOperation = AiOperation::query()
+            ->where('user_id', $user->id)
+            ->where('operation_key', $operationKey)
+            ->where('operation_type', AiOperationType::PublicationTriage)
+            ->where('target_type', 'publication')
+            ->where('target_id', $publication->id)
+            ->where('status', AiOperationStatus::Completed)
+            ->first();
+
+        if ($completedOperation !== null) {
+            return $completedOperation;
+        }
+
+        if (! is_string($publication->content) || trim($publication->content) === '') {
+            throw new LogicException('A publicação não possui conteúdo persistido suficiente; nova visita necessária.');
+        }
+
+        if (! is_string($publication->content_hash)
+            || ! hash_equals($publication->content_hash, hash('sha256', $publication->content))
+            || mb_strlen($publication->content) > (int) config('ai.publication_triage.max_content_characters', 100000)) {
+            throw new LogicException('O conteúdo persistido da publicação é inválido; nova visita necessária.');
+        }
+
+        $clefResult = PublicationClefResult::query()
+            ->where('publication_id', $publication->id)
+            ->where('content_version', $publication->content_version)
+            ->orderByDesc('attempt')
+            ->first();
+
+        if ($clefResult?->status === 'barred' && ! $bypassClef) {
+            throw new LogicException('A publicação não está elegível segundo a decisão Clef atual.');
+        }
+
+        if ($clefResult?->status !== 'barred'
+            && $clefResult?->status !== 'eligible'
+            && ! ($bypassClef && $clefResult?->status === 'inconclusive')) {
+            throw new LogicException('A decisão Clef atual não permite solicitar triagem.');
+        }
+
+        if ($clefResult?->status === 'eligible' && $bypassClef) {
+            throw new LogicException('Bypass só se aplica a uma publicação barrada pela decisão Clef atual.');
+        }
+
+        $observation = $publication->observations()
+            ->where('content_version', $publication->content_version)
+            ->latest('observed_at')
+            ->first();
+        $evidenceBlockIds = $observation?->evidence_block_ids ?? [];
+
+        $provider = (string) config('ai.publication_triage.provider');
+        $model = (string) config('ai.publication_triage.model');
+        $schemaVersion = (string) config('ai.publication_triage.schema_version');
+        $snapshot = [
+            'payload' => [
+                'publication_id' => $publication->id,
+                'content_version' => $publication->content_version,
+                'content_hash' => $publication->content_hash,
+                'url' => $publication->url,
+                'content' => $publication->content,
+                'evidence_block_ids' => $evidenceBlockIds,
+                'provider' => $provider,
+                'model' => $model,
+                'schema_version' => $schemaVersion,
+                'clef_result_id' => $clefResult->id,
+                'clef_status' => $clefResult->status,
+                'clef_bypassed' => $bypassClef,
+                'clef_bypass_reason' => $bypassClef ? trim((string) $reason) : null,
+                'requested_by' => $user->id,
+            ],
+        ];
+        $snapshot['fingerprint'] = hash('sha256', json_encode($snapshot['payload'], JSON_THROW_ON_ERROR));
+
+        return $this->enqueue(
+            $user,
+            AiOperationType::PublicationTriage,
+            $operationKey,
+            'publication',
+            $publication->id,
+            null,
+            $snapshot,
+            failOnDispatchError: false,
+            idempotent: true,
+            retry: $retry,
+            allowTerminalReplacement: $bypassClef,
+        );
+    }
+
+    public function retryPublicationClef(User $user, int $publicationId, int $contentVersion): PublicationClefResult
+    {
+        $publication = Publication::query()
+            ->where('user_id', $user->id)
+            ->whereKey($publicationId)
+            ->first();
+
+        if ($publication === null) {
+            throw new LogicException('Publicação não encontrada para este usuário.');
+        }
+
+        if ($publication->content_version !== $contentVersion) {
+            throw new LogicException('A versão informada não é a versão atual da publicação.');
+        }
+
+        $result = DB::transaction(function () use ($publication, $contentVersion): PublicationClefResult {
+            $latest = PublicationClefResult::query()
+                ->where('publication_id', $publication->id)
+                ->where('content_version', $contentVersion)
+                ->orderByDesc('attempt')
+                ->lockForUpdate()
+                ->first();
+
+            if ($latest === null) {
+                throw new LogicException('Não há classificação Clef para retry nesta versão da publicação.');
+            }
+
+            if (in_array($latest->status, ['pending', 'running'], true)) {
+                return $latest;
+            }
+
+            if ($latest->status !== 'inconclusive') {
+                throw new LogicException('Somente classificação Clef inconclusiva aceita retry explícito.');
+            }
+
+            return PublicationClefResult::query()->create([
+                'publication_id' => $publication->id,
+                'content_version' => $contentVersion,
+                'attempt' => $latest->attempt + 1,
+                'status' => 'pending',
+            ]);
+        });
+
+        if ($result->status === 'pending' && $result->wasRecentlyCreated) {
+            try {
+                ClassifyPublicationWithClef::dispatch($result->id);
+            } catch (Throwable $exception) {
+                Log::channel('ai')->warning('Publication Clef retry dispatch failed; recovery will retry.', [
+                    'result_id' => $result->id,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        }
+
+        return $result;
+    }
+
+    private function retryPublicationTriage(User $user, int $publicationId, int $contentVersion): AiOperation
+    {
+        $operationKey = "user:{$user->id}:publication_triage:publication:{$publicationId}:version:{$contentVersion}";
+        $operation = AiOperation::query()
+            ->where('user_id', $user->id)
+            ->where('operation_key', $operationKey)
+            ->where('operation_type', AiOperationType::PublicationTriage)
+            ->where('target_type', 'publication')
+            ->where('target_id', $publicationId)
+            ->first();
+
+        if ($operation === null) {
+            throw new LogicException('Não há operação solicitada para retry nesta versão da publicação.');
+        }
+
+        $snapshotPayload = $operation->input_snapshot ?? [];
+
+        if (($snapshotPayload['content_version'] ?? null) !== $contentVersion) {
+            throw new LogicException('A versão informada não corresponde ao snapshot da operação.');
+        }
+
+        if (! is_string($snapshotPayload['content'] ?? null)
+            || trim($snapshotPayload['content']) === ''
+            || ! is_string($snapshotPayload['content_hash'] ?? null)
+            || ! hash_equals($snapshotPayload['content_hash'], hash('sha256', $snapshotPayload['content']))) {
+            throw new LogicException('O snapshot não contém publicação suficiente; nova visita necessária.');
+        }
+
+        if ($operation->isActive() || $operation->status === AiOperationStatus::Completed) {
+            return $operation;
+        }
+
+        if ($operation->status !== AiOperationStatus::Failed) {
+            throw new LogicException('Somente operação com falha aceita retry explícito.');
+        }
+
+        return $this->enqueue(
+            $user,
+            AiOperationType::PublicationTriage,
+            $operationKey,
+            'publication',
+            $publicationId,
+            null,
+            [
+                'payload' => $snapshotPayload,
+                'fingerprint' => $operation->input_fingerprint,
+            ],
+            failOnDispatchError: false,
+            idempotent: true,
+            retry: true,
+        );
+    }
+
     /**
      * @param  array{payload: array<string, mixed>, fingerprint: string}  $snapshot
      */
@@ -220,6 +464,9 @@ class AiOperationService
         ?int $jobPostingId,
         array $snapshot,
         bool $failOnDispatchError = true,
+        bool $idempotent = false,
+        bool $retry = false,
+        bool $allowTerminalReplacement = false,
     ): AiOperation {
         $now = now();
 
@@ -230,11 +477,33 @@ class AiOperationService
         }
 
         try {
-            $operation = DB::transaction(function () use ($user, $operationType, $operationKey, $targetType, $targetId, $jobPostingId, $snapshot, $now): AiOperation {
+            $shouldDispatch = true;
+            $operation = DB::transaction(function () use ($user, $operationType, $operationKey, $targetType, $targetId, $jobPostingId, $snapshot, $now, $idempotent, $retry, $allowTerminalReplacement, &$shouldDispatch): AiOperation {
                 $operation = AiOperation::query()
                     ->where('operation_key', $operationKey)
                     ->lockForUpdate()
                     ->first();
+
+                if ($idempotent && $operation !== null) {
+                    $fingerprintMatches = hash_equals($operation->input_fingerprint, $snapshot['fingerprint']);
+                    if ($operation->status === AiOperationStatus::Completed
+                        || ($operation->isActive() && $fingerprintMatches)) {
+                        $shouldDispatch = false;
+
+                        return $operation;
+                    }
+
+                    if (! $fingerprintMatches
+                        && (! $allowTerminalReplacement || $operation->isActive())) {
+                        throw new LogicException('A operação existente tem snapshot diferente para esta publicação e versão.');
+                    }
+
+                    if ($fingerprintMatches && $operation->status === AiOperationStatus::Failed && ! $retry) {
+                        $shouldDispatch = false;
+
+                        return $operation;
+                    }
+                }
 
                 if ($operation?->isActive()) {
                     throw new LogicException($this->inProgressMessage($operationType));
@@ -293,6 +562,10 @@ class AiOperationService
             $lock->release();
         }
 
+        if (! $shouldDispatch) {
+            return $operation;
+        }
+
         try {
             $pendingDispatch = ProcessAiOperation::dispatch(
                 $operation->id,
@@ -302,10 +575,12 @@ class AiOperationService
             unset($pendingDispatch);
         } catch (Throwable $exception) {
             if (! $failOnDispatchError) {
-                Log::channel('ai')->warning('Publication extraction dispatch failed; recovery will retry.', [
-                    'operation_id' => $operation->id,
-                    'error' => $exception->getMessage(),
-                ]);
+                Log::channel('ai')->warning($operationType === AiOperationType::PublicationTriage
+                    ? 'Publication triage dispatch failed; recovery will retry.'
+                    : 'Publication extraction dispatch failed; recovery will retry.', [
+                        'operation_id' => $operation->id,
+                        'error' => $exception->getMessage(),
+                    ]);
 
                 return $operation;
             }
@@ -345,6 +620,10 @@ class AiOperationService
             return max(1, (int) config('capture.ingestion.publication_extraction_ttl_minutes', 60));
         }
 
+        if ($operationType === AiOperationType::PublicationTriage) {
+            return 5;
+        }
+
         return 5;
     }
 
@@ -357,6 +636,7 @@ class AiOperationService
             AiOperationType::AtsOptimization => 'Atualização da otimização ATS já está em andamento para esta vaga.',
             AiOperationType::AtsScore => 'Simulação ATS já está em andamento para esta vaga.',
             AiOperationType::PublicationExtraction => 'A extração de publicações já está em andamento para esta captura.',
+            AiOperationType::PublicationTriage => 'A triagem da publicação já está em andamento.',
         };
     }
 
@@ -374,14 +654,22 @@ class AiOperationService
                 return null;
             }
 
-            if ($operation->status === AiOperationStatus::Queued && $operation->expires_at->lte(now())) {
+            if ($operation->expires_at->lte(now())
+                && ($operation->status === AiOperationStatus::Queued || $this->isRunningAttemptStale($operation))) {
                 $operation->forceFill([
                     'status' => AiOperationStatus::Failed,
                     'failed_at' => now(),
                     'failure_code' => 'worker_unavailable',
                 ])->save();
+                $this->recordPublicationTriageFailure($operation, 'worker_unavailable');
 
                 return $operation->fresh(['user']);
+            }
+
+            if ($operation->status === AiOperationStatus::Queued
+                && $attemptToken !== null
+                && ($operation->attempt_token === null || ! hash_equals($operation->attempt_token, $attemptToken))) {
+                return null;
             }
 
             if ($operation->status === AiOperationStatus::Running) {
@@ -395,6 +683,7 @@ class AiOperationService
                         'failed_at' => now(),
                         'failure_code' => 'processing_failed',
                     ])->save();
+                    $this->recordPublicationTriageFailure($operation, 'processing_failed');
 
                     return $operation->fresh(['user']);
                 }
@@ -409,6 +698,7 @@ class AiOperationService
                     'failed_at' => now(),
                     'failure_code' => 'processing_failed',
                 ])->save();
+                $this->recordPublicationTriageFailure($operation, 'processing_failed');
 
                 return $operation->fresh(['user']);
             }
@@ -461,7 +751,58 @@ class AiOperationService
                 AiOperationType::AtsOptimization => $this->processAtsOptimization($operation, $runToken, $ownedAttemptToken),
                 AiOperationType::AtsScore => $this->processAtsScore($operation, $runToken, $ownedAttemptToken),
                 AiOperationType::PublicationExtraction => $this->processPublicationExtraction($operation, $runToken, $ownedAttemptToken),
+                AiOperationType::PublicationTriage => $this->processPublicationTriage($operation, $runToken, $ownedAttemptToken),
             };
+        } catch (PublicationTriageInvalidOutput $exception) {
+            $this->persistForAttempt(
+                $operation->id,
+                $runToken,
+                $ownedAttemptToken,
+                function () use ($operation, $runToken, $ownedAttemptToken, $exception): void {
+                    $snapshot = $operation->input_snapshot ?? [];
+                    PublicationTriageResult::query()->create([
+                        'ai_operation_id' => $operation->id,
+                        'publication_id' => $snapshot['publication_id'],
+                        'content_version' => $snapshot['content_version'],
+                        'run_token' => $runToken,
+                        'attempt_token' => $ownedAttemptToken,
+                        'attempt' => $operation->attempts,
+                        'status' => 'failed',
+                        'provider' => $snapshot['provider'],
+                        'model' => $snapshot['model'],
+                        'schema_version' => $snapshot['schema_version'],
+                        'input_fingerprint' => $operation->input_fingerprint,
+                        'prompt_tokens' => $exception->promptTokens,
+                        'completion_tokens' => $exception->completionTokens,
+                        'error_code' => 'invalid_output',
+                        ...$this->publicationTriageAuditFields($snapshot),
+                    ]);
+
+                    AiOperation::query()
+                        ->whereKey($operation->id)
+                        ->where('run_token', $runToken)
+                        ->where('attempt_token', $ownedAttemptToken)
+                        ->where('status', AiOperationStatus::Running->value)
+                        ->update([
+                            'status' => AiOperationStatus::Failed->value,
+                            'failed_at' => now(),
+                            'failure_code' => 'invalid_output',
+                        ]);
+                },
+            );
+
+            $failedOperation = AiOperation::query()
+                ->whereKey($operation->id)
+                ->where('run_token', $runToken)
+                ->where('attempt_token', $ownedAttemptToken)
+                ->where('status', AiOperationStatus::Failed->value)
+                ->first();
+
+            if ($failedOperation !== null) {
+                $this->notifyFailed($failedOperation->fresh(['user']));
+            }
+
+            return;
         } catch (PublicationExtractionException $exception) {
             $failed = AiOperation::query()
                 ->whereKey($operation->id)
@@ -515,6 +856,18 @@ class AiOperationService
                 'completed_at' => now(),
             ]);
             $this->notifyCompleted($operation);
+        } else {
+            $terminalOperation = AiOperation::query()
+                ->whereKey($operation->id)
+                ->where('run_token', $runToken)
+                ->where('attempt_token', $ownedAttemptToken)
+                ->first();
+
+            if ($terminalOperation?->status === AiOperationStatus::Completed) {
+                $this->notifyCompleted($terminalOperation->fresh(['user']));
+            } elseif ($terminalOperation?->status === AiOperationStatus::Failed) {
+                $this->notifyFailed($terminalOperation->fresh(['user']));
+            }
         }
     }
 
@@ -634,6 +987,27 @@ class AiOperationService
         );
     }
 
+    private function processPublicationTriage(AiOperation $operation, string $runToken, string $attemptToken): void
+    {
+        if ($operation->user === null) {
+            throw new LogicException('O usuário da triagem não está disponível.');
+        }
+
+        $this->publicationTriage->process(
+            $operation->user,
+            $operation,
+            $operation->input_snapshot ?? [],
+            $runToken,
+            $attemptToken,
+            fn (Closure $persist): mixed => $this->persistForAttempt(
+                $operation->id,
+                $runToken,
+                $attemptToken,
+                $persist,
+            ),
+        );
+    }
+
     /**
      * Keep the result write behind the attempt lease so a recovered worker
      * cannot be overwritten by the worker that lost that lease.
@@ -683,10 +1057,12 @@ class AiOperationService
             $legacyQueueAttemptMatches = $attemptToken === null
                 && $queueAttempt !== null
                 && (
-                    $operation->attempts === $queueAttempt
-                    || ($operation->status === AiOperationStatus::Queued && $operation->attempts === 0)
+                    ($operation->status === AiOperationStatus::Queued && $operation->attempts === 0)
+                    || ($operation->attempt_token === null && $operation->attempts === $queueAttempt)
                 );
-            $queueExhaustionMatches = $queueAttempt !== null
+            $queueExhaustionMatches = $attemptToken === null
+                && $operation->attempt_token === null
+                && $queueAttempt !== null
                 && $queueAttempt >= self::MAX_ATTEMPTS
                 && $operation->attempts >= self::MAX_ATTEMPTS
                 && (
@@ -703,6 +1079,8 @@ class AiOperationService
                 'failed_at' => now(),
                 'failure_code' => 'processing_failed',
             ])->save();
+
+            $this->recordPublicationTriageFailure($operation, 'processing_failed');
 
             return $operation->fresh(['user']);
         });
@@ -731,10 +1109,51 @@ class AiOperationService
             && $lastAttemptStartedAt->lte(now()->subSeconds(self::RUNNING_STALE_AFTER_SECONDS));
     }
 
+    private function recordPublicationTriageFailure(AiOperation $operation, string $errorCode): void
+    {
+        if ($operation->operation_type !== AiOperationType::PublicationTriage || $operation->attempt_token === null) {
+            return;
+        }
+
+        $snapshot = $operation->input_snapshot ?? [];
+
+        PublicationTriageResult::query()->firstOrCreate([
+            'ai_operation_id' => $operation->id,
+            'run_token' => $operation->run_token,
+            'attempt_token' => $operation->attempt_token,
+        ], [
+            'publication_id' => $snapshot['publication_id'],
+            'content_version' => $snapshot['content_version'],
+            'attempt' => $operation->attempts,
+            'status' => 'failed',
+            'provider' => $snapshot['provider'],
+            'model' => $snapshot['model'],
+            'schema_version' => $snapshot['schema_version'],
+            'input_fingerprint' => $operation->input_fingerprint,
+            'error_code' => $errorCode,
+            ...$this->publicationTriageAuditFields($snapshot),
+        ]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $snapshot
+     * @return array<string, mixed>
+     */
+    private function publicationTriageAuditFields(array $snapshot): array
+    {
+        return [
+            'clef_result_id' => $snapshot['clef_result_id'] ?? null,
+            'clef_status' => $snapshot['clef_status'] ?? null,
+            'clef_bypassed' => $snapshot['clef_bypassed'] ?? false,
+            'clef_bypass_reason' => $snapshot['clef_bypass_reason'] ?? null,
+            'requested_by' => $snapshot['requested_by'] ?? null,
+        ];
+    }
+
     public function expireWaiting(): int
     {
         $operations = AiOperation::query()
-            ->where('status', AiOperationStatus::Queued)
+            ->whereIn('status', [AiOperationStatus::Queued, AiOperationStatus::Running])
             ->where('expires_at', '<=', now())
             ->get(['id', 'run_token']);
         $expired = 0;
@@ -776,12 +1195,13 @@ class AiOperationService
             $operation = AiOperation::query()
                 ->whereKey($operationId)
                 ->where('run_token', $runToken)
-                ->where('status', AiOperationStatus::Queued)
+                ->whereIn('status', [AiOperationStatus::Queued, AiOperationStatus::Running])
                 ->where('expires_at', '<=', now())
                 ->lockForUpdate()
                 ->first();
 
-            if ($operation === null) {
+            if ($operation === null
+                || ($operation->status === AiOperationStatus::Running && ! $this->isRunningAttemptStale($operation))) {
                 return null;
             }
 
@@ -790,6 +1210,7 @@ class AiOperationService
                 'failed_at' => now(),
                 'failure_code' => 'worker_unavailable',
             ])->save();
+            $this->recordPublicationTriageFailure($operation, 'worker_unavailable');
 
             return $operation->fresh(['user']);
         });
@@ -830,6 +1251,10 @@ class AiOperationService
                 'Extração de publicações concluída',
                 'As publicações da captura estão disponíveis para consulta.',
             ],
+            AiOperationType::PublicationTriage => [
+                'Triagem de publicação concluída',
+                'O resultado estruturado está disponível para consulta.',
+            ],
         };
 
         $this->sendTerminalNotification($operation, true, $title, $body);
@@ -861,6 +1286,10 @@ class AiOperationService
             AiOperationType::PublicationExtraction => [
                 'Falha na extração de publicações',
                 'Não foi possível processar as publicações desta captura.',
+            ],
+            AiOperationType::PublicationTriage => [
+                'Falha na triagem da publicação',
+                'Não foi possível estruturar esta publicação. Tente novamente.',
             ],
         };
 
@@ -961,6 +1390,7 @@ class AiOperationService
             AiOperationType::StrategicCompetencyClassification => [ProfessionalCompetenciesPage::getUrl(), 'Ver competências'],
             AiOperationType::ResumeTranslation => [ResumePage::getUrl(), 'Ver currículo'],
             AiOperationType::PublicationExtraction => [null, null],
+            AiOperationType::PublicationTriage => [null, null],
         };
     }
 }
