@@ -18,9 +18,12 @@ use App\Models\User;
 use App\Services\AiOperationService;
 use App\Services\CaptureTokenService;
 use App\Services\Discovery\CaptureBlockReader;
+use App\Services\Discovery\CaptureValidationException;
+use App\Services\Discovery\CaptureValidator;
 use App\Services\Discovery\DiscoveryRunService;
 use App\Services\Discovery\LinkedInPublicationsDecoder;
 use App\Services\Discovery\PublicationExtractionException;
+use App\Services\Discovery\PublicationExtractionProcessor;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -30,7 +33,7 @@ use Illuminate\Testing\TestResponse;
 uses(RefreshDatabase::class);
 
 /**
- * @param  list<array{block_id: string, platform_id: string, permalink: string, text: string}>  $posts
+ * @param  list<array{block_id: string, platform_id: ?string, permalink: ?string, text: string}>  $posts
  */
 function publicationExtractionEnvelope(array $posts, ?string $capturedAt = null): array
 {
@@ -41,8 +44,8 @@ function publicationExtractionEnvelope(array $posts, ?string $capturedAt = null)
 
     foreach ($posts as $post) {
         $html .= '<article data-block-id="'.$post['block_id'].'" data-kind="post"'
-            .' data-platform-id="'.$post['platform_id'].'"'
-            .' data-permalink="'.$post['permalink'].'">'
+            .($post['platform_id'] === null ? '' : ' data-platform-id="'.$post['platform_id'].'"')
+            .($post['permalink'] === null ? '' : ' data-permalink="'.$post['permalink'].'"').'>'
             .'<h2>'.$post['text'].'</h2></article>';
     }
 
@@ -105,7 +108,7 @@ function publicationExtractionPost(User $user, array $payload): TestResponse
 }
 
 /**
- * @param  list<array{block_id: string, platform_id: string, permalink: string, text: string}>  $posts
+ * @param  list<array{block_id: string, platform_id: ?string, permalink: ?string, text: string}>  $posts
  * @return array{0: PageCapture, 1: AiOperation}
  */
 function publicationExtractionIngest(User $user, array $posts, ?string $capturedAt = null): array
@@ -144,6 +147,209 @@ it('decodes the public linkedin publications fixture deterministically', functio
         ->and($publications[0]['url'])->toBe('https://www.linkedin.com/feed/update/urn:li:activity:9000000000000000011')
         ->and($publications[0]['content'])->toContain('Publicação Exemplo 1')
         ->and($publications[0]['evidence_block_ids'])->toBe(['post-1']);
+});
+
+it('ingests multiple linkedin posts without identity or permalink', function () {
+    $user = User::factory()->create();
+
+    $posts = [
+        [
+            'block_id' => 'post-anonymous-1',
+            'platform_id' => null,
+            'permalink' => null,
+            'text' => 'Post sem identidade',
+        ],
+        [
+            'block_id' => 'post-anonymous-2',
+            'platform_id' => null,
+            'permalink' => null,
+            'text' => 'Post sem identidade',
+        ],
+        [
+            'block_id' => 'post-id-only',
+            'platform_id' => 'urn:li:activity:anonymous-id-only',
+            'permalink' => null,
+            'text' => 'Post com ID',
+        ],
+        [
+            'block_id' => 'post-url-only',
+            'platform_id' => null,
+            'permalink' => 'https://www.linkedin.com/feed/update/urn:li:activity:url-only',
+            'text' => 'Post com URL',
+        ],
+    ];
+
+    [$capture, $operation] = publicationExtractionIngest($user, $posts);
+
+    $publications = Publication::query()->orderBy('id')->get();
+    $storedHtml = Storage::disk('local')->get((string) $capture->html_path);
+
+    expect($operation->refresh()->status)->toBe(AiOperationStatus::Completed)
+        ->and($publications)->toHaveCount(4)
+        ->and($publications->pluck('external_id')->all())->toBe([
+            null,
+            null,
+            'urn:li:activity:anonymous-id-only',
+            null,
+        ])
+        ->and($publications->pluck('url')->all())->toBe([
+            null,
+            null,
+            null,
+            'https://www.linkedin.com/feed/update/urn:li:activity:url-only',
+        ])
+        ->and($publications[0]->fingerprint)->toBe(hash('sha256', 'capture-block:v1|'.$capture->id.'|post-anonymous-1'))
+        ->and($publications[1]->fingerprint)->toBe(hash('sha256', 'capture-block:v1|'.$capture->id.'|post-anonymous-2'))
+        ->and($publications[2]->fingerprint)->toBeNull()
+        ->and($publications[3]->fingerprint)->toBeNull()
+        ->and(PublicationObservation::query()->count())->toBe(4)
+        ->and(PublicationObservation::query()->where('page_capture_id', $capture->id)->orderBy('id')->pluck('evidence_block_ids')->all())->toBe([
+            ['post-anonymous-1'],
+            ['post-anonymous-2'],
+            ['post-id-only'],
+            ['post-url-only'],
+        ])
+        ->and($storedHtml)->not->toMatch('/data-block-id="post-anonymous-[12]"[^>]*data-platform-id=/')
+        ->and($storedHtml)->not->toMatch('/data-block-id="post-anonymous-[12]"[^>]*data-permalink=/');
+
+    app(PublicationExtractionProcessor::class)->extractFromSnapshot(
+        $user,
+        [
+            'page_capture_id' => $capture->id,
+            'html_path' => $capture->html_path,
+            'surface' => $capture->surface,
+            'format_version' => $capture->format_version,
+        ],
+        fn (Closure $persist): mixed => $persist(),
+    );
+
+    expect(Publication::query()->count())->toBe(4)
+        ->and(PublicationObservation::query()->count())->toBe(4);
+
+    [$recapture] = publicationExtractionIngest($user, $posts);
+
+    expect(Publication::query()->count())->toBe(6)
+        ->and(PublicationObservation::query()->count())->toBe(8)
+        ->and(Publication::query()->where('external_id', 'urn:li:activity:anonymous-id-only')->count())->toBe(1)
+        ->and(Publication::query()->where('url', 'https://www.linkedin.com/feed/update/urn:li:activity:url-only')->count())->toBe(1)
+        ->and(Publication::query()->where('fingerprint', hash('sha256', 'capture-block:v1|'.$recapture->id.'|post-anonymous-1'))->exists())->toBeTrue()
+        ->and(Publication::query()->where('fingerprint', hash('sha256', 'capture-block:v1|'.$recapture->id.'|post-anonymous-2'))->exists())->toBeTrue()
+        ->and($recapture->id)->not->toBe($capture->id);
+});
+
+it('requires identity keys but allows null only on linkedin publication posts', function () {
+    $validator = app(CaptureValidator::class);
+    $payload = publicationExtractionEnvelope([[
+        'block_id' => 'post-null-identity',
+        'platform_id' => null,
+        'permalink' => null,
+        'text' => 'Post sem identidade',
+    ]]);
+
+    $validator->validate($payload);
+
+    foreach (['platform_id', 'permalink'] as $identityKey) {
+        $missing = $payload;
+        unset($missing['blocks'][0][$identityKey]);
+        expect(fn () => $validator->validate($missing))
+            ->toThrow(CaptureValidationException::class);
+
+        foreach (['', 42, []] as $invalid) {
+            $invalidPayload = $payload;
+            $invalidPayload['blocks'][0][$identityKey] = $invalid;
+            expect(fn () => $validator->validate($invalidPayload))
+                ->toThrow(CaptureValidationException::class);
+        }
+
+        $whitespace = $payload;
+        $whitespace['blocks'][0][$identityKey] = '   ';
+        expect(fn () => $validator->validate($whitespace))
+            ->toThrow(CaptureValidationException::class);
+    }
+
+    $jobPayload = $payload;
+    $jobPayload['capture']['surface'] = 'linkedin_jobs';
+    $jobPayload['capture']['initial_url'] = 'https://www.linkedin.com/jobs/search/?keywords=laravel';
+
+    expect(fn () => $validator->validate($jobPayload))
+        ->toThrow(CaptureValidationException::class);
+
+    foreach (['card', 'detail'] as $kind) {
+        foreach (['platform_id', 'permalink'] as $identityKey) {
+            $relatedBlock = $payload;
+            $relatedBlock['blocks'][0]['kind'] = $kind;
+            $relatedBlock['blocks'][0]['platform_id'] = 'urn:li:activity:related-block';
+            $relatedBlock['blocks'][0]['permalink'] = 'https://www.linkedin.com/feed/update/urn:li:activity:related-block';
+            $relatedBlock['blocks'][0][$identityKey] = null;
+            $relatedBlock['blocks'][0]['card_block_id'] = $kind === 'detail' ? 'card-1' : null;
+
+            expect(fn () => $validator->validate($relatedBlock))
+                ->toThrow(CaptureValidationException::class, $identityKey.' inválido.');
+        }
+    }
+});
+
+it('rejects identity HTML attributes that diverge from JSON identity values', function () {
+    $user = User::factory()->create();
+    foreach ([
+        'data-platform-id=""',
+        'data-permalink=""',
+        'data-permalink="https://www.linkedin.com/feed/update/forged"',
+    ] as $attribute) {
+        $anonymous = publicationExtractionEnvelope([[
+            'block_id' => 'post-null-identity',
+            'platform_id' => null,
+            'permalink' => null,
+            'text' => 'Post sem identidade',
+        ]]);
+        $anonymous['capture']['html'] = str_replace(
+            'data-kind="post"',
+            'data-kind="post" '.$attribute,
+            $anonymous['capture']['html'],
+        );
+
+        publicationExtractionPost($user, $anonymous)->assertStatus(422);
+    }
+
+    foreach ([
+        ' data-platform-id="urn:li:activity:html-mismatch"',
+        ' data-permalink="https://www.linkedin.com/feed/update/urn:li:activity:html-mismatch"',
+    ] as $missingAttribute) {
+        $identified = publicationExtractionEnvelope([[
+            'block_id' => 'post-identified',
+            'platform_id' => 'urn:li:activity:html-mismatch',
+            'permalink' => 'https://www.linkedin.com/feed/update/urn:li:activity:html-mismatch',
+            'text' => 'Post com identidade',
+        ]]);
+        $identified['capture']['html'] = str_replace($missingAttribute, '', $identified['capture']['html']);
+
+        publicationExtractionPost($user, $identified)->assertStatus(422);
+    }
+
+    foreach ([
+        ['data-platform-id="urn:li:activity:html-mismatch"', 'data-platform-id="urn:li:activity:other"'],
+        ['data-permalink="https://www.linkedin.com/feed/update/urn:li:activity:html-mismatch"', 'data-permalink="https://www.linkedin.com/feed/update/urn:li:activity:other"'],
+    ] as [$htmlValue, $htmlMismatch]) {
+        $identified = publicationExtractionEnvelope([[
+            'block_id' => 'post-identified',
+            'platform_id' => 'urn:li:activity:html-mismatch',
+            'permalink' => 'https://www.linkedin.com/feed/update/urn:li:activity:html-mismatch',
+            'text' => 'Post com identidade',
+        ]]);
+        $identified['capture']['html'] = str_replace($htmlValue, $htmlMismatch, $identified['capture']['html']);
+
+        publicationExtractionPost($user, $identified)->assertStatus(422);
+    }
+});
+
+it('rejects a LinkedIn search URL as publication permalink', function () {
+    expect(fn () => app(LinkedInPublicationsDecoder::class)->decode([[
+        'block_id' => 'post-search-url',
+        'kind' => 'post',
+        'platform_id' => null,
+        'permalink' => 'https://www.linkedin.com/search/results/content/?keywords=laravel',
+        'content' => 'Post com URL de busca',
+    ]]))->toThrow(PublicationExtractionException::class);
 });
 
 it('accepts an empty publications page as valid', function () {

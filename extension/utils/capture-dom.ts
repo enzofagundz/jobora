@@ -70,8 +70,16 @@ export function createCaptureBlockElement(
 export function serializeCaptureBlock(element: Element, block: CaptureBlock): string {
   element.setAttribute('data-block-id', block.block_id);
   element.setAttribute('data-kind', block.kind);
-  element.setAttribute('data-platform-id', block.platform_id);
-  element.setAttribute('data-permalink', block.permalink);
+  if (block.platform_id === null) {
+    element.removeAttribute('data-platform-id');
+  } else {
+    element.setAttribute('data-platform-id', block.platform_id);
+  }
+  if (block.permalink === null) {
+    element.removeAttribute('data-permalink');
+  } else {
+    element.setAttribute('data-permalink', block.permalink);
+  }
   element.removeAttribute('data-card-block-id');
   element.removeAttribute('data-detail-block-id');
 

@@ -1,7 +1,7 @@
 import type {
-  CaptureBlock,
   CaptureCoverageReason,
   CaptureEnvelope,
+  CapturePostBlock,
   CaptureSurface,
 } from '@/types/capture';
 import { buildCaptureDocument, safeHref, snapshotCaptureBlock } from '@/utils/capture-dom';
@@ -9,7 +9,7 @@ import type { LinkedInRawPost } from './extract';
 
 export interface CollectedPost {
   identity: string;
-  block: CaptureBlock;
+  block: CapturePostBlock;
 }
 
 interface StoredPost extends CollectedPost {
@@ -36,20 +36,19 @@ export function createLinkedInPublicationsBuilder(
   const posts: StoredPost[] = [];
   const byIdentity = new Map<string, StoredPost>();
 
-  function add(raw: LinkedInRawPost, identity: string, postEl: Element): CollectedPost | null {
+  function add(raw: LinkedInRawPost, identity: string, postEl: Element): CollectedPost {
     const existing = byIdentity.get(identity);
     if (existing) return existing;
 
     const permalink = normalizePermalink(raw.url) ?? permalinkFromExternalId(raw.externalId);
-    const platformId = raw.externalId?.trim() || permalink || identity;
-    if (!permalink || !platformId) return null;
+    const platformId = raw.externalId?.trim() || null;
 
     const blockId = `post-${posts.length + 1}`;
-    const block: CaptureBlock = {
+    const block: CapturePostBlock = {
       block_id: blockId,
       kind: 'post',
-      platform_id: platformId.slice(0, 255),
-      permalink: permalink.slice(0, 2000),
+      platform_id: platformId?.slice(0, 255) ?? null,
+      permalink: permalink?.slice(0, 2000) ?? null,
       card_block_id: null,
       detail_block_id: null,
     };

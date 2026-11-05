@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
+import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { ContentScriptContext } from 'wxt/utils/content-script-context';
 import type { CaptureEnvelope, CaptureMessage } from '@/types/capture';
 import { createLinkedInController } from '@/sites/linkedin/controller';
+import { OBSERVER_DEBOUNCE_MS } from '@/sites/linkedin/extract';
 
 const SEARCH_URL =
   'https://www.linkedin.com/search/results/content/?keywords=php&datePosted=%5B%22past-week%22%5D';
@@ -127,7 +129,11 @@ describe('LinkedIn publicações — envelope consolidado', () => {
       'urn:li:activity:1',
       'urn:li:activity:2',
     ]);
-    expect(envelope.blocks.every((block) => block.permalink.startsWith('https://'))).toBe(true);
+    expect(
+      envelope.blocks.every(
+        (block) => block.kind === 'post' && block.permalink?.startsWith('https://') === true,
+      ),
+    ).toBe(true);
     expect(envelope.capture.html).toContain('data-capture-surface="linkedin_publications"');
     expect(envelope.capture.html.match(/data-block-id=/g)).toHaveLength(2);
     expect(envelope.capture.html).not.toMatch(/<(script|style|iframe|form|button|img)\b/i);
@@ -144,8 +150,16 @@ describe('LinkedIn publicações — envelope consolidado', () => {
       const nodes = parsed.querySelectorAll(`[data-block-id="${block.block_id}"]`);
       expect(nodes).toHaveLength(1);
       expect(nodes[0]!.getAttribute('data-kind')).toBe(block.kind);
-      expect(nodes[0]!.getAttribute('data-platform-id')).toBe(block.platform_id);
-      expect(nodes[0]!.getAttribute('data-permalink')).toBe(block.permalink);
+      if (block.platform_id === null) {
+        expect(nodes[0]!.hasAttribute('data-platform-id')).toBe(false);
+      } else {
+        expect(nodes[0]!.getAttribute('data-platform-id')).toBe(block.platform_id);
+      }
+      if (block.permalink === null) {
+        expect(nodes[0]!.hasAttribute('data-permalink')).toBe(false);
+      } else {
+        expect(nodes[0]!.getAttribute('data-permalink')).toBe(block.permalink);
+      }
     }
     expect(controller.getCaptureState()).toMatchObject({
       captured: true,
@@ -338,6 +352,168 @@ describe('LinkedIn publicações — envelope consolidado', () => {
       'urn:li:activity:777',
     ]);
     expect(envelopes[0]!.capture.html).toContain('data-platform-id="urn:li:activity:777"');
+
+    controller.deactivate();
+    await advance(0);
+  });
+
+  it('preserva conteúdo com e sem identidade no envelope, inclusive post removido do DOM', async () => {
+    document.documentElement.innerHTML = readFileSync(
+      'tests/fixtures/linkedin-publications-content-without-identity.html',
+      'utf8',
+    );
+    const posts = Array.from(document.querySelectorAll('[role="listitem"]'));
+    expect(posts).toHaveLength(9);
+    expect(document.querySelectorAll('a[href*="/feed/update/"]')).toHaveLength(2);
+    expect(document.querySelector('#rehydrate-data')).toBeNull();
+    const textOnlyPosts = posts.slice(3);
+    expect(textOnlyPosts).toHaveLength(6);
+    expect(
+      textOnlyPosts.every(
+        (post) => !post.hasAttribute('id') && !post.querySelector('[id], [componentkey], a[href]'),
+      ),
+    ).toBe(true);
+
+    const { envelopes, kinds } = setupMessaging();
+    const controller = createLinkedInController();
+    await activate(controller);
+    await advance(1000);
+    posts[8]!.remove();
+    await advance(OBSERVER_DEBOUNCE_MS + 100);
+    await advance(1200 * 8);
+
+    expect(envelopes).toHaveLength(1);
+    expect(kinds.filter((kind) => kind === 'capture:submit')).toEqual([]);
+    const envelope = envelopes[0]!;
+    expect(envelope.version).toBe(1);
+    expect(envelope.capture.surface).toBe('linkedin_publications');
+    const parsed = new DOMParser().parseFromString(envelope.capture.html, 'text/html');
+    for (let index = 1; index <= 9; index++) {
+      const content = `POST_CONTENT_${String(index).padStart(2, '0')}`;
+      expect(envelope.capture.html).toContain(content);
+      expect(envelope.capture.html.split(content)).toHaveLength(2);
+
+      const node = Array.from(parsed.querySelectorAll('[data-block-id]')).find((candidate) =>
+        candidate.textContent?.includes(content),
+      );
+      expect(node).toBeDefined();
+      const block = envelope.blocks.find(
+        (candidate) => candidate.block_id === node!.getAttribute('data-block-id'),
+      );
+      expect(block).toBeDefined();
+
+      if (index === 1) {
+        expect(block).toMatchObject({
+          kind: 'post',
+          platform_id: 'urn:li:activity:9100000000000000001',
+          permalink: 'https://www.linkedin.com/feed/update/urn:li:activity:9100000000000000001',
+        });
+      } else if (index === 2) {
+        expect(block).toMatchObject({
+          kind: 'post',
+          platform_id: 'urn:li:activity:9100000000000000002',
+          permalink: 'https://www.linkedin.com/feed/update/urn:li:activity:9100000000000000002',
+        });
+      } else if (index === 3) {
+        expect(block).toMatchObject({
+          kind: 'post',
+          platform_id: null,
+          permalink: 'https://www.linkedin.com/feed/update/url-only-post',
+        });
+      } else {
+        expect(node!.hasAttribute('data-platform-id')).toBe(false);
+        expect(node!.hasAttribute('data-permalink')).toBe(false);
+        expect(block).toMatchObject({ kind: 'post', platform_id: null, permalink: null });
+      }
+    }
+    expect(envelope.capture.coverage).toMatchObject({
+      status: 'complete',
+      reason: null,
+      blocks_captured: 9,
+    });
+
+    controller.deactivate();
+    await advance(0);
+  });
+
+  it('mantém textos iguais em posts distintos sem identidade forte', async () => {
+    document.body.innerHTML = `
+      <div class="feed">
+        <article role="listitem"><div data-testid="expandable-text-box"><p>POST_DUPLICATE_CONTENT</p></div></article>
+        <article role="listitem"><div data-testid="expandable-text-box"><p>POST_DUPLICATE_CONTENT</p></div></article>
+        <article role="listitem">
+          <a href="https://www.linkedin.com/in/autor-a">Autor A</a>
+          <div data-testid="expandable-text-box"><p>POST_SHARED_AUTHOR_CONTENT</p></div>
+        </article>
+        <article role="listitem">
+          <a href="https://www.linkedin.com/in/autor-b">Autor B</a>
+          <div data-testid="expandable-text-box"><p>POST_SHARED_AUTHOR_CONTENT</p></div>
+        </article>
+      </div>`;
+    const { envelopes } = setupMessaging();
+    const controller = createLinkedInController();
+
+    await activate(controller);
+    await advance(1200 * 8);
+
+    expect(envelopes).toHaveLength(1);
+    const envelope = envelopes[0]!;
+    const parsed = new DOMParser().parseFromString(envelope.capture.html, 'text/html');
+    for (const content of ['POST_DUPLICATE_CONTENT', 'POST_SHARED_AUTHOR_CONTENT']) {
+      const nodes = Array.from(parsed.querySelectorAll('[data-block-id]')).filter((node) =>
+        node.textContent?.includes(content),
+      );
+      expect(nodes).toHaveLength(2);
+      for (const node of nodes) {
+        expect(node.hasAttribute('data-platform-id')).toBe(false);
+        expect(node.hasAttribute('data-permalink')).toBe(false);
+        const block = envelope.blocks.find(
+          (candidate) => candidate.block_id === node.getAttribute('data-block-id'),
+        );
+        expect(block).toMatchObject({ kind: 'post', platform_id: null, permalink: null });
+      }
+    }
+    expect(envelope.blocks).toHaveLength(4);
+    expect(envelope.capture.coverage).toMatchObject({ status: 'complete', reason: null });
+
+    controller.deactivate();
+    await advance(0);
+  });
+
+  it('captura novo conteúdo quando DOM virtualizado reutiliza mesmo elemento', async () => {
+    document.body.innerHTML = `
+      <div class="feed">
+        <article role="listitem">
+          <a href="https://www.linkedin.com/in/autor-a">Autor A</a>
+          <div data-testid="expandable-text-box"><p>RECYCLED_POST_A</p></div>
+        </article>
+      </div>`;
+    const { envelopes } = setupMessaging();
+    const controller = createLinkedInController();
+    await activate(controller);
+
+    const feed = document.querySelector('.feed') as HTMLElement;
+    const post = feed.querySelector('[role="listitem"]') as HTMLElement;
+    await advance(1000);
+    post.innerHTML = `
+      <a href="https://www.linkedin.com/in/autor-b">Autor B</a>
+      <div data-testid="expandable-text-box"><p>RECYCLED_POST_B</p></div>`;
+    feed.removeChild(post);
+    feed.appendChild(post);
+    await advance(OBSERVER_DEBOUNCE_MS + 100);
+
+    feed.removeChild(post);
+    feed.appendChild(post);
+    await advance(OBSERVER_DEBOUNCE_MS + 100);
+    await advance(1200 * 8);
+
+    expect(envelopes).toHaveLength(1);
+    const html = envelopes[0]!.capture.html;
+    expect(html).toContain('RECYCLED_POST_A');
+    expect(html).toContain('RECYCLED_POST_B');
+    expect(html.split('RECYCLED_POST_A')).toHaveLength(2);
+    expect(html.split('RECYCLED_POST_B')).toHaveLength(2);
+    expect(envelopes[0]!.blocks).toHaveLength(2);
 
     controller.deactivate();
     await advance(0);

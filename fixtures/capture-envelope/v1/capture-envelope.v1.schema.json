@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://jobora.test/contracts/capture-envelope/v1",
   "title": "Jobora capture envelope v1",
-  "description": "Inert, sanitized envelope for a consolidated page capture. Each blocks[] entry MUST appear once in capture.html as an element carrying data-block-id, data-kind, data-platform-id and data-permalink. Card/detail relations use data-detail-block-id on the card and data-card-block-id on the detail. HTML MUST NOT contain executable content.",
+  "description": "Inert, sanitized envelope for a consolidated page capture. Each blocks[] entry MUST appear once in capture.html as an element carrying data-block-id and data-kind. platform_id and permalink keys remain required. Their values may be null only for kind=post on surface=linkedin_publications; null means the matching HTML attribute is absent. A string means the matching HTML attribute is present with the identical value. Cards, details and job surfaces require non-empty strings. Publication permalinks MUST be individual LinkedIn URLs, not search URLs. Card/detail relations use data-detail-block-id on the card and data-card-block-id on the detail. HTML MUST NOT contain executable content.",
   "type": "object",
   "additionalProperties": false,
   "required": ["format", "version", "capture", "blocks"],
@@ -129,6 +129,65 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "capture": {
+            "properties": {
+              "surface": {
+                "const": "linkedin_publications"
+              }
+            },
+            "required": ["surface"]
+          }
+        },
+        "required": ["capture"]
+      },
+      "then": {
+        "properties": {
+          "blocks": {
+            "items": {
+              "if": {
+                "properties": {
+                  "kind": {
+                    "const": "post"
+                  }
+                },
+                "required": ["kind"]
+              },
+              "else": {
+                "properties": {
+                  "platform_id": {
+                    "type": "string"
+                  },
+                  "permalink": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "blocks": {
+            "items": {
+              "properties": {
+                "platform_id": {
+                  "type": "string"
+                },
+                "permalink": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "block": {
       "type": "object",
@@ -143,12 +202,12 @@
           "enum": ["post", "card", "detail"]
         },
         "platform_id": {
-          "type": "string",
+          "type": ["string", "null"],
           "minLength": 1,
           "maxLength": 255
         },
         "permalink": {
-          "type": "string",
+          "type": ["string", "null"],
           "format": "uri",
           "maxLength": 2000
         },

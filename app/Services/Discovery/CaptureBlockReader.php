@@ -9,7 +9,7 @@ use DOMXPath;
 class CaptureBlockReader
 {
     /**
-     * @return list<array{block_id: string, kind: string, platform_id: string, permalink: string, content: string, card_block_id: ?string, detail_block_id: ?string}>
+     * @return list<array{block_id: string, kind: string, platform_id: ?string, permalink: ?string, content: string, card_block_id: ?string, detail_block_id: ?string}>
      */
     public function read(string $html, string $surface, int $version, ?int $expectedBlocks = null): array
     {
@@ -39,7 +39,7 @@ class CaptureBlockReader
                 throw PublicationExtractionException::parseFailed('Bloco fora da raiz da captura.');
             }
 
-            $block = $this->block($element);
+            $block = $this->block($element, $surface);
 
             if (isset($seen[$block['block_id']])) {
                 throw PublicationExtractionException::parseFailed('Bloco repetido na captura.');
@@ -84,16 +84,19 @@ class CaptureBlockReader
     }
 
     /**
-     * @return array{block_id: string, kind: string, platform_id: string, permalink: string, content: string, card_block_id: ?string, detail_block_id: ?string}
+     * @return array{block_id: string, kind: string, platform_id: ?string, permalink: ?string, content: string, card_block_id: ?string, detail_block_id: ?string}
      */
-    private function block(DOMElement $element): array
+    private function block(DOMElement $element, string $surface): array
     {
         $blockId = trim($element->getAttribute('data-block-id'));
         $kind = trim($element->getAttribute('data-kind'));
-        $platformId = trim($element->getAttribute('data-platform-id'));
-        $permalink = trim($element->getAttribute('data-permalink'));
+        $platformId = $element->hasAttribute('data-platform-id') ? trim($element->getAttribute('data-platform-id')) : null;
+        $permalink = $element->hasAttribute('data-permalink') ? trim($element->getAttribute('data-permalink')) : null;
+        $nullablePostIdentity = $surface === 'linkedin_publications' && $kind === 'post';
 
-        if ($blockId === '' || $kind === '' || $platformId === '' || ! $this->isIndividualUrl($permalink)) {
+        if ($blockId === '' || $kind === ''
+            || (! ($nullablePostIdentity && $platformId === null) && ($platformId === null || $platformId === ''))
+            || (! ($nullablePostIdentity && $permalink === null) && ($permalink === null || ! $this->isIndividualUrl($permalink)))) {
             throw PublicationExtractionException::parseFailed('Bloco sem identidade ou permalink individual.');
         }
 

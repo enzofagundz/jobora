@@ -7,8 +7,8 @@ class LinkedInPublicationsDecoder
     private const SURFACE = 'linkedin_publications';
 
     /**
-     * @param  list<array{block_id: string, kind: string, platform_id: string, permalink: string, content: string}>  $blocks
-     * @return list<array{external_id: string, url: string, content: string, content_hash: string, evidence_block_ids: list<string>}>
+     * @param  list<array{block_id: string, kind: string, platform_id: ?string, permalink: ?string, content: string}>  $blocks
+     * @return list<array{external_id: ?string, url: ?string, content: string, content_hash: string, evidence_block_ids: list<string>}>
      */
     public function decode(array $blocks): array
     {
@@ -24,16 +24,21 @@ class LinkedInPublicationsDecoder
             $externalId = $block['platform_id'];
             $url = $block['permalink'];
 
-            if (! $this->isIndividualLinkedInUrl($url)) {
+            if ($url !== null && ! $this->isIndividualLinkedInUrl($url)) {
                 throw PublicationExtractionException::parseFailed('Publicação sem URL individual do LinkedIn.');
             }
 
-            if (isset($seenExternal[$externalId]) || isset($seenUrl[$url])) {
+            if (($externalId !== null && isset($seenExternal[$externalId])) || ($url !== null && isset($seenUrl[$url]))) {
                 throw PublicationExtractionException::parseFailed('Publicação repetida na captura.');
             }
 
-            $seenExternal[$externalId] = true;
-            $seenUrl[$url] = true;
+            if ($externalId !== null) {
+                $seenExternal[$externalId] = true;
+            }
+
+            if ($url !== null) {
+                $seenUrl[$url] = true;
+            }
 
             $publications[] = [
                 'external_id' => $externalId,

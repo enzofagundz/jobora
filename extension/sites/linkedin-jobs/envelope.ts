@@ -1,5 +1,7 @@
 import type {
   CaptureBlock,
+  CaptureJobCardBlock,
+  CaptureJobDetailBlock,
   CaptureCoverageReason,
   CaptureEnvelope,
   CaptureSurface,
@@ -20,9 +22,9 @@ export interface EnvelopeInput {
 
 interface StoredJob {
   jobId: string;
-  card: CaptureBlock;
+  card: CaptureJobCardBlock;
   cardElement: Element;
-  detail: CaptureBlock | null;
+  detail: CaptureJobDetailBlock | null;
   detailElement: Element | null;
 }
 
@@ -33,11 +35,11 @@ export function createLinkedInJobsBuilder(
   const jobs: StoredJob[] = [];
   const byJobId = new Map<string, StoredJob>();
 
-  function addCard(jobId: string, cardElement: Element): CaptureBlock | null {
+  function addCard(jobId: string, cardElement: Element): CaptureJobCardBlock | null {
     const existing = byJobId.get(jobId);
     if (existing) return existing.card;
 
-    const card: CaptureBlock = {
+    const card: CaptureJobCardBlock = {
       block_id: `card-${jobs.length + 1}`,
       kind: 'card',
       platform_id: jobId,
@@ -57,12 +59,12 @@ export function createLinkedInJobsBuilder(
     return card;
   }
 
-  function addDetail(jobId: string, paneElement: Element): CaptureBlock | null {
+  function addDetail(jobId: string, paneElement: Element): CaptureJobDetailBlock | null {
     const stored = byJobId.get(jobId);
     if (!stored) return null;
     if (stored.detail) return stored.detail;
 
-    const detail: CaptureBlock = {
+    const detail: CaptureJobDetailBlock = {
       block_id: `detail-${jobs.indexOf(stored) + 1}`,
       kind: 'detail',
       platform_id: jobId,
