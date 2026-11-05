@@ -8,6 +8,7 @@ import {
   isJobCard,
   isLinkedInJobsRoute,
   jobIdFromCard,
+  jobsPaneMatches,
 } from './extract';
 
 function fixture(): string {
@@ -95,6 +96,33 @@ describe('LinkedIn Jobs extração (fixture real)', () => {
     expect(raw!.description).toContain('Job Description');
     expect(raw!.description).toContain('Laravel');
     expect(raw!.description).toContain('- Laravel');
+  });
+
+  it('não aceita currentJobId da URL quando o painel não expõe ID/permalink', () => {
+    window.happyDOM.setURL(
+      'https://www.linkedin.com/jobs/search/?keywords=Laravel&currentJobId=222',
+    );
+    const pane = document.querySelector('.scaffold-layout__detail.jobs-search__job-details')!;
+    pane.removeAttribute('data-job-id');
+    pane.querySelectorAll('[data-job-id]').forEach((node) => node.removeAttribute('data-job-id'));
+    pane.querySelectorAll('a[href*="/jobs/view/"]').forEach((node) => node.remove());
+
+    expect(jobsPaneMatches('222', pane)).toBe(false);
+  });
+
+  it('não aceita painel antigo por título igual; exige ID/permalink explícito', async () => {
+    window.happyDOM.setURL(
+      'https://www.linkedin.com/jobs/search/?keywords=Laravel&currentJobId=4461568022',
+    );
+    const pane = document.querySelector('.scaffold-layout__detail.jobs-search__job-details')!;
+    const title = pane.querySelector('h1 a')!;
+    title.textContent = 'PHP Back End Developer';
+
+    expect(jobsPaneMatches('4461568022', pane)).toBe(false);
+    expect(jobsPaneMatches('4461568021', pane)).toBe(true);
+
+    const card = document.querySelector('li[data-occludable-job-id="4461568022"]')!;
+    expect(await extractLinkedInJob('4461568022', card)).toBeNull();
   });
 
   it('extractLinkedInJob retorna null quando painel sem descrição', async () => {

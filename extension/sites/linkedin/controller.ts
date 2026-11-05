@@ -3,6 +3,7 @@ import type { ContentScriptContext, ShadowRootContentScriptUi } from '#imports';
 import CapturePanel from '@/components/CapturePanel.vue';
 import { createCaptureSession, type CaptureSession } from '@/utils/capture-session';
 import { deriveCaptureIdentity } from '@/utils/capture-identity';
+import type { CaptureCoverageReason, EnvelopeResult, ResolveRunResult } from '@/types/capture';
 import {
   OBSERVER_DEBOUNCE_MS,
   buildPayload,
@@ -11,10 +12,36 @@ import {
   isPost,
 } from './extract';
 import { countPosts, runJumpToEnd } from './jump';
+import { createLinkedInPublicationsBuilder } from './envelope';
+
+const CAPTURE_SETTLE_MS = 1500;
+
+export interface LinkedInCaptureState {
+  captured: boolean;
+  pending: boolean;
+  coverage: 'complete' | 'partial' | null;
+  executionId: string | null;
+  blocks: number;
+}
 
 export interface LinkedInController {
   activate(ctx: ContentScriptContext): Promise<void>;
   deactivate(): void;
+  getCaptureState(): LinkedInCaptureState;
+}
+
+interface CaptureAttempt {
+  generation: number;
+  initialUrl: string;
+  idempotencyKey: string;
+  builder: ReturnType<typeof createLinkedInPublicationsBuilder>;
+  executionId: string | null;
+  credentialContext: string | null;
+  blocked: boolean;
+  finalized: boolean;
+  pending: boolean;
+  captured: boolean;
+  coverage: 'complete' | 'partial' | null;
 }
 
 /** Uma instância por aba; activate/deactivate por rota SPA. */
@@ -22,6 +49,7 @@ export function createLinkedInController(): LinkedInController {
   const session: CaptureSession = createCaptureSession();
   let observer: MutationObserver | null = null;
   let debounceTimer: number | undefined;
+  let finalizeTimer: number | undefined;
   let scanRunning = false;
   let rescanQueued = false;
   let panelVisible = true;
@@ -35,6 +63,9 @@ export function createLinkedInController(): LinkedInController {
   let escListener: ((e: KeyboardEvent) => void) | null = null;
   let preInteracted = false;
   let preListeners: Array<() => void> = [];
+  let attempt: CaptureAttempt | null = null;
+  let pendingElements: Element[] = [];
+  const pendingSet = new Set<Element>();
 
   /** Falso após deactivate(), troca de rota ou invalidação do contexto WXT. */
   function isGenerationActive(generation: number): boolean {
@@ -46,10 +77,28 @@ export function createLinkedInController(): LinkedInController {
     );
   }
 
-  async function processPost(el: Element): Promise<void> {
+  function enqueueCandidates(root: ParentNode): void {
+    for (const el of root.querySelectorAll('[role="listitem"]')) {
+      if (!isPost(el) || pendingSet.has(el)) continue;
+      pendingSet.add(el);
+      pendingElements.push(el);
+    }
+  }
+
+  function enqueueMutationNode(node: Node): void {
+    if (!(node instanceof Element)) return;
+    if (isPost(node) && !pendingSet.has(node)) {
+      pendingSet.add(node);
+      pendingElements.push(node);
+    }
+    enqueueCandidates(node);
+  }
+
+  async function collectPost(el: Element, generation: number): Promise<void> {
+    const current = attempt;
+    if (!current || current.blocked || current.finalized) return;
     if (session.isInvalidElement(el)) return;
 
-    const generation = lifecycleGeneration;
     let raw: Awaited<ReturnType<typeof extractLinkedInPost>>;
     try {
       raw = await extractLinkedInPost(el);
@@ -58,7 +107,7 @@ export function createLinkedInController(): LinkedInController {
       session.counters.errors++;
       return;
     }
-    if (!isGenerationActive(generation)) return;
+    if (!isGenerationActive(generation) || attempt !== current) return;
 
     // Regra exata do userscript: rejeita somente se TUDO vazio.
     if (!raw.externalId && !raw.description && !raw.url) {
@@ -69,23 +118,18 @@ export function createLinkedInController(): LinkedInController {
 
     const payload = buildPayload(raw);
     const identity = await deriveCaptureIdentity(payload);
-    if (!isGenerationActive(generation)) return;
+    if (!isGenerationActive(generation) || attempt !== current) return;
 
+    if (current.builder.has(identity)) return;
     // Claim antes da rede: clones/recriações/scroll não passam daqui.
     if (!session.claim(identity)) return;
 
-    try {
-      session.counters.phase = 'sending';
-      const result = await browser.runtime.sendMessage({
-        type: 'capture:submit',
-        payload,
-      });
-      if (!isGenerationActive(generation)) return;
-      session.applyResult(identity, result);
-    } catch {
-      // Erro não é reenviado na mesma sessão; o claim vira terminal.
-      session.applyResult(identity, { ok: false, error: 'network' });
+    if (!current.builder.add(raw, identity, el)) {
+      session.applyResult(identity, { ok: false, error: 'invalid' });
+      return;
     }
+
+    if (!jumpState.active) scheduleFinalize();
   }
 
   /** Lote sequencial; callback concorrente apenas enfileira um rescan. */
@@ -100,16 +144,14 @@ export function createLinkedInController(): LinkedInController {
       if (!isGenerationActive(generation)) return;
       session.counters.phase = 'processing';
 
-      const posts = Array.from(document.querySelectorAll('[role="listitem"]')).filter(isPost);
-      for (const el of posts) {
-        if (!isGenerationActive(generation)) return;
-        await processPost(el);
+      while (pendingElements.length > 0) {
+        if (!isGenerationActive(generation) || attempt?.finalized) return;
+        const el = pendingElements.shift();
+        if (!el) break;
+        pendingSet.delete(el);
+        await collectPost(el, generation);
         if (!isGenerationActive(generation)) return;
       }
-
-      if (!isGenerationActive(generation)) return;
-      session.counters.phase =
-        session.counters.processed > 0 && session.counters.errors === 0 ? 'completed' : 'waiting';
     } finally {
       scanRunning = false;
       // Um scan antigo nunca agenda o próximo lote.
@@ -122,9 +164,119 @@ export function createLinkedInController(): LinkedInController {
     }
   }
 
-  function scheduleScan(): void {
+  function scheduleScan(records?: MutationRecord[]): void {
+    if (records) {
+      for (const record of records) {
+        for (const node of Array.from(record.addedNodes)) enqueueMutationNode(node);
+        // LinkedIn virtualiza a lista: o card removido ainda existe na memória.
+        for (const node of Array.from(record.removedNodes)) enqueueMutationNode(node);
+      }
+    }
     clearTimeout(debounceTimer);
     debounceTimer = window.setTimeout(() => void processNewPosts(), OBSERVER_DEBOUNCE_MS);
+  }
+
+  function scheduleFinalize(reason: CaptureCoverageReason | null = null): void {
+    const current = attempt;
+    if (!current || current.finalized || current.blocked) return;
+    clearTimeout(finalizeTimer);
+    finalizeTimer = window.setTimeout(
+      () => void finalizeAttempt(current, reason),
+      CAPTURE_SETTLE_MS,
+    );
+  }
+
+  async function resolveAttempt(current: CaptureAttempt, generation: number): Promise<void> {
+    try {
+      const response = (await browser.runtime.sendMessage({
+        type: 'capture:resolve-run',
+        url: current.initialUrl,
+      })) as ResolveRunResult | undefined;
+
+      if (!isGenerationActive(generation) || attempt !== current) return;
+      if (response?.context) current.credentialContext = response.context;
+
+      if (response && response.ok === false) {
+        // Ambiguidade/auth invalida a correlação: não mistura execuções.
+        if (
+          response.error === 'conflict' ||
+          response.error === 'auth' ||
+          response.error === 'invalid'
+        ) {
+          current.blocked = true;
+          session.counters.phase = 'error';
+        }
+        return;
+      }
+
+      if (response?.ok && response.run) {
+        if (response.run.source !== 'linkedin' || response.run.surface !== 'linkedin_publications') {
+          current.blocked = true;
+          session.counters.phase = 'error';
+          return;
+        }
+        current.executionId = response.run.executionId;
+      }
+    } catch {
+      // Falha de correlação não impede acumular; o ACK do backend decide.
+    }
+  }
+
+  async function finalizeAttempt(
+    current: CaptureAttempt | null,
+    reason: CaptureCoverageReason | null,
+  ): Promise<void> {
+    if (!current || current.finalized || current.blocked) return;
+    current.finalized = true;
+    clearTimeout(finalizeTimer);
+
+    const blocks = current.builder.list();
+    const coverageReason = reason ?? (blocks.length === 0 ? 'no_content' : null);
+    const finalUrl = isLinkedInRoute(location) ? location.href : current.initialUrl;
+    if (!current.credentialContext) {
+      session.counters.phase = 'error';
+      return;
+    }
+
+    const envelope = current.builder.toEnvelope({
+      executionId: current.executionId,
+      initialUrl: current.initialUrl,
+      finalUrl,
+      coverageReason,
+    });
+
+    current.pending = true;
+    try {
+      const result = (await browser.runtime.sendMessage({
+        type: 'capture:submit-envelope',
+        envelope,
+        context: current.credentialContext,
+      })) as EnvelopeResult | undefined;
+
+      if (!result || result.ok !== true) {
+        for (const post of blocks) {
+          session.applyResult(post.identity, result ?? { ok: false, error: 'network' });
+        }
+        session.counters.errors++;
+        session.counters.lastOutcome = 'error';
+        session.counters.phase = 'error';
+        return;
+      }
+
+      current.captured = true;
+      current.coverage = result.coverage ?? envelope.capture.coverage.status;
+      for (const post of blocks) session.applyResult(post.identity, result);
+      session.counters.phase = 'completed';
+    } catch {
+      for (const post of blocks) {
+        session.applyResult(post.identity, { ok: false, error: 'network' });
+      }
+      session.counters.errors++;
+      session.counters.lastOutcome = 'error';
+      session.counters.phase = 'error';
+    } finally {
+      current.pending = false;
+    }
   }
 
   function cancelJump(): void {
@@ -150,9 +302,15 @@ export function createLinkedInController(): LinkedInController {
   }
 
   async function startJump(generation: number): Promise<void> {
-    if (jumpAbort) return;
+    const current = attempt;
+    if (!current || jumpAbort) return;
     if (!isGenerationActive(generation)) return;
-    if (countPosts() === 0) return;
+    if (current.builder.size() === 0) {
+      void finalizeAttempt(current, 'no_content');
+      return;
+    }
+    clearTimeout(finalizeTimer);
+
     const ac = new AbortController();
     jumpAbort = ac;
     jumpState.active = true;
@@ -162,9 +320,11 @@ export function createLinkedInController(): LinkedInController {
     };
     escListener = onEsc;
     window.addEventListener('keydown', onEsc, { capture: true });
+
+    let result: Awaited<ReturnType<typeof runJumpToEnd>>;
     try {
-      await runJumpToEnd({
-        isActive: () => isGenerationActive(generation) && !ac.signal.aborted,
+      result = await runJumpToEnd({
+        isActive: () => isGenerationActive(generation) && !ac.signal.aborted && attempt === current,
         signal: ac.signal,
         onProgress: (c) => {
           jumpState.count = c;
@@ -176,6 +336,36 @@ export function createLinkedInController(): LinkedInController {
       if (jumpAbort === ac) jumpAbort = null;
       jumpState.active = false;
     }
+
+    if (attempt !== current || current.finalized) return;
+    if (result === 'cancelled') {
+      void finalizeAttempt(current, 'cancelled');
+    } else if (result === 'empty') {
+      void finalizeAttempt(current, 'no_content');
+    } else if (result === 'aborted') {
+      void finalizeAttempt(current, 'navigation_interrupted');
+    } else {
+      void finalizeAttempt(current, null);
+    }
+  }
+
+  function newAttempt(generation: number): CaptureAttempt {
+    const idempotencyKey = `linkedin-publications-${Date.now().toString(36)}-${Math.random()
+      .toString(36)
+      .slice(2, 10)}`;
+    return {
+      generation,
+      initialUrl: window.location.href,
+      idempotencyKey,
+      builder: createLinkedInPublicationsBuilder(idempotencyKey),
+      executionId: null,
+      credentialContext: null,
+      blocked: false,
+      finalized: false,
+      pending: false,
+      captured: false,
+      coverage: null,
+    };
   }
 
   async function activate(ctx: ContentScriptContext): Promise<void> {
@@ -184,7 +374,12 @@ export function createLinkedInController(): LinkedInController {
     preInteracted = false;
     jumpState.active = false;
     jumpState.count = 0;
+    pendingElements = [];
+    pendingSet.clear();
     watchPreInteraction();
+
+    const current = newAttempt(generation);
+    attempt = current;
 
     // position modal → container fixo cobrindo a viewport; pointer-events none
     // deixa os cliques do site passarem (o painel religa em si).
@@ -215,8 +410,11 @@ export function createLinkedInController(): LinkedInController {
     app = (ui.mounted as VueApp | undefined) ?? null;
 
     // deactivate() pode ter corrido durante o await da UI: descarta a geração.
-    if (!isGenerationActive(generation)) {
+    if (!isGenerationActive(generation) || attempt !== current) {
       removeUi();
+      if (!current.finalized && !current.blocked) {
+        void finalizeAttempt(current, 'navigation_interrupted');
+      }
       return;
     }
 
@@ -228,11 +426,19 @@ export function createLinkedInController(): LinkedInController {
       attributeFilter: ['href', 'data-jk', 'data-urn', 'data-entity-urn', 'aria-expanded', 'style'],
     });
 
+    await resolveAttempt(current, generation);
+    if (!isGenerationActive(generation) || attempt !== current) return;
+    if (current.blocked) {
+      clearPreInteractionListeners();
+      return;
+    }
+
+    enqueueCandidates(document);
     await processNewPosts();
 
     clearPreInteractionListeners();
 
-    if (!isGenerationActive(generation)) return;
+    if (!isGenerationActive(generation) || attempt !== current) return;
 
     // Guardar e remover o callback para não acumular a cada entrada/saída SPA.
     const removeInvalidatedListener = ctx.onInvalidated(deactivate);
@@ -240,6 +446,8 @@ export function createLinkedInController(): LinkedInController {
 
     if (!preInteracted) {
       void startJump(generation);
+    } else {
+      scheduleFinalize();
     }
   }
 
@@ -249,6 +457,7 @@ export function createLinkedInController(): LinkedInController {
   function removeUi(): void {
     cancelJump();
     clearPreInteractionListeners();
+    clearTimeout(finalizeTimer);
     if (escListener) {
       window.removeEventListener('keydown', escListener, { capture: true });
       escListener = null;
@@ -268,9 +477,24 @@ export function createLinkedInController(): LinkedInController {
     lifecycleGeneration++;
     for (const remove of removeInvalidatedListeners.splice(0)) remove();
     context = undefined;
+    const interrupted = attempt;
     removeUi();
+    if (interrupted && !interrupted.finalized && !interrupted.blocked) {
+      void finalizeAttempt(interrupted, 'navigation_interrupted');
+    }
     // Contadores/claims permanecem em memória para reentrada na mesma aba.
   }
 
-  return { activate, deactivate };
+  function getCaptureState(): LinkedInCaptureState {
+    const current = attempt;
+    return {
+      captured: current?.captured ?? false,
+      pending: current?.pending ?? false,
+      coverage: current?.coverage ?? null,
+      executionId: current?.executionId ?? null,
+      blocks: current?.builder.size() ?? 0,
+    };
+  }
+
+  return { activate, deactivate, getCaptureState };
 }

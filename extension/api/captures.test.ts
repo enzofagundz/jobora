@@ -5,11 +5,15 @@ import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { apiBaseUrl, apiToken, captureEnabled, lastApiStatus } from '@/utils/storage';
 import {
   CAPTURE_PATH,
+  PAGE_CAPTURE_PATH,
   REQUEST_TIMEOUT_MS,
+  RESOLVE_RUN_PATH,
+  resolveDiscoveryRun,
   sanitizeApiBaseUrl,
   submitCapture,
+  submitEnvelope,
 } from './captures';
-import type { CapturePayload } from '@/types/capture';
+import type { CaptureEnvelope, CapturePayload } from '@/types/capture';
 
 function payload(overrides: Partial<CapturePayload> = {}): CapturePayload {
   return {
@@ -190,5 +194,207 @@ describe('submitCapture', () => {
     expect(JSON.stringify(result)).not.toContain('segredo-do-env');
     const stored = await lastApiStatus.getValue();
     expect(stored).toBeNull(); // quem grava lastApiStatus é o background
+  });
+});
+
+function envelope(): CaptureEnvelope {
+  return {
+    format: 'jobora.capture-envelope',
+    version: 1,
+    capture: {
+      idempotency_key: 'capture-key-1',
+      execution_id: 'exec-1',
+      source: 'linkedin',
+      surface: 'linkedin_publications',
+      initial_url: 'https://www.linkedin.com/search/results/content/?keywords=php',
+      final_url: 'https://www.linkedin.com/search/results/content/?keywords=php',
+      captured_at: '2026-08-18T10:00:00Z',
+      coverage: {
+        status: 'complete',
+        reason: null,
+        blocks_expected: 1,
+        blocks_captured: 1,
+      },
+      html: '<main data-capture-surface="linkedin_publications" data-capture-version="1"></main>',
+    },
+    blocks: [],
+  };
+}
+
+describe('resolveDiscoveryRun', () => {
+  beforeEach(() => {
+    fakeBrowser.reset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function mockFetch(fn: (url: string, init: RequestInit) => Promise<Response>): MockInstance {
+    const spy = vi.fn(fn);
+    vi.stubGlobal('fetch', spy);
+    return spy;
+  }
+
+  it('POSTa a URL atual e devolve a execução correlacionada', async () => {
+    await captureEnabled.setValue(true);
+    await apiToken.setValue('segredo-do-env');
+    await apiBaseUrl.setValue('https://vagas.test');
+    const fetchSpy = mockFetch(
+      async () =>
+        new Response(
+          JSON.stringify({
+            execution_id: 'exec-1',
+            source: 'linkedin',
+            surface: 'linkedin_publications',
+            initial_url: 'https://www.linkedin.com/search/results/content/?keywords=php',
+            expires_at: '2026-08-18T11:00:00Z',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+    );
+
+    const result = await resolveDiscoveryRun(
+      'https://www.linkedin.com/search/results/content/?keywords=php',
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      run: {
+        executionId: 'exec-1',
+        source: 'linkedin',
+        surface: 'linkedin_publications',
+        initialUrl: 'https://www.linkedin.com/search/results/content/?keywords=php',
+        expiresAt: '2026-08-18T11:00:00Z',
+      },
+    });
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://vagas.test' + RESOLVE_RUN_PATH);
+    expect(init.method).toBe('POST');
+    expect((init.headers as Record<string, string>).Authorization).toBe('Bearer segredo-do-env');
+    expect(JSON.parse(init.body as string)).toEqual({
+      url: 'https://www.linkedin.com/search/results/content/?keywords=php',
+    });
+  });
+
+  it('404 sem execução ativa é resposta válida com run null', async () => {
+    await captureEnabled.setValue(true);
+    await apiToken.setValue('segredo-do-env');
+    mockFetch(async () => new Response('{}', { status: 404 }));
+
+    expect(await resolveDiscoveryRun('https://www.linkedin.com/search/results/content/?keywords=php')).toEqual({
+      ok: true,
+      run: null,
+    });
+  });
+
+  it('409 não escolhe execução ambígua', async () => {
+    await captureEnabled.setValue(true);
+    await apiToken.setValue('segredo-do-env');
+    mockFetch(async () => new Response('{}', { status: 409 }));
+
+    expect(await resolveDiscoveryRun('https://www.linkedin.com/search/results/content/?keywords=php')).toMatchObject({
+      ok: false,
+      error: 'conflict',
+      status: 409,
+    });
+  });
+
+  it('gate fechado não chama a rede', async () => {
+    const fetchSpy = mockFetch(async () => new Response('{}', { status: 200 }));
+
+    expect(await resolveDiscoveryRun('https://www.linkedin.com/search/results/content/?keywords=php')).toMatchObject({
+      ok: false,
+      error: 'auth',
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('submitEnvelope', () => {
+  beforeEach(() => {
+    fakeBrowser.reset();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function mockFetch(fn: (url: string, init: RequestInit) => Promise<Response>): MockInstance {
+    const spy = vi.fn(fn);
+    vi.stubGlobal('fetch', spy);
+    return spy;
+  }
+
+  it('POSTa o envelope v1 no mesmo contrato de ingestão e só confirma no ACK', async () => {
+    await captureEnabled.setValue(true);
+    await apiToken.setValue('segredo-do-env');
+    await apiBaseUrl.setValue('https://vagas.test');
+    const body = envelope();
+    const fetchSpy = mockFetch(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: 7,
+            execution_id: 'exec-1',
+            coverage: 'complete',
+            ingest_status: 'received',
+            replay: false,
+          }),
+          { status: 201, headers: { 'Content-Type': 'application/json' } },
+        ),
+    );
+
+    const result = await submitEnvelope(body);
+
+    expect(result).toEqual({
+      ok: true,
+      duplicate: false,
+      status: 201,
+      captureId: 7,
+      executionId: 'exec-1',
+      coverage: 'complete',
+      replay: false,
+    });
+    const [url, init] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://vagas.test' + PAGE_CAPTURE_PATH);
+    expect(JSON.parse(init.body as string)).toEqual(body);
+  });
+
+  it('200 replay é sucesso duplicado', async () => {
+    await captureEnabled.setValue(true);
+    await apiToken.setValue('segredo-do-env');
+    mockFetch(
+      async () =>
+        new Response(JSON.stringify({ id: 7, replay: true, coverage: 'partial' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    );
+
+    expect(await submitEnvelope(envelope())).toMatchObject({
+      ok: true,
+      duplicate: true,
+      status: 200,
+      replay: true,
+      coverage: 'partial',
+    });
+  });
+
+  it.each([
+    [401, 'auth'],
+    [409, 'conflict'],
+    [413, 'too_large'],
+    [422, 'invalid'],
+    [503, 'http'],
+  ])('status %i → error=%s; não declara captura', async (status, error) => {
+    await captureEnabled.setValue(true);
+    await apiToken.setValue('segredo-do-env');
+    mockFetch(async () => new Response('{}', { status }));
+
+    const result = await submitEnvelope(envelope());
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe(error);
+    expect(result.status).toBe(status);
   });
 });

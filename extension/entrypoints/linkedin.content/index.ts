@@ -17,6 +17,7 @@ export default defineContentScript({
     const jobsController = createLinkedInJobsController();
     let activePublications = false;
     let activeJobs = false;
+    let lastToken: string | null = null;
 
     // Serializa sincronizações: mudanças de rota/storage durante uma leitura
     // apenas enfileiram a reavaliação; nenhuma transição concorrente.
@@ -40,6 +41,21 @@ export default defineContentScript({
 
     async function syncRoute(): Promise<void> {
       const ready = await isCaptureReady();
+      const token = await apiToken.getValue();
+      // Troca de conta/token encerra a captura antiga antes de correlacionar outra.
+      const tokenChanged = lastToken !== null && lastToken !== token;
+      lastToken = token;
+      if (tokenChanged) {
+        if (activePublications) {
+          activePublications = false;
+          publicationsController.deactivate();
+        }
+        if (activeJobs) {
+          activeJobs = false;
+          jobsController.deactivate();
+        }
+      }
+
       const isPublicationsRoute = isLinkedInRoute(location);
       const isJobsRoute = isLinkedInJobsRoute(location);
 

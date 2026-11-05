@@ -67,7 +67,6 @@ export function waitForJobsPane(
   generation: number,
   isGenerationActive: (generation: number) => boolean,
   jobId: string,
-  cardTitle: string | null,
 ): Promise<boolean> {
   const { promise, resolve } = Promise.withResolvers<boolean>();
   const started = Date.now();
@@ -79,15 +78,9 @@ export function waitForJobsPane(
       return;
     }
 
+    // Painel precisa existir e expor ID/permalink explícito; título não basta.
     const pane = document.querySelector(PANE_SELECTOR);
-    const currentJobId = new URLSearchParams(window.location.search).get('currentJobId');
-
-    const idMatch = currentJobId === jobId;
-    const titleEl = pane?.querySelector('h1 a, .job-details-jobs-unified-top-card__job-title a, .job-details-jobs-unified-top-card__job-title');
-    const titleText = titleEl ? (titleEl.textContent ?? '').trim() : '';
-    const titleMatch = !!cardTitle && titleText.length > 0 && titleText === cardTitle;
-
-    if (idMatch || titleMatch) {
+    if (pane && jobsPaneMatches(jobId, pane)) {
       clearInterval(timer);
       resolve(true);
       return;
@@ -100,6 +93,28 @@ export function waitForJobsPane(
   }, PANE_POLL_MS);
 
   return promise;
+}
+
+/** ID explícito dentro do painel: data-job-id ou link individual. URL não vale. */
+export function jobsPaneMatches(
+  jobId: string,
+  pane: Element | null = document.querySelector(PANE_SELECTOR),
+): boolean {
+  return jobIdFromPane(pane) === jobId;
+}
+
+export function jobIdFromPane(pane: Element | null): string | null {
+  if (!pane) return null;
+
+  const own = pane.getAttribute('data-job-id') ?? pane.getAttribute('data-occludable-job-id');
+  if (own && /^\d+$/.test(own.trim())) return own.trim();
+
+  const inner = pane.querySelector('[data-job-id]')?.getAttribute('data-job-id');
+  if (inner && /^\d+$/.test(inner.trim())) return inner.trim();
+
+  const link = pane.querySelector('a[href*="/jobs/view/"]')?.getAttribute('href') ?? '';
+  const match = link.match(/\/jobs\/view\/(\d+)/);
+  return match?.[1] ?? null;
 }
 
 export async function expandJobsPane(paneEl: Element): Promise<void> {
@@ -136,8 +151,10 @@ export async function extractLinkedInJob(
 ): Promise<LinkedInJobsRaw | null> {
   const pane = document.querySelector(PANE_SELECTOR);
   if (!pane) return null;
+  if (!jobsPaneMatches(jobId, pane)) return null;
 
   await expandJobsPane(pane);
+  if (!jobsPaneMatches(jobId, pane)) return null;
 
   const queryPaneText = (selector: string): string | null => {
     const el = pane.querySelector(selector);
@@ -171,7 +188,7 @@ export async function extractLinkedInJob(
     ?? null;
   const location = locationFromCard ?? locationFromPane;
 
-  const descriptionEl = document.querySelector(DESCRIPTION_SELECTOR);
+  const descriptionEl = pane.querySelector(DESCRIPTION_SELECTOR);
   const description = toText(descriptionEl);
   if (!description) return null;
 
