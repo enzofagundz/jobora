@@ -93,11 +93,23 @@ class PublicationExtractionProcessor
     }
 
     /**
-     * @param  array{external_id: string, url: string, content: string, content_hash: string, evidence_block_ids: list<string>}  $item
+     * @param  array{external_id: ?string, url: ?string, content: string, content_hash: string, evidence_block_ids: list<string>}  $item
      */
     private function observe(User $user, PageCapture $capture, array $item, CarbonInterface $observedAt): void
     {
-        $publication = $this->identities->resolve($user, 'linkedin', $item['external_id'], $item['url']);
+        $fingerprint = null;
+
+        if ($item['external_id'] === null && $item['url'] === null) {
+            $blockId = $item['evidence_block_ids'][0] ?? null;
+
+            if (! is_string($blockId) || $blockId === '') {
+                throw PublicationExtractionException::parseFailed('Publicação anônima sem bloco de evidência.');
+            }
+
+            $fingerprint = hash('sha256', 'capture-block:v1|'.$capture->id.'|'.$blockId);
+        }
+
+        $publication = $this->identities->resolve($user, 'linkedin', $item['external_id'], $item['url'], $fingerprint);
 
         $publication = Publication::query()->whereKey($publication->id)->lockForUpdate()->firstOrFail();
 

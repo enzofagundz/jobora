@@ -3,6 +3,7 @@ import type { ContentScriptContext, ShadowRootContentScriptUi } from '#imports';
 import CapturePanel from '@/components/CapturePanel.vue';
 import { createCaptureSession, type CaptureSession } from '@/utils/capture-session';
 import { deriveCaptureIdentity } from '@/utils/capture-identity';
+import { safeHref } from '@/utils/capture-dom';
 import type { CaptureCoverageReason, EnvelopeResult, ResolveRunResult } from '@/types/capture';
 import {
   OBSERVER_DEBOUNCE_MS,
@@ -48,6 +49,8 @@ interface CaptureAttempt {
   captured: boolean;
   coverage: 'complete' | 'partial' | null;
   identityFailure: boolean;
+  occurrenceIdentities: WeakMap<Element, { signature: string; identity: string }>;
+  nextOccurrenceId: number;
 }
 
 /** Uma instância por aba; activate/deactivate por rota SPA. */
@@ -133,18 +136,31 @@ export function createLinkedInController(
     }
 
     const payload = buildPayload(raw);
-    const identity = await deriveCaptureIdentity(payload);
+    const normalizedUrl = raw.url ? safeHref(raw.url) : null;
+    const hasStrongIdentity = Boolean(raw.externalId?.trim() || normalizedUrl);
+    let identity: string;
+    if (hasStrongIdentity) {
+      identity = await deriveCaptureIdentity({ ...payload, url: normalizedUrl });
+    } else {
+      const signature = JSON.stringify([
+        payload.description,
+        payload.author?.name ?? null,
+        payload.author?.profile_url ?? null,
+      ]);
+      const occurrence = current.occurrenceIdentities.get(el);
+      if (occurrence?.signature === signature) {
+        identity = occurrence.identity;
+      } else {
+        identity = `${current.idempotencyKey}:occurrence:${++current.nextOccurrenceId}`;
+        current.occurrenceIdentities.set(el, { signature, identity });
+      }
+    }
     if (!isGenerationActive(generation) || attempt !== current) return;
 
     if (current.builder.has(identity)) return;
-    // Claim antes da rede: clones/recriações/scroll não passam daqui.
     if (!session.claim(identity)) return;
 
-    if (!current.builder.add(raw, identity, el)) {
-      current.identityFailure = true;
-      session.applyResult(identity, { ok: false, error: 'invalid' });
-      return;
-    }
+    current.builder.add(raw, identity, el);
 
     if (!jumpState.active) scheduleFinalize();
   }
@@ -388,6 +404,8 @@ export function createLinkedInController(
       captured: false,
       coverage: null,
       identityFailure: false,
+      occurrenceIdentities: new WeakMap(),
+      nextOccurrenceId: 0,
     };
   }
 

@@ -139,7 +139,7 @@ describe('LinkedIn publicações sem permalink/URN no DOM', () => {
     restarted.deactivate();
   });
 
-  it('reset do mapa não reutiliza ID em nova navegação SPA', async () => {
+  it('reset do mapa preserva textos sem reutilizar ID em nova navegação SPA', async () => {
     mountHydrationScript(
       hydrationScript([
         { componentKey: 'ck-A', activityId: POST_A },
@@ -168,16 +168,44 @@ describe('LinkedIn publicações sem permalink/URN no DOM', () => {
     await activate(controller);
 
     expect(envelopes).toHaveLength(1);
-    expect(envelopes[0]!.blocks).toEqual([]);
+    expect(envelopes[0]!.blocks).toHaveLength(2);
+    expect(envelopes[0]!.blocks.map((block) => [block.platform_id, block.permalink])).toEqual([
+      [null, null],
+      [null, null],
+    ]);
+    expect(envelopes[0]!.capture.html).toContain('Vaga fictícia para desenvolvedor de exemplo');
+    expect(envelopes[0]!.capture.html).toContain('Oportunidade fictícia para pessoa profissional');
     expect(envelopes[0]!.capture.coverage).toMatchObject({
-      status: 'partial',
-      reason: 'timeout',
+      status: 'complete',
+      reason: null,
+      blocks_captured: 2,
     });
     expect(envelopes[0]!.capture.html).not.toContain(POST_A);
     controller.deactivate();
   });
 
-  it('sem mapping não inventa ID e envia parcial timeout, não no_content', async () => {
+  it('limpa identidade por elemento entre execuções com o mesmo DOM', async () => {
+    const controller = createLinkedInController();
+
+    await activate(controller);
+    expect(envelopes).toHaveLength(1);
+    const firstEnvelope = envelopes[0]!;
+    expect(firstEnvelope.blocks).toHaveLength(2);
+    controller.deactivate();
+    await vi.advanceTimersByTimeAsync(0);
+
+    window.happyDOM.setURL(`${SEARCH_URL}&pagina=3`);
+    await activate(controller);
+
+    expect(envelopes).toHaveLength(2);
+    expect(envelopes[1]!.blocks).toHaveLength(2);
+    expect(envelopes[1]!.capture.html).toContain('Vaga fictícia para desenvolvedor de exemplo');
+    expect(envelopes[1]!.capture.html).toContain('Oportunidade fictícia para pessoa profissional');
+    expect(envelopes[1]!.capture.idempotency_key).not.toBe(firstEnvelope.capture.idempotency_key);
+    controller.deactivate();
+  });
+
+  it('sem mapping preserva conteúdo sem inventar ID ou permalink', async () => {
     const identities = createHydrationIdentityCollector();
     const controller = createLinkedInController({
       resolveHydrationIdentity: (componentKey) => identities.resolve(componentKey),
@@ -186,16 +214,21 @@ describe('LinkedIn publicações sem permalink/URN no DOM', () => {
     await activate(controller);
 
     expect(envelopes).toHaveLength(1);
-    expect(envelopes[0]!.blocks).toEqual([]);
+    expect(envelopes[0]!.blocks).toHaveLength(2);
+    expect(envelopes[0]!.blocks.every((block) => block.platform_id === null)).toBe(true);
+    expect(envelopes[0]!.blocks.every((block) => block.permalink === null)).toBe(true);
+    expect(envelopes[0]!.capture.html).toContain('Vaga fictícia para desenvolvedor de exemplo');
+    expect(envelopes[0]!.capture.html).toContain('Oportunidade fictícia para pessoa profissional');
+    expect(envelopes[0]!.capture.html).not.toMatch(/data-platform-id|data-permalink/);
     expect(envelopes[0]!.capture.coverage).toMatchObject({
-      status: 'partial',
-      reason: 'timeout',
-      blocks_captured: 0,
+      status: 'complete',
+      reason: null,
+      blocks_captured: 2,
     });
     expect(controller.getCaptureState()).toMatchObject({
       captured: true,
-      coverage: 'partial',
-      blocks: 0,
+      coverage: 'complete',
+      blocks: 2,
     });
 
     controller.deactivate();

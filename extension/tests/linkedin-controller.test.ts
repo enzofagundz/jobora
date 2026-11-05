@@ -180,7 +180,7 @@ describe('linkedin controller — integridade observer/SPA', () => {
     expect(observeSpy).toHaveBeenCalledTimes(3);
   });
 
-  it('card sem permalink não inventa link: envelope parcial timeout', async () => {
+  it('preserva texto sem identidade e não inventa ID/permalink', async () => {
     document.body.innerHTML = `<div class="feed">
       <article role="listitem">
         <div data-testid="expandable-text-box"><p>Só texto, sem urn nem url.</p></div>
@@ -190,13 +190,17 @@ describe('linkedin controller — integridade observer/SPA', () => {
     await advance(1200 * 8);
 
     expect(envelopes).toHaveLength(1);
-    expect(envelopes[0]!.blocks).toEqual([]);
+    expect(envelopes[0]!.blocks).toMatchObject([
+      { kind: 'post', platform_id: null, permalink: null },
+    ]);
+    expect(envelopes[0]!.capture.html).toContain('Só texto, sem urn nem url.');
+    expect(envelopes[0]!.capture.html).not.toMatch(/data-platform-id|data-permalink/);
     expect(envelopes[0]!.capture.coverage).toMatchObject({
-      status: 'partial',
-      reason: 'timeout',
-      blocks_captured: 0,
+      status: 'complete',
+      reason: null,
+      blocks_captured: 1,
     });
-    expect(controller.getCaptureState().captured).toBe(true);
+    expect(controller.getCaptureState()).toMatchObject({ captured: true, blocks: 1 });
     deactivate();
   });
 });

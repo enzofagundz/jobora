@@ -151,13 +151,22 @@ class CaptureSanitizer
 
             if ($element === null
                 || $element->getAttribute('data-kind') !== $block['kind']
-                || $element->getAttribute('data-platform-id') !== $block['platform_id']
-                || $element->getAttribute('data-permalink') !== $block['permalink']) {
+                || ! $this->matchesIdentityAttribute($element, 'data-platform-id', $block['platform_id'])
+                || ! $this->matchesIdentityAttribute($element, 'data-permalink', $block['permalink'])) {
                 throw new CaptureValidationException('Bloco do HTML diverge do envelope.');
             }
 
             $this->assertBlockRelations($element, $block);
         }
+    }
+
+    private function matchesIdentityAttribute(DOMElement $element, string $attribute, ?string $value): bool
+    {
+        if ($value === null) {
+            return ! $element->hasAttribute($attribute);
+        }
+
+        return $element->hasAttribute($attribute) && $element->getAttribute($attribute) === $value;
     }
 
     /**

@@ -56,14 +56,35 @@ export interface CaptureCoverage {
 
 export type CaptureBlockKind = 'post' | 'card' | 'detail';
 
-export interface CaptureBlock {
+interface CaptureBlockBase {
   block_id: string;
-  kind: CaptureBlockKind;
+}
+
+export interface CapturePostBlock extends CaptureBlockBase {
+  kind: 'post';
+  card_block_id: null;
+  detail_block_id: null;
+  platform_id: string | null;
+  permalink: string | null;
+}
+
+export interface CaptureJobCardBlock extends CaptureBlockBase {
+  kind: 'card';
+  card_block_id: null;
+  detail_block_id: string | null;
   platform_id: string;
   permalink: string;
-  card_block_id: string | null;
-  detail_block_id: string | null;
 }
+
+export interface CaptureJobDetailBlock extends CaptureBlockBase {
+  kind: 'detail';
+  card_block_id: string;
+  detail_block_id: null;
+  platform_id: string;
+  permalink: string;
+}
+
+export type CaptureBlock = CapturePostBlock | CaptureJobCardBlock | CaptureJobDetailBlock;
 
 /** Envelope v1 compartilhado com fixtures/capture-envelope/v1. */
 export interface CaptureEnvelope {
