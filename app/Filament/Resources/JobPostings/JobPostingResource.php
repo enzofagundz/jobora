@@ -9,6 +9,7 @@ use App\Filament\Resources\JobPostings\Pages\ListJobPostings;
 use App\Filament\Resources\JobPostings\Pages\ViewJobPosting;
 use App\Filament\Resources\JobPostings\Schemas\JobPostingForm;
 use App\Filament\Resources\JobPostings\Tables\JobPostingsTable;
+use App\Models\JobIaAttempt;
 use App\Models\JobPosting;
 use BackedEnum;
 use Filament\Infolists\Components\TextEntry;
@@ -49,6 +50,18 @@ class JobPostingResource extends Resource
 
     public static function infolist(Schema $schema): Schema
     {
+        /** @var array<string, JobIaAttempt|null> $latestAttemptsByRecord */
+        $latestAttemptsByRecord = [];
+        $latestAttempt = static function (JobPosting $record) use (&$latestAttemptsByRecord): ?JobIaAttempt {
+            $recordKey = (string) $record->getKey();
+
+            if (! array_key_exists($recordKey, $latestAttemptsByRecord)) {
+                $latestAttemptsByRecord[$recordKey] = $record->latestAttempt();
+            }
+
+            return $latestAttemptsByRecord[$recordKey];
+        };
+
         return $schema
             ->components([
                 TextEntry::make('description')
@@ -76,34 +89,34 @@ class JobPostingResource extends Resource
                             ->state(fn (JobPosting $record): int => $record->attempts()->count()),
                         TextEntry::make('last_attempt')
                             ->label('Última tentativa')
-                            ->state(fn (JobPosting $record): ?string => $record->lastAttemptAt()?->format('d/m/Y H:i')),
+                            ->state(fn (JobPosting $record): ?string => $latestAttempt($record)?->created_at?->format('d/m/Y H:i')),
                     ]),
                 Section::make('Detalhes técnicos')
                     ->collapsible()
-                    ->visible(fn (JobPosting $record): bool => $record->latestAttempt() !== null)
+                    ->visible(fn (JobPosting $record): bool => $latestAttempt($record) !== null)
                     ->schema([
                         TextEntry::make('operation')
                             ->label('Operação')
-                            ->state(fn (JobPosting $record): ?string => $record->latestAttempt()?->operation),
+                            ->state(fn (JobPosting $record): ?string => $latestAttempt($record)?->operation),
                         TextEntry::make('provider')
                             ->label('Provedor')
-                            ->state(fn (JobPosting $record): ?string => $record->latestAttempt()?->provider),
+                            ->state(fn (JobPosting $record): ?string => $latestAttempt($record)?->provider),
                         TextEntry::make('model')
                             ->label('Modelo')
-                            ->state(fn (JobPosting $record): ?string => $record->latestAttempt()?->model),
+                            ->state(fn (JobPosting $record): ?string => $latestAttempt($record)?->model),
                         TextEntry::make('error_class')
                             ->label('Classe do erro')
-                            ->state(fn (JobPosting $record): ?string => $record->latestAttempt()?->error_class),
+                            ->state(fn (JobPosting $record): ?string => $latestAttempt($record)?->error_class),
                         TextEntry::make('technical_error')
                             ->label('Erro técnico')
-                            ->state(fn (JobPosting $record): ?string => $record->latestAttempt()?->error_message)
+                            ->state(fn (JobPosting $record): ?string => $latestAttempt($record)?->error_message)
                             ->columnSpanFull(),
                         TextEntry::make('latency')
                             ->label('Latência (ms)')
-                            ->state(fn (JobPosting $record): ?int => $record->latestAttempt()?->latency_ms),
+                            ->state(fn (JobPosting $record): ?int => $latestAttempt($record)?->latency_ms),
                         TextEntry::make('attempt_id')
                             ->label('Attempt ID')
-                            ->state(fn (JobPosting $record): ?int => $record->latestAttempt()?->id),
+                            ->state(fn (JobPosting $record): ?int => $latestAttempt($record)?->id),
                     ]),
             ]);
     }
