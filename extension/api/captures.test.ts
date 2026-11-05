@@ -2,7 +2,8 @@
 import type { MockInstance } from 'vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
-import { apiBaseUrl, apiToken, captureEnabled, lastApiStatus } from '@/utils/storage';
+import { apiBaseUrl, apiToken, captureEnabled } from '@/utils/storage';
+import { lastApiStatus } from '@/utils/session-storage';
 import {
   CAPTURE_PATH,
   PAGE_CAPTURE_PATH,

@@ -4,7 +4,8 @@ import { fakeBrowser } from 'wxt/testing/fake-browser';
 import type { CaptureEnvelope } from '@/types/capture';
 import { createCaptureMessageHandler } from '@/api/capture-message-handler';
 import { createCaptureQueue } from '@/utils/capture-queue';
-import { apiToken, captureEnabled, lastApiStatus } from '@/utils/storage';
+import { apiToken, captureEnabled } from '@/utils/storage';
+import { lastApiStatus } from '@/utils/session-storage';
 import { createMemoryQueueStore } from './helpers/memory-queue-store';
 import {
   createMemoryCredentialContextStore,

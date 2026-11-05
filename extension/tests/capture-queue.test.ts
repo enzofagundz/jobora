@@ -7,7 +7,8 @@ import {
   CAPTURE_ENVELOPE_MAX_BYTES,
   createCaptureQueue,
 } from '@/utils/capture-queue';
-import { apiBaseUrl, apiToken, captureEnabled, lastApiStatus } from '@/utils/storage';
+import { apiBaseUrl, apiToken, captureEnabled } from '@/utils/storage';
+import { lastApiStatus } from '@/utils/session-storage';
 import { createMemoryQueueStore } from './helpers/memory-queue-store';
 import {
   createMemoryCredentialContextStore,
