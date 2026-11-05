@@ -2,10 +2,9 @@ import { createApp, type App as VueApp } from 'vue';
 import type { ContentScriptContext, ShadowRootContentScriptUi } from '#imports';
 import CapturePanel from '@/components/CapturePanel.vue';
 import { createCaptureSession, type CaptureSession } from '@/utils/capture-session';
-import { externalCaptureIdentity } from '@/utils/capture-identity';
+import type { CaptureCoverageReason, EnvelopeResult, ResolveRunResult } from '@/types/capture';
 import {
   OBSERVER_DEBOUNCE_MS,
-  buildJobsPayload,
   extractLinkedInJob,
   frozenSearchUrl,
   isJobCard,
@@ -13,24 +12,58 @@ import {
   jobIdFromCard,
   waitForJobsPane,
 } from './extract';
+import { createLinkedInJobsBuilder, jobIdentity } from './envelope';
+
+const CAPTURE_SETTLE_MS = 1500;
+const PANE_SELECTOR = '.scaffold-layout__detail.jobs-search__job-details';
+
+export interface LinkedInJobsCaptureState {
+  captured: boolean;
+  pending: boolean;
+  coverage: 'complete' | 'partial' | null;
+  executionId: string | null;
+  cards: number;
+  details: number;
+}
 
 export interface LinkedInJobsController {
   activate(ctx: ContentScriptContext): Promise<void>;
   deactivate(): void;
+  getCaptureState(): LinkedInJobsCaptureState;
+}
+
+interface JobAttempt {
+  generation: number;
+  initialUrl: string;
+  idempotencyKey: string;
+  builder: ReturnType<typeof createLinkedInJobsBuilder>;
+  executionId: string | null;
+  credentialContext: string | null;
+  blocked: boolean;
+  finalized: boolean;
+  pending: boolean;
+  captured: boolean;
+  coverage: 'complete' | 'partial' | null;
+  cancelled: boolean;
+  detailFailure: boolean;
 }
 
 export function createLinkedInJobsController(): LinkedInJobsController {
   const session: CaptureSession = createCaptureSession();
   let observer: MutationObserver | null = null;
   let debounceTimer: number | undefined;
+  let finalizeTimer: number | undefined;
   let scanRunning = false;
   let rescanQueued = false;
   let panelVisible = true;
   let app: VueApp | null = null;
   let ui: ShadowRootContentScriptUi<VueApp> | null = null;
-  let searchUrl = '';
   let context: ContentScriptContext | undefined;
   let lifecycleGeneration = 0;
+  let attempt: JobAttempt | null = null;
+  let pendingElements: Element[] = [];
+  const pendingSet = new Set<Element>();
+  let escListener: ((event: KeyboardEvent) => void) | null = null;
 
   function isGenerationActive(generation: number): boolean {
     return (
@@ -41,59 +74,105 @@ export function createLinkedInJobsController(): LinkedInJobsController {
     );
   }
 
-  async function processCard(cardEl: Element): Promise<void> {
-    if (session.isInvalidElement(cardEl)) return;
+  function isCardCandidate(el: Element): boolean {
+    return isJobCard(el) && !el.closest(PANE_SELECTOR);
+  }
 
+  function collectCandidates(root: ParentNode): void {
+    const selectors = [
+      'div[data-job-id]',
+      'li[data-occludable-job-id]',
+      'div.job-card-container',
+      'li.scaffold-layout__list-item',
+    ];
+
+    for (const selector of selectors) {
+      for (const el of root.querySelectorAll(selector)) {
+        if (!isCardCandidate(el) || pendingSet.has(el)) continue;
+        pendingSet.add(el);
+        pendingElements.push(el);
+      }
+    }
+
+    for (const anchor of root.querySelectorAll('a[href*="/jobs/view/"]')) {
+      const card = anchor.closest(
+        'li[data-occludable-job-id], div[data-job-id], div.job-card-container, li.scaffold-layout__list-item',
+      );
+      if (!card || !isCardCandidate(card) || pendingSet.has(card)) continue;
+      pendingSet.add(card);
+      pendingElements.push(card);
+    }
+  }
+
+  function enqueueMutationNode(node: Node): void {
+    if (!(node instanceof Element)) return;
+    if (isCardCandidate(node) && !pendingSet.has(node)) {
+      pendingSet.add(node);
+      pendingElements.push(node);
+    }
+    collectCandidates(node);
+  }
+
+  async function processCard(el: Element, current: JobAttempt, generation: number): Promise<void> {
+    if (session.isInvalidElement(el) || current.cancelled) return;
+
+    const cardEl = el.matches('div[data-job-id], div.job-card-container')
+      ? el
+      : (el.querySelector('div[data-job-id], div.job-card-container') ?? el);
     const jobId = jobIdFromCard(cardEl);
     if (!jobId) {
-      session.markInvalidElement(cardEl);
+      current.detailFailure = true;
+      session.markInvalidElement(el);
       session.counters.errors++;
       return;
     }
 
-    const linkEl = (cardEl.querySelector('a.job-card-container__link') ??
-      cardEl.querySelector('a[href*="/jobs/view/"]')) as HTMLAnchorElement | null;
-    const cardTitle = linkEl?.getAttribute('aria-label')?.trim()
-      ?? linkEl?.querySelector('strong')?.textContent?.trim()
-      ?? linkEl?.textContent?.trim()
-      ?? null;
+    if (!current.builder.hasCard(jobId)) {
+      if (!current.builder.addCard(jobId, cardEl)) {
+        current.detailFailure = true;
+        session.applyResult(jobIdentity(jobId), { ok: false, error: 'invalid' });
+        return;
+      }
+      session.claim(jobIdentity(jobId));
+    }
 
-    const identity = externalCaptureIdentity('linkedin', `linkedin:job:${jobId}`);
-    if (!session.claim(identity)) return;
-
-    const generation = lifecycleGeneration;
-    try {
-      (cardEl as HTMLElement).click();
-    } catch {
-      session.applyResult(identity, { ok: false, error: 'invalid' });
+    if (current.builder.hasDetail(jobId)) return;
+    if (!cardEl.isConnected) {
+      // Card removido pelo DOM virtualizado: preserva o bloco sem inventar detalhe.
+      current.detailFailure = true;
       return;
     }
 
-    const paneOk = await waitForJobsPane(generation, isGenerationActive, jobId, cardTitle);
-    if (!isGenerationActive(generation)) return;
+    try {
+      (cardEl as HTMLElement).click();
+    } catch {
+      current.detailFailure = true;
+      session.counters.errors++;
+      return;
+    }
+
+    const paneOk = await waitForJobsPane(
+      generation,
+      () => isGenerationActive(generation) && attempt === current && !current.cancelled,
+      jobId,
+    );
+    if (!isGenerationActive(generation) || attempt !== current || current.cancelled) return;
     if (!paneOk) {
-      session.applyResult(identity, { ok: false, error: 'network' });
+      current.detailFailure = true;
+      session.counters.errors++;
       return;
     }
 
     const raw = await extractLinkedInJob(jobId, cardEl);
-    if (!isGenerationActive(generation)) return;
-    if (!raw || !raw.description) {
-      session.applyResult(identity, { ok: false, error: 'invalid' });
+    if (!isGenerationActive(generation) || attempt !== current || current.cancelled) return;
+    const pane = document.querySelector(PANE_SELECTOR);
+    if (!raw || !raw.description || !pane) {
+      current.detailFailure = true;
+      session.counters.errors++;
       return;
     }
 
-    try {
-      session.counters.phase = 'sending';
-      const result = await browser.runtime.sendMessage({
-        type: 'capture:submit',
-        payload: buildJobsPayload(raw, searchUrl),
-      });
-      if (!isGenerationActive(generation)) return;
-      session.applyResult(identity, result);
-    } catch {
-      session.applyResult(identity, { ok: false, error: 'network' });
-    }
+    current.builder.addDetail(jobId, pane);
   }
 
   async function processNewJobs(): Promise<void> {
@@ -103,58 +182,187 @@ export function createLinkedInJobsController(): LinkedInJobsController {
     }
     scanRunning = true;
     const generation = lifecycleGeneration;
+    const current = attempt;
     try {
-      if (!isGenerationActive(generation)) return;
-      searchUrl = frozenSearchUrl();
+      if (!current || !isGenerationActive(generation)) return;
       session.counters.phase = 'processing';
 
-      const candidates = new Set<Element>();
-      for (const el of document.querySelectorAll('div[data-job-id]')) {
-        if (isJobCard(el)) candidates.add(el);
+      while (pendingElements.length > 0) {
+        if (!isGenerationActive(generation) || attempt !== current || current.finalized) return;
+        if (current.cancelled) break;
+        const el = pendingElements.shift();
+        if (!el) break;
+        pendingSet.delete(el);
+        await processCard(el, current, generation);
       }
-      for (const el of document.querySelectorAll('li[data-occludable-job-id]')) {
-        if (isJobCard(el)) candidates.add(el);
-      }
-      for (const a of document.querySelectorAll('a[href*="/jobs/view/"]')) {
-        const card = a.closest('li[data-occludable-job-id], div[data-job-id], div.job-card-container, li.scaffold-layout__list-item');
-        if (card && isJobCard(card as Element)) candidates.add(card as Element);
-        else if (isJobCard(a as unknown as Element)) candidates.add(a as unknown as Element);
-      }
-      // Fallback: varre tudo e filtra por isJobCard para href-only isolado
-      if (candidates.size === 0) {
-        for (const el of document.querySelectorAll('*')) {
-          if (isJobCard(el as Element)) candidates.add(el as Element);
-        }
-      }
-      const cards = Array.from(candidates);
-      for (const el of cards) {
-        if (!isGenerationActive(generation)) return;
-        await processCard(el);
-        if (!isGenerationActive(generation)) return;
-      }
-
-      if (!isGenerationActive(generation)) return;
-      session.counters.phase =
-        session.counters.processed > 0 && session.counters.errors === 0 ? 'completed' : 'waiting';
     } finally {
       scanRunning = false;
-      if (rescanQueued && isGenerationActive(lifecycleGeneration)) {
+      if (rescanQueued && isGenerationActive(lifecycleGeneration) && attempt === current) {
         rescanQueued = false;
         void processNewJobs();
       } else {
         rescanQueued = false;
+        scheduleFinalize();
       }
     }
   }
 
-  function scheduleScan(): void {
+  function scheduleScan(records?: MutationRecord[]): void {
+    // Nova mutação adia a finalização; o lote ainda pode crescer.
+    clearTimeout(finalizeTimer);
+    if (records) {
+      for (const record of records) {
+        for (const node of Array.from(record.addedNodes)) enqueueMutationNode(node);
+        for (const node of Array.from(record.removedNodes)) enqueueMutationNode(node);
+      }
+    }
     clearTimeout(debounceTimer);
     debounceTimer = window.setTimeout(() => void processNewJobs(), OBSERVER_DEBOUNCE_MS);
+  }
+
+  function scheduleFinalize(): void {
+    const current = attempt;
+    if (!current || current.finalized || current.blocked || current.cancelled) return;
+    clearTimeout(finalizeTimer);
+    finalizeTimer = window.setTimeout(() => void finalizeAttempt(current, null), CAPTURE_SETTLE_MS);
+  }
+
+  async function resolveAttempt(current: JobAttempt, generation: number): Promise<void> {
+    try {
+      const response = (await browser.runtime.sendMessage({
+        type: 'capture:resolve-run',
+        url: current.initialUrl,
+      })) as ResolveRunResult | undefined;
+
+      if (!isGenerationActive(generation) || attempt !== current) return;
+      if (response?.context) current.credentialContext = response.context;
+
+      if (response && response.ok === false) {
+        if (
+          response.error === 'conflict' ||
+          response.error === 'auth' ||
+          response.error === 'invalid'
+        ) {
+          current.blocked = true;
+          session.counters.phase = 'error';
+        }
+        return;
+      }
+
+      if (response?.ok && response.run) {
+        if (response.run.source !== 'linkedin' || response.run.surface !== 'linkedin_jobs') {
+          current.blocked = true;
+          session.counters.phase = 'error';
+          return;
+        }
+        current.executionId = response.run.executionId;
+      }
+    } catch {
+      // Falha de correlação não impede acumular; o ACK do backend decide.
+    }
+  }
+
+  async function finalizeAttempt(
+    current: JobAttempt | null,
+    reason: CaptureCoverageReason | null,
+  ): Promise<void> {
+    if (!current || current.finalized || current.blocked) return;
+    current.finalized = true;
+    clearTimeout(finalizeTimer);
+
+    const blocks = current.builder.blocks();
+    const cards = blocks.filter((block) => block.kind === 'card');
+    const coverageReason =
+      reason ??
+      (current.cancelled
+        ? 'cancelled'
+        : current.detailFailure
+          ? 'timeout'
+          : cards.length === 0
+            ? 'no_content'
+            : null);
+    const finalUrl = isLinkedInJobsRoute(location) ? location.href : current.initialUrl;
+    if (!current.credentialContext) {
+      session.counters.phase = 'error';
+      return;
+    }
+
+    const envelope = current.builder.toEnvelope({
+      executionId: current.executionId,
+      initialUrl: current.initialUrl,
+      finalUrl,
+      coverageReason,
+    });
+
+    current.pending = true;
+    try {
+      const result = (await browser.runtime.sendMessage({
+        type: 'capture:submit-envelope',
+        envelope,
+        context: current.credentialContext,
+      })) as EnvelopeResult | undefined;
+
+      if (!result || result.ok !== true) {
+        for (const card of cards) {
+          session.applyResult(jobIdentity(card.platform_id), result ?? { ok: false, error: 'network' });
+        }
+        session.counters.errors++;
+        session.counters.lastOutcome = 'error';
+        session.counters.phase = 'error';
+        return;
+      }
+
+      current.captured = true;
+      current.coverage = result.coverage ?? envelope.capture.coverage.status;
+      for (const card of cards) session.applyResult(jobIdentity(card.platform_id), result);
+      session.counters.phase = 'completed';
+    } catch {
+      for (const card of cards) {
+        session.applyResult(jobIdentity(card.platform_id), { ok: false, error: 'network' });
+      }
+      session.counters.errors++;
+      session.counters.lastOutcome = 'error';
+      session.counters.phase = 'error';
+    } finally {
+      current.pending = false;
+    }
+  }
+
+  function newAttempt(generation: number): JobAttempt {
+    const idempotencyKey = `linkedin-jobs-${Date.now().toString(36)}-${Math.random()
+      .toString(36)
+      .slice(2, 10)}`;
+    return {
+      generation,
+      initialUrl: frozenSearchUrl(),
+      idempotencyKey,
+      builder: createLinkedInJobsBuilder(idempotencyKey),
+      executionId: null,
+      credentialContext: null,
+      blocked: false,
+      finalized: false,
+      pending: false,
+      captured: false,
+      coverage: null,
+      cancelled: false,
+      detailFailure: false,
+    };
+  }
+
+  function cancelCapture(): void {
+    const current = attempt;
+    if (!current || current.finalized) return;
+    current.cancelled = true;
+    void finalizeAttempt(current, 'cancelled');
   }
 
   async function activate(ctx: ContentScriptContext): Promise<void> {
     const generation = lifecycleGeneration;
     context = ctx;
+    pendingElements = [];
+    pendingSet.clear();
+    const current = newAttempt(generation);
+    attempt = current;
 
     ui = await createShadowRootUi(ctx, {
       name: 'vagas-capture-panel',
@@ -180,8 +388,11 @@ export function createLinkedInJobsController(): LinkedInJobsController {
     ui.mount();
     app = (ui.mounted as VueApp | undefined) ?? null;
 
-    if (!isGenerationActive(generation)) {
+    if (!isGenerationActive(generation) || attempt !== current) {
       removeUi();
+      if (!current.finalized && !current.blocked) {
+        void finalizeAttempt(current, 'navigation_interrupted');
+      }
       return;
     }
 
@@ -192,9 +403,19 @@ export function createLinkedInJobsController(): LinkedInJobsController {
       attributeFilter: ['href', 'data-job-id', 'data-occludable-job-id', 'aria-expanded', 'style'],
     });
 
+    escListener = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') cancelCapture();
+    };
+    window.addEventListener('keydown', escListener, { capture: true });
+
+    await resolveAttempt(current, generation);
+    if (!isGenerationActive(generation) || attempt !== current) return;
+    if (current.blocked) return;
+
+    collectCandidates(document);
     await processNewJobs();
 
-    if (!isGenerationActive(generation)) return;
+    if (!isGenerationActive(generation) || attempt !== current) return;
 
     const removeInvalidatedListener = ctx.onInvalidated(deactivate);
     removeInvalidatedListeners.push(removeInvalidatedListener);
@@ -203,9 +424,11 @@ export function createLinkedInJobsController(): LinkedInJobsController {
   const removeInvalidatedListeners: Array<() => void> = [];
 
   function removeUi(): void {
+    clearPreEscListener();
+    clearTimeout(debounceTimer);
+    clearTimeout(finalizeTimer);
     observer?.disconnect();
     observer = null;
-    clearTimeout(debounceTimer);
     rescanQueued = false;
     app?.unmount();
     app = null;
@@ -213,12 +436,34 @@ export function createLinkedInJobsController(): LinkedInJobsController {
     ui = null;
   }
 
+  function clearPreEscListener(): void {
+    if (!escListener) return;
+    window.removeEventListener('keydown', escListener, { capture: true });
+    escListener = null;
+  }
+
   function deactivate(): void {
     lifecycleGeneration++;
     for (const remove of removeInvalidatedListeners.splice(0)) remove();
     context = undefined;
+    const interrupted = attempt;
     removeUi();
+    if (interrupted && !interrupted.finalized && !interrupted.blocked) {
+      void finalizeAttempt(interrupted, 'navigation_interrupted');
+    }
   }
 
-  return { activate, deactivate };
+  function getCaptureState(): LinkedInJobsCaptureState {
+    const blocks = attempt?.builder.blocks() ?? [];
+    return {
+      captured: attempt?.captured ?? false,
+      pending: attempt?.pending ?? false,
+      coverage: attempt?.coverage ?? null,
+      executionId: attempt?.executionId ?? null,
+      cards: blocks.filter((block) => block.kind === 'card').length,
+      details: blocks.filter((block) => block.kind === 'detail').length,
+    };
+  }
+
+  return { activate, deactivate, getCaptureState };
 }
