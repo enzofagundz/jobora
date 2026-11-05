@@ -23,6 +23,7 @@ use App\Mcp\Tools\Captures\GetJobCaptureTool;
 use App\Mcp\Tools\Captures\GetPageCaptureTool;
 use App\Mcp\Tools\Captures\IngestPageCaptureTool;
 use App\Mcp\Tools\Captures\ListJobCapturesTool;
+use App\Mcp\Tools\Captures\ListPublicationsTool;
 use App\Mcp\Tools\Captures\PromoteEligibleJobCapturesTool;
 use App\Mcp\Tools\Captures\PromoteJobCaptureTool;
 use App\Mcp\Tools\Captures\TriageJobCapturesTool;
@@ -80,6 +81,7 @@ final class JoboraServer extends Server
         CaptureJobTool::class,
         IngestPageCaptureTool::class,
         GetPageCaptureTool::class,
+        ListPublicationsTool::class,
         GetJobCaptureTool::class,
         ListJobCapturesTool::class,
         DeleteJobCaptureTool::class,

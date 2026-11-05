@@ -17,6 +17,7 @@ class CaptureIngestionService
     public function __construct(
         private readonly CaptureValidator $validator,
         private readonly CaptureSanitizer $sanitizer,
+        private readonly PublicationExtractionService $extractions,
     ) {}
 
     /**
@@ -86,6 +87,8 @@ class CaptureIngestionService
 
             throw new CaptureConflictException('Captura concorrente em conflito.', 0, $exception);
         }
+
+        $this->extractions->requestSafely($pageCapture);
 
         return [$pageCapture, true];
     }

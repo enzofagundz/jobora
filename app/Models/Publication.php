@@ -22,7 +22,19 @@ class Publication extends Model
         'canonical_url',
         'canonical_url_hash',
         'fingerprint',
+        'content',
+        'content_hash',
+        'content_version',
+        'last_observed_at',
     ];
+
+    protected function casts(): array
+    {
+        return [
+            'content_version' => 'integer',
+            'last_observed_at' => 'datetime',
+        ];
+    }
 
     public function user(): BelongsTo
     {

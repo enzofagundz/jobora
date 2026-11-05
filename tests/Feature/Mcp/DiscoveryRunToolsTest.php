@@ -94,6 +94,35 @@ it('reports access without declaring a capture and without touching last_success
         ->and($source->refresh()->last_success_at->toDateString())->toBe(now()->subDay()->toDateString());
 });
 
+it('accepts execution identifiers of 200 characters', function () {
+    $user = McpTestHelpers::user();
+    $executionId = str_repeat('e', 200);
+    $run = DiscoveryRun::factory()->for($user, 'user')->create([
+        'execution_id' => $executionId,
+        'idempotency_key' => 'run-200',
+    ]);
+
+    JoboraServer::tool(GetDiscoveryRunTool::class, ['execution_id' => $executionId])
+        ->assertOk()
+        ->assertStructuredContent(fn ($json) => $json
+            ->where('data.run.id', $run->id)
+            ->where('data.run.execution_id', $executionId)
+            ->etc());
+
+    JoboraServer::tool(ReportDiscoveryAccessTool::class, [
+        'execution_id' => $executionId,
+        'event_key' => 'access-200',
+        'outcome' => 'success',
+        'final_url' => $run->initial_url,
+    ])->assertOk()
+        ->assertStructuredContent(fn ($json) => $json
+            ->where('ok', true)
+            ->where('data.event.outcome', 'success')
+            ->etc());
+
+    expect($run->events()->count())->toBe(1);
+});
+
 it('fails closed when the integration lacks runs capabilities', function () {
     $user = User::factory()->create();
     $client = Helpers::client();

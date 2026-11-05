@@ -1,0 +1,54 @@
+{
+  "format": "jobora.capture-envelope",
+  "version": 1,
+  "capture": {
+    "idempotency_key": "fixture-linkedin-jobs-spa-v1",
+    "execution_id": "exec-exemplo-linkedin-jobs-spa",
+    "source": "linkedin",
+    "surface": "linkedin_jobs",
+    "initial_url": "https://www.linkedin.com/jobs/search/?keywords=desenvolvedor%20exemplo",
+    "final_url": "https://www.linkedin.com/jobs/search/?keywords=desenvolvedor%20exemplo&currentJobId=9000000000000000302",
+    "captured_at": "2026-01-15T12:05:00Z",
+    "coverage": {
+      "status": "complete",
+      "reason": null,
+      "blocks_expected": 4,
+      "blocks_captured": 4
+    },
+    "html": "<!DOCTYPE html>\n<html lang=\"pt-BR\">\n<head><meta charset=\"utf-8\"><title>LinkedIn vagas SPA — fixture sintética</title></head>\n<body>\n<main data-capture-surface=\"linkedin_jobs\" data-capture-version=\"1\">\n  <article data-block-id=\"card-1\" data-kind=\"card\" data-platform-id=\"9000000000000000301\" data-permalink=\"https://www.linkedin.com/jobs/view/9000000000000000301\" data-detail-block-id=\"detail-1\">\n    <h2>Vaga SPA PHP</h2>\n    <p>Empresa Exemplo</p>\n  </article>\n  <section data-block-id=\"detail-2\" data-kind=\"detail\" data-platform-id=\"9000000000000000302\" data-permalink=\"https://www.linkedin.com/jobs/view/9000000000000000302\" data-card-block-id=\"card-2\">\n    <h1>Vaga SPA Node.js</h1>\n    <p>Descrição da segunda vaga carregada fora de ordem.</p>\n  </section>\n  <section data-block-id=\"detail-1\" data-kind=\"detail\" data-platform-id=\"9000000000000000301\" data-permalink=\"https://www.linkedin.com/jobs/view/9000000000000000301\" data-card-block-id=\"card-1\">\n    <h1>Vaga SPA PHP</h1>\n    <p>Descrição da primeira vaga carregada depois do detalhe da segunda.</p>\n  </section>\n  <article data-block-id=\"card-2\" data-kind=\"card\" data-platform-id=\"9000000000000000302\" data-permalink=\"https://www.linkedin.com/jobs/view/9000000000000000302\" data-detail-block-id=\"detail-2\">\n    <h2>Vaga SPA Node.js</h2>\n    <p>Empresa Exemplo Dois</p>\n  </article>\n</main>\n</body>\n</html>"
+  },
+  "blocks": [
+    {
+      "block_id": "card-1",
+      "kind": "card",
+      "platform_id": "9000000000000000301",
+      "permalink": "https://www.linkedin.com/jobs/view/9000000000000000301",
+      "card_block_id": null,
+      "detail_block_id": "detail-1"
+    },
+    {
+      "block_id": "detail-2",
+      "kind": "detail",
+      "platform_id": "9000000000000000302",
+      "permalink": "https://www.linkedin.com/jobs/view/9000000000000000302",
+      "card_block_id": "card-2",
+      "detail_block_id": null
+    },
+    {
+      "block_id": "detail-1",
+      "kind": "detail",
+      "platform_id": "9000000000000000301",
+      "permalink": "https://www.linkedin.com/jobs/view/9000000000000000301",
+      "card_block_id": "card-1",
+      "detail_block_id": null
+    },
+    {
+      "block_id": "card-2",
+      "kind": "card",
+      "platform_id": "9000000000000000302",
+      "permalink": "https://www.linkedin.com/jobs/view/9000000000000000302",
+      "card_block_id": null,
+      "detail_block_id": "detail-2"
+    }
+  ]
+}

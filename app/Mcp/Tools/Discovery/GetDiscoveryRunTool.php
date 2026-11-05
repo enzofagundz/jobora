@@ -17,7 +17,7 @@ class GetDiscoveryRunTool extends DiscoveryRunTool
     {
         $validated = $request->validate([
             'id' => ['nullable', 'integer'],
-            'execution_id' => ['nullable', 'string', 'max:64', 'required_without:id'],
+            'execution_id' => ['nullable', 'string', 'max:200', 'required_without:id'],
         ]);
 
         $id = $validated['id'] ?? $validated['execution_id'];

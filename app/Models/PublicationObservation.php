@@ -14,12 +14,18 @@ class PublicationObservation extends Model
         'page_capture_id',
         'publication_id',
         'observed_at',
+        'content',
+        'content_hash',
+        'content_version',
+        'evidence_block_ids',
     ];
 
     protected function casts(): array
     {
         return [
             'observed_at' => 'datetime',
+            'content_version' => 'integer',
+            'evidence_block_ids' => 'array',
         ];
     }
 

@@ -1,0 +1,46 @@
+{
+  "format": "jobora.capture-envelope",
+  "version": 1,
+  "capture": {
+    "idempotency_key": "fixture-linkedin-jobs-card-only-v1",
+    "execution_id": "exec-exemplo-linkedin-jobs-card-only",
+    "source": "linkedin",
+    "surface": "linkedin_jobs",
+    "initial_url": "https://www.linkedin.com/jobs/search/?keywords=desenvolvedor%20exemplo",
+    "final_url": "https://www.linkedin.com/jobs/search/?keywords=desenvolvedor%20exemplo&currentJobId=9000000000000000201",
+    "captured_at": "2026-01-15T12:04:00Z",
+    "coverage": {
+      "status": "partial",
+      "reason": "timeout",
+      "blocks_expected": 3,
+      "blocks_captured": 3
+    },
+    "html": "<!DOCTYPE html>\n<html lang=\"pt-BR\">\n<head><meta charset=\"utf-8\"><title>LinkedIn vagas parcial — fixture sintética</title></head>\n<body>\n<main data-capture-surface=\"linkedin_jobs\" data-capture-version=\"1\">\n  <article data-block-id=\"card-1\" data-kind=\"card\" data-platform-id=\"9000000000000000201\" data-permalink=\"https://www.linkedin.com/jobs/view/9000000000000000201\" data-detail-block-id=\"detail-1\">\n    <h2>Vaga Parcial com Detalhe</h2>\n    <p>Empresa Exemplo</p>\n  </article>\n  <section data-block-id=\"detail-1\" data-kind=\"detail\" data-platform-id=\"9000000000000000201\" data-permalink=\"https://www.linkedin.com/jobs/view/9000000000000000201\" data-card-block-id=\"card-1\">\n    <h1>Vaga Parcial com Detalhe</h1>\n    <p>Descrição carregada antes do timeout.</p>\n  </section>\n  <article data-block-id=\"card-2\" data-kind=\"card\" data-platform-id=\"9000000000000000202\" data-permalink=\"https://www.linkedin.com/jobs/view/9000000000000000202\">\n    <h2>Vaga Parcial sem Detalhe</h2>\n    <p>Empresa Exemplo Dois</p>\n  </article>\n</main>\n</body>\n</html>"
+  },
+  "blocks": [
+    {
+      "block_id": "card-1",
+      "kind": "card",
+      "platform_id": "9000000000000000201",
+      "permalink": "https://www.linkedin.com/jobs/view/9000000000000000201",
+      "card_block_id": null,
+      "detail_block_id": "detail-1"
+    },
+    {
+      "block_id": "detail-1",
+      "kind": "detail",
+      "platform_id": "9000000000000000201",
+      "permalink": "https://www.linkedin.com/jobs/view/9000000000000000201",
+      "card_block_id": "card-1",
+      "detail_block_id": null
+    },
+    {
+      "block_id": "card-2",
+      "kind": "card",
+      "platform_id": "9000000000000000202",
+      "permalink": "https://www.linkedin.com/jobs/view/9000000000000000202",
+      "card_block_id": null,
+      "detail_block_id": null
+    }
+  ]
+}
