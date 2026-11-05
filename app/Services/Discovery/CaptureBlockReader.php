@@ -93,9 +93,10 @@ class CaptureBlockReader
         $platformId = $element->hasAttribute('data-platform-id') ? trim($element->getAttribute('data-platform-id')) : null;
         $permalink = $element->hasAttribute('data-permalink') ? trim($element->getAttribute('data-permalink')) : null;
         $nullablePostIdentity = $surface === 'linkedin_publications' && $kind === 'post';
+        $nullableIndeedPlatformId = $surface === 'indeed_jobs' && in_array($kind, ['card', 'detail'], true);
 
         if ($blockId === '' || $kind === ''
-            || (! ($nullablePostIdentity && $platformId === null) && ($platformId === null || $platformId === ''))
+            || (! (($nullablePostIdentity || $nullableIndeedPlatformId) && $platformId === null) && ($platformId === null || $platformId === ''))
             || (! ($nullablePostIdentity && $permalink === null) && ($permalink === null || ! $this->isIndividualUrl($permalink)))) {
             throw PublicationExtractionException::parseFailed('Bloco sem identidade ou permalink individual.');
         }

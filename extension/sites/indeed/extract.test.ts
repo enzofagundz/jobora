@@ -2,7 +2,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
-  buildPayload,
   extractJob,
   frozenSearchUrl,
   isCard,
@@ -96,22 +95,4 @@ describe('Indeed extração (fixture própria)', () => {
     expect(frozenSearchUrl()).toBe('http://localhost:3000/jobs');
   });
 
-  it('payload: source indeed, external_id = jk, sem autor', () => {
-    const p = buildPayload(
-      {
-        jk: 'abc111',
-        url: location.origin + '/viewjob?jk=abc111',
-        title: 'Dev PHP',
-        description: 'desc',
-        company: 'Vaga Tech',
-        location: 'SP',
-      },
-      '/jobs?q=php',
-    );
-    expect(p.source).toBe('indeed');
-    expect(p.external_id).toBe('abc111');
-    expect(p.author).toBeUndefined();
-    expect(p.search_url).toBe('/jobs?q=php');
-    expect(p.title).toBe('Dev PHP');
-  });
 });

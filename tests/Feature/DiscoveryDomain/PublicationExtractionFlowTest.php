@@ -26,6 +26,7 @@ use App\Services\Discovery\PublicationExtractionException;
 use App\Services\Discovery\PublicationExtractionProcessor;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Testing\TestResponse;
@@ -84,17 +85,21 @@ function publicationExtractionEnvelope(array $posts, ?string $capturedAt = null)
 /**
  * @return array{0: DiscoverySource, 1: DiscoveryRun}
  */
-function publicationExtractionRun(User $user): array
+function publicationExtractionRun(User $user, ?DiscoverySource $source = null): array
 {
-    $url = 'https://www.linkedin.com/search/results/content/?keywords=laravel-'.uniqid();
-    $source = DiscoverySource::factory()->for($user, 'user')->create([
-        'source' => 'linkedin',
-        'surface' => 'linkedin_publications',
-        'url' => $url,
-        'canonical_url_hash' => hash('sha256', $url),
-        'active' => true,
-        'next_due_at' => now()->subMinute(),
-    ]);
+    if ($source === null) {
+        $url = 'https://www.linkedin.com/search/results/content/?keywords=laravel-'.uniqid();
+        $source = DiscoverySource::factory()->for($user, 'user')->create([
+            'source' => 'linkedin',
+            'surface' => 'linkedin_publications',
+            'url' => $url,
+            'canonical_url_hash' => hash('sha256', $url),
+            'active' => true,
+            'next_due_at' => now()->subMinute(),
+        ]);
+    } else {
+        $source->forceFill(['next_due_at' => now()->subMinute()])->save();
+    }
 
     $run = app(DiscoveryRunService::class)->acquire($user, null, 'idem-'.uniqid())->first();
 
@@ -111,9 +116,9 @@ function publicationExtractionPost(User $user, array $payload): TestResponse
  * @param  list<array{block_id: string, platform_id: ?string, permalink: ?string, text: string}>  $posts
  * @return array{0: PageCapture, 1: AiOperation}
  */
-function publicationExtractionIngest(User $user, array $posts, ?string $capturedAt = null): array
+function publicationExtractionIngest(User $user, array $posts, ?string $capturedAt = null, ?DiscoverySource $source = null): array
 {
-    [$source, $run] = publicationExtractionRun($user);
+    [$source, $run] = publicationExtractionRun($user, $source);
     $payload = publicationExtractionEnvelope($posts, $capturedAt);
     $payload['capture']['execution_id'] = $run->execution_id;
     $payload['capture']['initial_url'] = $source->url;
@@ -151,6 +156,7 @@ it('decodes the public linkedin publications fixture deterministically', functio
 
 it('ingests multiple linkedin posts without identity or permalink', function () {
     $user = User::factory()->create();
+    config(['jobora.mcp.user' => $user->email]);
 
     $posts = [
         [
@@ -180,6 +186,21 @@ it('ingests multiple linkedin posts without identity or permalink', function () 
     ];
 
     [$capture, $operation] = publicationExtractionIngest($user, $posts);
+
+    $anonymousPublicationIds = [];
+    JoboraServer::tool(ListPublicationsTool::class, ['page_capture_id' => $capture->id])
+        ->assertOk()
+        ->assertStructuredContent(function ($json) use (&$anonymousPublicationIds): void {
+            $json->where('data.total', 4)
+                ->where('data.items', function (Collection $items) use (&$anonymousPublicationIds): bool {
+                    $anonymousItems = $items->filter(fn (array $item): bool => $item['publication']['content'] === 'Post sem identidade');
+                    $anonymousPublicationIds = $anonymousItems->pluck('publication.id')->all();
+
+                    return $anonymousItems->count() === 2
+                        && $anonymousItems->pluck('publication.id')->unique()->count() === 2;
+                })
+                ->etc();
+        });
 
     $publications = Publication::query()->orderBy('id')->get();
     $storedHtml = Storage::disk('local')->get((string) $capture->html_path);
@@ -235,6 +256,74 @@ it('ingests multiple linkedin posts without identity or permalink', function () 
         ->and(Publication::query()->where('fingerprint', hash('sha256', 'capture-block:v1|'.$recapture->id.'|post-anonymous-1'))->exists())->toBeTrue()
         ->and(Publication::query()->where('fingerprint', hash('sha256', 'capture-block:v1|'.$recapture->id.'|post-anonymous-2'))->exists())->toBeTrue()
         ->and($recapture->id)->not->toBe($capture->id);
+});
+
+it('reuses anonymous publications across recaptures without merging distinct source items', function () {
+    $user = User::factory()->create();
+    config(['jobora.mcp.user' => $user->email]);
+    $firstPosts = [
+        [
+            'block_id' => 'post-a-first-capture',
+            'platform_id' => null,
+            'permalink' => null,
+            'text' => 'Publicação anônima A',
+        ],
+        [
+            'block_id' => 'post-b-first-capture',
+            'platform_id' => null,
+            'permalink' => null,
+            'text' => 'Publicação anônima B',
+        ],
+    ];
+
+    [$firstCapture] = publicationExtractionIngest($user, $firstPosts);
+    $source = DiscoverySource::query()->where('user_id', $user->id)->sole();
+    [$secondCapture] = publicationExtractionIngest($user, [
+        [
+            'block_id' => 'post-b-second-capture',
+            'platform_id' => null,
+            'permalink' => null,
+            'text' => 'Publicação anônima B',
+        ],
+        [
+            'block_id' => 'post-a-second-capture',
+            'platform_id' => null,
+            'permalink' => null,
+            'text' => 'Publicação anônima A',
+        ],
+    ], source: $source);
+    [$otherSourceCapture] = publicationExtractionIngest($user, [$firstPosts[0]]);
+
+    $readPublicationIds = function (PageCapture $capture, int $expectedCount): array {
+        $publicationIds = [];
+
+        JoboraServer::tool(ListPublicationsTool::class, ['page_capture_id' => $capture->id])
+            ->assertOk()
+            ->assertStructuredContent(function ($json) use (&$publicationIds, $expectedCount): void {
+                $json->where('data.total', $expectedCount)
+                    ->where('data.items', function (Collection $items) use (&$publicationIds, $expectedCount): bool {
+                        foreach ($items as $item) {
+                            $publicationIds[$item['publication']['content']] = $item['publication']['id'];
+                        }
+
+                        return count($publicationIds) === $expectedCount;
+                    })
+                    ->etc();
+            });
+
+        ksort($publicationIds);
+
+        return $publicationIds;
+    };
+
+    $firstPublications = $readPublicationIds($firstCapture, 2);
+    $secondPublications = $readPublicationIds($secondCapture, 2);
+    $otherSourcePublications = $readPublicationIds($otherSourceCapture, 1);
+
+    expect($firstPublications)->toHaveCount(2)
+        ->and(array_unique($firstPublications))->toHaveCount(2)
+        ->and($secondPublications)->toBe($firstPublications)
+        ->and($otherSourcePublications['Publicação anônima A'])->not->toBe($firstPublications['Publicação anônima A']);
 });
 
 it('requires identity keys but allows null only on linkedin publication posts', function () {

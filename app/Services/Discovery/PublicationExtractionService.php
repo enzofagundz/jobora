@@ -14,6 +14,7 @@ class PublicationExtractionService
     private const SUPPORTED_SURFACES = [
         'linkedin_publications',
         'linkedin_jobs',
+        'indeed_jobs',
     ];
 
     private const SAFE_FAILURE_CODES = [

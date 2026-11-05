@@ -7,6 +7,7 @@ use App\Enums\AiOperationType;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class AiOperation extends Model
 {
@@ -62,6 +63,11 @@ class AiOperation extends Model
     public function jobPosting(): BelongsTo
     {
         return $this->belongsTo(JobPosting::class);
+    }
+
+    public function publicationTriageResults(): HasMany
+    {
+        return $this->hasMany(PublicationTriageResult::class);
     }
 
     public function scopeActive(Builder $query): Builder

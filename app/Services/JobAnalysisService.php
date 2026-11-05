@@ -44,6 +44,8 @@ class JobAnalysisService
             throw new \LogicException('Vaga não pertence ao usuário.');
         }
 
+        $posting->assertLegacyWorkflow();
+
         if ($posting->status === JobPostingStatus::Confirmed) {
             throw new \LogicException('Vaga confirmada não pode ser re-analisada.');
         }

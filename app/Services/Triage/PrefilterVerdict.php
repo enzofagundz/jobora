@@ -11,5 +11,6 @@ final readonly class PrefilterVerdict
     public function __construct(
         public float $isJobProbability,
         public ?string $nonJobKind = null,
+        public ?float $confidence = null,
     ) {}
 }

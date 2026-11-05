@@ -1000,7 +1000,7 @@ it('does not let a stale worker overwrite a recovered ATS score', function () {
         ->and($adaptation->ats_rationale)->toBe('Resultado recuperado.');
 });
 
-it('fails a final reclaimed timeout without accepting an older queue attempt', function () {
+it('ignores final timeout callback carrying an older attempt token', function () {
     Queue::fake([ProcessAiOperation::class]);
 
     $user = User::factory()->create();
@@ -1030,8 +1030,10 @@ it('fails a final reclaimed timeout without accepting an older queue attempt', f
     $finalJob->job = $finalQueueJob;
     $finalJob->failed(new TimeoutExceededException('timeout final'));
 
-    expect($operation->refresh()->status)->toBe(AiOperationStatus::Failed)
-        ->and($operation->failure_code)->toBe('processing_failed');
+    expect($operation->refresh()->status)->toBe(AiOperationStatus::Running)
+        ->and($operation->attempts)->toBe(3)
+        ->and($operation->attempt_token)->not->toBe($originalAttemptToken)
+        ->and($operation->failure_code)->toBeNull();
 });
 
 it('shows polling and the active operation state on the application page', function () {

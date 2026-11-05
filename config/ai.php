@@ -159,4 +159,11 @@ return [
         ],
     ],
 
+    'publication_triage' => [
+        'provider' => 'opencode_zen',
+        'model' => 'deepseek-v4.1-flash-free',
+        'schema_version' => 'publication-triage-v1',
+        'max_content_characters' => 100000,
+    ],
+
 ];

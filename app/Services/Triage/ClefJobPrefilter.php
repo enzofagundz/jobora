@@ -75,6 +75,26 @@ final class ClefJobPrefilter implements JobPrefilter
         return $results;
     }
 
+    public function configuredModel(): string
+    {
+        return $this->model;
+    }
+
+    public function classifierIdentifier(): string
+    {
+        $configuration = [
+            'provider' => 'cloudflare-workers-ai',
+            'account_id' => $this->accountId,
+            'base_url' => rtrim($this->baseUrl, '/'),
+            'model' => $this->model,
+            'questions' => (array) config('triage.questions', []),
+            'non_job_kinds' => (array) config('triage.non_job_kinds', []),
+            'min_job_probability' => (float) config('triage.prefilter.min_job_probability', 0.50),
+        ];
+
+        return 'clef-config-sha256:'.hash('sha256', json_encode($configuration, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
+    }
+
     private function verdict(mixed $response): PrefilterVerdict|PrefilterException
     {
         try {
@@ -95,10 +115,12 @@ final class ClefJobPrefilter implements JobPrefilter
             }
 
             $answers = $this->answers($response);
+            $nonJobKind = $this->choice($answers, 'non_job_kind');
 
             return new PrefilterVerdict(
                 isJobProbability: $this->noulProbability($answers, 'is_job'),
-                nonJobKind: $this->choice($answers, 'non_job_kind'),
+                nonJobKind: $nonJobKind['choice'],
+                confidence: $nonJobKind['confidence'],
             );
         } catch (PrefilterException $exception) {
             return $exception;
@@ -120,6 +142,12 @@ final class ClefJobPrefilter implements JobPrefilter
             throw new PrefilterException('Cloudflare Workers AI retornou uma resposta sem success=true.');
         }
 
+        foreach (['errors', 'messages'] as $field) {
+            if (! is_array($json[$field] ?? null) || $json[$field] !== []) {
+                throw new PrefilterException("Cloudflare Workers AI retornou um envelope inválido em \"{$field}\".");
+            }
+        }
+
         $result = $json['result'] ?? null;
 
         if (! is_array($result)) {
@@ -130,6 +158,17 @@ final class ClefJobPrefilter implements JobPrefilter
 
         if (! is_array($answers)) {
             throw new PrefilterException('A resposta do Workers AI não contém "answers".');
+        }
+
+        if (! $this->hasExactKeys($answers, ['is_job', 'non_job_kind'])) {
+            $missing = array_values(array_diff(['is_job', 'non_job_kind'], array_keys($answers)));
+            $unknown = array_values(array_diff(array_keys($answers), ['is_job', 'non_job_kind']));
+
+            if ($missing !== []) {
+                throw new PrefilterException('A resposta do Workers AI não contém a resposta "'.$missing[0].'".');
+            }
+
+            throw new PrefilterException('A resposta do Workers AI contém uma resposta desconhecida: "'.$unknown[0].'".');
         }
 
         $this->assertType($answers, 'is_job', 'noul');
@@ -146,8 +185,9 @@ final class ClefJobPrefilter implements JobPrefilter
     private function assertType(array $answers, string $id, string $type): void
     {
         $answer = $answers[$id] ?? null;
+        $keys = $type === 'noul' ? ['type', 'noul'] : ['type', 'choice', 'probabilities', 'confidence'];
 
-        if (! is_array($answer) || ($answer['type'] ?? null) !== $type) {
+        if (! is_array($answer) || ! $this->hasExactKeys($answer, $keys) || ($answer['type'] ?? null) !== $type) {
             throw new PrefilterException("A resposta do pré-filtro não contém uma resposta válida para \"{$id}\".");
         }
     }
@@ -162,7 +202,7 @@ final class ClefJobPrefilter implements JobPrefilter
         $answer = $answers[$id] ?? null;
         $probability = is_array($answer) ? ($answer['noul'] ?? null) : null;
 
-        if (! is_numeric($probability) || (float) $probability < 0 || (float) $probability > 1) {
+        if ((! is_int($probability) && ! is_float($probability)) || $probability < 0 || $probability > 1) {
             throw new PrefilterException("A resposta do pré-filtro tem uma probabilidade inválida para \"{$id}\".");
         }
 
@@ -174,11 +214,11 @@ final class ClefJobPrefilter implements JobPrefilter
      *
      * @throws PrefilterException
      */
-    private function choice(array $answers, string $id): string
+    private function choice(array $answers, string $id): array
     {
         $answer = $answers[$id] ?? null;
 
-        if (! is_array($answer)) {
+        if (! is_array($answer) || ! $this->hasExactKeys($answer, ['type', 'choice', 'probabilities', 'confidence'])) {
             throw new PrefilterException("A resposta do pré-filtro tem uma escolha inválida para \"{$id}\".");
         }
 
@@ -192,7 +232,7 @@ final class ClefJobPrefilter implements JobPrefilter
         $this->assertProbabilities($answer['probabilities'] ?? null, $allowed, $id);
         $this->assertConfidence($answer['confidence'] ?? null, $id);
 
-        return $chosen;
+        return ['choice' => $chosen, 'confidence' => (float) $answer['confidence']];
     }
 
     /**
@@ -210,16 +250,17 @@ final class ClefJobPrefilter implements JobPrefilter
 
         foreach ($probabilities as $kind => $probability) {
             if (! in_array((string) $kind, $allowed, true)
-                || ! is_numeric($probability)
-                || (float) $probability < 0
-                || (float) $probability > 1) {
+                || (! is_int($probability) && ! is_float($probability))
+                || $probability < 0
+                || $probability > 1) {
                 throw new PrefilterException("A resposta do pré-filtro tem probabilidades inválidas para \"{$id}\".");
             }
 
             $sum += (float) $probability;
         }
 
-        if (abs($sum - 1.0) > self::PROBABILITY_TOLERANCE) {
+        if (array_diff($allowed, array_map(strval(...), array_keys($probabilities))) !== []
+            || abs($sum - 1.0) > self::PROBABILITY_TOLERANCE) {
             throw new PrefilterException("As probabilidades de \"{$id}\" não somam 1.");
         }
     }
@@ -229,7 +270,7 @@ final class ClefJobPrefilter implements JobPrefilter
      */
     private function assertConfidence(mixed $confidence, string $id): void
     {
-        if (! is_numeric($confidence) || (float) $confidence < 0 || (float) $confidence > 1) {
+        if ((! is_int($confidence) && ! is_float($confidence)) || $confidence < 0 || $confidence > 1) {
             throw new PrefilterException("A resposta do pré-filtro tem uma confiança inválida para \"{$id}\".");
         }
     }
@@ -279,5 +320,15 @@ final class ClefJobPrefilter implements JobPrefilter
             $this->accountId,
             $this->model,
         );
+    }
+
+    /**
+     * @param  array<string, mixed>  $values
+     * @param  list<string>  $expected
+     */
+    private function hasExactKeys(array $values, array $expected): bool
+    {
+        return array_diff(array_keys($values), $expected) === []
+            && array_diff($expected, array_keys($values)) === [];
     }
 }

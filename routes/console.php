@@ -28,6 +28,14 @@ Schedule::command('publication-extractions:recover')
     ->everyMinute()
     ->withoutOverlapping();
 
+Schedule::command('publication-triages:recover')
+    ->everyMinute()
+    ->withoutOverlapping();
+
+Schedule::command('publication-clef:recover')
+    ->everyMinute()
+    ->withoutOverlapping();
+
 Schedule::command('captures:prune-raw')
     ->daily()
     ->withoutOverlapping();
