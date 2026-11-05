@@ -2,11 +2,13 @@
 
 namespace App\Models;
 
+use App\Enums\AiOperationType;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Hidden(['user_id', 'deleted_at'])]
@@ -59,5 +61,13 @@ class PageCapture extends Model
     public function observations(): HasMany
     {
         return $this->hasMany(PublicationObservation::class);
+    }
+
+    public function extractionOperation(): HasOne
+    {
+        return $this->hasOne(AiOperation::class, 'target_id')
+            ->where('target_type', 'page_capture')
+            ->where('operation_type', AiOperationType::PublicationExtraction->value)
+            ->latestOfMany();
     }
 }

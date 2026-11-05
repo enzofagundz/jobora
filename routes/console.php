@@ -24,6 +24,10 @@ Schedule::command('discovery-runs:expire')
     ->everyMinute()
     ->withoutOverlapping();
 
+Schedule::command('publication-extractions:recover')
+    ->everyMinute()
+    ->withoutOverlapping();
+
 Schedule::command('captures:prune-raw')
     ->daily()
     ->withoutOverlapping();
