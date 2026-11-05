@@ -10,6 +10,7 @@ import {
   extractLinkedInPost,
   isLinkedInRoute,
   isPost,
+  type HydrationIdentityResolver,
 } from './extract';
 import { countPosts, runJumpToEnd } from './jump';
 import { createLinkedInPublicationsBuilder } from './envelope';
@@ -30,6 +31,10 @@ export interface LinkedInController {
   getCaptureState(): LinkedInCaptureState;
 }
 
+export interface LinkedInControllerOptions {
+  resolveHydrationIdentity?: HydrationIdentityResolver;
+}
+
 interface CaptureAttempt {
   generation: number;
   initialUrl: string;
@@ -42,10 +47,13 @@ interface CaptureAttempt {
   pending: boolean;
   captured: boolean;
   coverage: 'complete' | 'partial' | null;
+  identityFailure: boolean;
 }
 
 /** Uma instância por aba; activate/deactivate por rota SPA. */
-export function createLinkedInController(): LinkedInController {
+export function createLinkedInController(
+  options: LinkedInControllerOptions = {},
+): LinkedInController {
   const session: CaptureSession = createCaptureSession();
   let observer: MutationObserver | null = null;
   let debounceTimer: number | undefined;
@@ -101,16 +109,24 @@ export function createLinkedInController(): LinkedInController {
 
     let raw: Awaited<ReturnType<typeof extractLinkedInPost>>;
     try {
-      raw = await extractLinkedInPost(el);
+      raw = await extractLinkedInPost(el, options.resolveHydrationIdentity);
     } catch {
+      current.identityFailure = true;
       session.markInvalidElement(el);
       session.counters.errors++;
       return;
     }
     if (!isGenerationActive(generation) || attempt !== current) return;
+    if (raw.identityConflict) {
+      current.identityFailure = true;
+      session.markInvalidElement(el);
+      session.counters.errors++;
+      return;
+    }
 
-    // Regra exata do userscript: rejeita somente se TUDO vazio.
+    // Regra exata do usuarioscript: rejeita somente se TUDO vazio.
     if (!raw.externalId && !raw.description && !raw.url) {
+      current.identityFailure = true;
       session.markInvalidElement(el);
       session.counters.errors++;
       return;
@@ -125,6 +141,7 @@ export function createLinkedInController(): LinkedInController {
     if (!session.claim(identity)) return;
 
     if (!current.builder.add(raw, identity, el)) {
+      current.identityFailure = true;
       session.applyResult(identity, { ok: false, error: 'invalid' });
       return;
     }
@@ -231,7 +248,9 @@ export function createLinkedInController(): LinkedInController {
     clearTimeout(finalizeTimer);
 
     const blocks = current.builder.list();
-    const coverageReason = reason ?? (blocks.length === 0 ? 'no_content' : null);
+    const coverageReason =
+      reason ??
+      (current.identityFailure ? 'timeout' : blocks.length === 0 ? 'no_content' : null);
     const finalUrl = isLinkedInRoute(location) ? location.href : current.initialUrl;
     if (!current.credentialContext) {
       session.counters.phase = 'error';
@@ -306,7 +325,10 @@ export function createLinkedInController(): LinkedInController {
     if (!current || jumpAbort) return;
     if (!isGenerationActive(generation)) return;
     if (current.builder.size() === 0) {
-      void finalizeAttempt(current, 'no_content');
+      void finalizeAttempt(
+        current,
+        current.identityFailure ? 'timeout' : 'no_content',
+      );
       return;
     }
     clearTimeout(finalizeTimer);
@@ -365,6 +387,7 @@ export function createLinkedInController(): LinkedInController {
       pending: false,
       captured: false,
       coverage: null,
+      identityFailure: false,
     };
   }
 

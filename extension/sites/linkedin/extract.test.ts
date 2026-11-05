@@ -88,6 +88,18 @@ describe('LinkedIn extração (fixture oficial)', () => {
     expect(new Set(ids).size).toBe(1);
   });
 
+  it('recusa conflito entre ID do DOM e identidade da hidratação', async () => {
+    const card = cardByUrn('111')!;
+    card.setAttribute('componentkey', 'ck-A');
+    const raw = await extractLinkedInPost(card, () => ({
+      activityId: '9000000000000000001',
+      permalink: 'https://www.linkedin.com/feed/update/urn:li:activity:9000000000000000001',
+    }));
+
+    expect(raw.identityConflict).toBe(true);
+    expect(raw.externalId).toBe('urn:li:activity:111');
+  });
+
   it('payload: title/company/location nulos, search_url viva, author condicional', () => {
     const raw = {
       url: 'https://www.linkedin.com/feed/update/urn:li:activity:9',

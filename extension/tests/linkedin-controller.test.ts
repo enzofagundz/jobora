@@ -180,7 +180,7 @@ describe('linkedin controller — integridade observer/SPA', () => {
     expect(observeSpy).toHaveBeenCalledTimes(3);
   });
 
-  it('card sem permalink não inventa link: envelope parcial no_content', async () => {
+  it('card sem permalink não inventa link: envelope parcial timeout', async () => {
     document.body.innerHTML = `<div class="feed">
       <article role="listitem">
         <div data-testid="expandable-text-box"><p>Só texto, sem urn nem url.</p></div>
@@ -193,7 +193,7 @@ describe('linkedin controller — integridade observer/SPA', () => {
     expect(envelopes[0]!.blocks).toEqual([]);
     expect(envelopes[0]!.capture.coverage).toMatchObject({
       status: 'partial',
-      reason: 'no_content',
+      reason: 'timeout',
       blocks_captured: 0,
     });
     expect(controller.getCaptureState().captured).toBe(true);
