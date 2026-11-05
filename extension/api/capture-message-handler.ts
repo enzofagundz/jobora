@@ -18,7 +18,8 @@ import {
   validateCaptureCredential,
 } from '@/api/captures';
 import { isCaptureReady } from '@/utils/capture-control';
-import { apiBaseUrl, apiToken, lastApiStatus } from '@/utils/storage';
+import { apiBaseUrl, apiToken } from '@/utils/storage';
+import { lastApiStatus } from '@/utils/session-storage';
 import {
   credentialFingerprint,
   type CaptureQueue,

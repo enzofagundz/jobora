@@ -12,8 +12,8 @@ import {
   apiBaseUrl,
   apiToken,
   captureEnabled,
-  lastApiStatus,
 } from '@/utils/storage';
+import { lastApiStatus } from '@/utils/session-storage';
 
 const TOKEN = 'segredo-que-nao-pode-aparecer';
 

@@ -7,7 +7,8 @@ import { createLinkedInJobsController } from '@/sites/linkedin-jobs/controller';
 import { OBSERVER_DEBOUNCE_MS } from '@/sites/linkedin-jobs/extract';
 import { createCaptureMessageHandler } from '@/api/capture-message-handler';
 import { createCaptureQueue } from '@/utils/capture-queue';
-import { apiBaseUrl, apiToken, captureEnabled, lastApiStatus } from '@/utils/storage';
+import { apiBaseUrl, apiToken, captureEnabled } from '@/utils/storage';
+import { lastApiStatus } from '@/utils/session-storage';
 import { createMemoryQueueStore } from './helpers/memory-queue-store';
 import {
   createMemoryCredentialContextStore,

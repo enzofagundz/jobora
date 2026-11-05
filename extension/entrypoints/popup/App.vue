@@ -4,9 +4,8 @@ import {
   apiBaseUrl,
   apiToken,
   captureEnabled,
-  lastApiStatus,
-  type LastApiStatus,
 } from '@/utils/storage';
+import { lastApiStatus, type LastApiStatus } from '@/utils/session-storage';
 import { hasConfiguredToken } from '@/utils/capture-control';
 import { sanitizeApiBaseUrl, validateCaptureToken } from '@/api/captures';
 import type {
