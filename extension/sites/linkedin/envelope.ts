@@ -66,6 +66,24 @@ export function createLinkedInPublicationsBuilder(
     return byIdentity.has(identity);
   }
 
+  function enrich(
+    occurrenceIdentity: string,
+    identity: string,
+    raw: LinkedInRawPost,
+    postEl: Element,
+  ): boolean {
+    const stored = byIdentity.get(occurrenceIdentity);
+    if (!stored || byIdentity.has(identity)) return false;
+
+    const permalink = normalizePermalink(raw.url) ?? permalinkFromExternalId(raw.externalId);
+    stored.block.platform_id = raw.externalId?.trim().slice(0, 255) ?? null;
+    stored.block.permalink = permalink?.slice(0, 2000) ?? null;
+    stored.html = snapshotCaptureBlock(postEl, stored.block);
+    byIdentity.set(identity, stored);
+
+    return true;
+  }
+
   function list(): CollectedPost[] {
     return posts.map(({ identity, block }) => ({ identity, block }));
   }
@@ -104,7 +122,7 @@ export function createLinkedInPublicationsBuilder(
     };
   }
 
-  return { add, has, list, size: () => posts.length, toEnvelope };
+  return { add, enrich, has, list, size: () => posts.length, toEnvelope };
 }
 
 function normalizePermalink(raw: string | null): string | null {
