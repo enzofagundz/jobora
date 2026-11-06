@@ -7,6 +7,7 @@ use App\Mcp\Support\ToolException;
 use App\Mcp\Tools\JoboraTool;
 use App\Models\ApplicationEvent;
 use App\Models\JobPosting;
+use App\Services\ApplicationPreparationService;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -39,6 +40,8 @@ class GetApplicationTool extends JoboraTool
 
         return $this->ok([
             'application' => ApplicationPresenter::toArray($application),
+            'preparation' => $application->current_preparation_id === null ? null
+                : app(ApplicationPreparationService::class)->get($this->user(), $application->current_preparation_id),
             'events' => $application->events()
                 ->orderBy('occurred_at')
                 ->orderBy('id')

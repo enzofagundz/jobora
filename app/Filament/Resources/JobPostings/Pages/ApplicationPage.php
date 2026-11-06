@@ -10,15 +10,21 @@ use App\Enums\ResumeLanguage;
 use App\Filament\Pages\ResumePage;
 use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Filament\Resources\JobPostings\Schemas\ApplicationMethodForm;
+use App\Models\AgentIntegration;
 use App\Models\AiOperation;
 use App\Models\Application;
 use App\Models\ApplicationEvent;
 use App\Models\ApplicationMethod;
+use App\Models\DocumentArtifact;
 use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
 use App\Services\AiOperationService;
+use App\Services\ApplicationApprovalService;
+use App\Services\ApplicationPreparationService;
 use App\Services\ApplicationTrackingService;
+use App\Services\DocumentArtifactService;
 use App\Services\JobReviewService;
+use App\Services\ProfessionalProfileService;
 use App\Services\ResumeService;
 use App\Support\Staleness;
 use Filament\Actions\Action;
@@ -38,10 +44,15 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
+use LogicException;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Throwable;
 
 /**
@@ -77,15 +88,31 @@ class ApplicationPage extends Page implements HasTable
 
     public ?string $atsConsentMarker = null;
 
+    public ?string $destinationApplicationMethodId = null;
+
+    public bool $preparationCoverLetterRequested = false;
+
+    public bool $preparationTranslateMissing = false;
+
+    public bool $preparationAtsConsent = false;
+
+    public ?array $preparationResult = null;
+
+    public array $preparationOperations = [];
+
+    public ?array $preparationData = ['questions' => []];
+
+    public array $preparationQuestionLabels = [];
+
+    public ?array $approvalData = null;
+
     public function mount(int|string $record): void
     {
         $this->record = $this->resolveRecord($record);
 
         Gate::authorize('view', $this->record);
 
-        if ($this->record->status !== JobPostingStatus::Confirmed) {
-            $this->redirect(ListJobPostings::getUrl());
-        }
+        $this->destinationApplicationMethodId = $this->applicationMethods()->first()?->id;
 
         $this->form->fill([
             'original_resume' => ResumeService::plainText(app(ResumeService::class)->content(auth()->user(), ResumeLanguage::PtBr)),
@@ -93,6 +120,7 @@ class ApplicationPage extends Page implements HasTable
 
         $this->fillAdaptedForm();
         $this->refreshAiOperation();
+        $this->recoverCurrentApplicationPreparation();
     }
 
     /**
@@ -102,6 +130,7 @@ class ApplicationPage extends Page implements HasTable
     public function updatedResumeLanguage(): void
     {
         $this->atsConsent = false;
+        $this->preparationAtsConsent = false;
         $this->fillOriginalForm();
         $this->refreshAiOperation();
     }
@@ -137,6 +166,23 @@ class ApplicationPage extends Page implements HasTable
                     ->columnSpanFull(),
             ])
             ->statePath('data');
+    }
+
+    public function preparationForm(Schema $schema): Schema
+    {
+        return $schema->components([
+            Repeater::make('questions')->label('Perguntas da candidatura')->schema([
+                TextInput::make('question')->label('Pergunta')->required()->maxLength(5000),
+                Textarea::make('answer')->label('Resposta')->rows(3)->maxLength(10000),
+                Repeater::make('support')->label('Trechos de apoio')->schema([
+                    Select::make('source')->label('Origem')->options(['profile' => 'Perfil confirmado', 'resume' => 'Currículo'])->required(),
+                    TextInput::make('path')->label('Campo de origem')->required()->maxLength(255)
+                        ->helperText('Ex.: competencies.0 no perfil ou content no currículo.'),
+                    Textarea::make('quote')->label('Trecho literal')->required()->maxLength(10000)->rows(2),
+                ])->defaultItems(0)->maxItems(50)->columnSpanFull(),
+            ])->defaultItems(0)->maxItems(100)->addActionLabel('Adicionar pergunta')->columnSpanFull()
+                ->helperText('Use apenas informações do perfil confirmado ou currículo. Respostas sem trecho literal correspondente ficam pendentes.'),
+        ])->statePath('preparationData');
     }
 
     public function getSubheading(): ?string
@@ -207,6 +253,7 @@ class ApplicationPage extends Page implements HasTable
     public function aiOperationLabel(AiOperation $operation): string
     {
         return match ($operation->operation_type) {
+            AiOperationType::ResumeTranslation => 'Tradução do currículo',
             AiOperationType::ResumeAdaptation => 'Adequação do currículo',
             AiOperationType::AtsOptimization => 'Otimização ATS',
             AiOperationType::AtsScore => 'Simulação ATS',
@@ -224,6 +271,7 @@ class ApplicationPage extends Page implements HasTable
 
         if ($this->atsConsentMarker !== null && $this->atsConsentMarker !== $currentConsentMarker) {
             $this->atsConsent = false;
+            $this->preparationAtsConsent = false;
         }
 
         $this->atsConsentMarker = $currentConsentMarker;
@@ -233,6 +281,273 @@ class ApplicationPage extends Page implements HasTable
                 'score' => $adaptation->ats_score,
                 'rationale' => $adaptation->ats_rationale ?? '',
             ];
+
+        $this->refreshApplicationPreparation();
+    }
+
+    public function prepareApplicationMaterials(ApplicationPreparationService $preparations): void
+    {
+        $user = auth()->user();
+        $posting = JobPosting::query()->where('user_id', $user->id)->findOrFail($this->record->getKey());
+        Gate::forUser($user)->authorize('update', $posting);
+
+        if (! $posting->isEligibleForApplicationDocuments()) {
+            Notification::make()->danger()->title('Vaga indisponível para preparação')->body('A oportunidade precisa estar pronta para candidatura.')->send();
+
+            return;
+        }
+
+        $language = ResumeLanguage::tryFrom($this->resumeLanguage);
+
+        if ($language === null || blank($this->destinationApplicationMethodId)) {
+            Notification::make()->warning()->title('Selecione idioma e destino')->body('Escolha uma forma de candidatura cadastrada nesta vaga.')->send();
+
+            return;
+        }
+
+        $profile = app(ProfessionalProfileService::class)->get($user);
+        $input = [
+            'job_posting_id' => $posting->id,
+            'expected_profile_confirmed_version' => $profile['confirmed_version'],
+            'language' => $language->value,
+            'destination' => ['application_method_id' => (int) $this->destinationApplicationMethodId],
+            'cover_letter_requested' => $this->preparationCoverLetterRequested,
+            'translate_missing' => $language === ResumeLanguage::En && $this->preparationTranslateMissing,
+            'ats_consent' => $this->preparationAtsConsent,
+            'questions' => $this->preparationQuestions(),
+        ];
+
+        if ($posting->isStructuredOpportunity()) {
+            $input['expected_opportunity_version'] = $posting->opportunity_version;
+        }
+
+        try {
+            $this->preparationResult = $preparations->prepare($user, $input, ['source' => 'filament']);
+            $this->refreshApplicationPreparation($preparations);
+            $notification = match ($this->preparationResult['state']) {
+                'pending_information' => Notification::make()->warning()->title('Faltam informações'),
+                'preparing' => Notification::make()->info()->title('Preparação em andamento'),
+                default => Notification::make()->success()->title('Material preparado'),
+            };
+            $notification->send();
+        } catch (AuthorizationException|LogicException|ModelNotFoundException) {
+            Notification::make()->danger()->title('Não foi possível preparar o material')->body('Confira se perfil, vaga e destino ainda estão válidos.')->send();
+        }
+    }
+
+    public function refreshApplicationPreparation(?ApplicationPreparationService $preparations = null): void
+    {
+        if ($this->preparationResult === null) {
+            $this->approvalData = null;
+
+            return;
+        }
+
+        $preparations ??= app(ApplicationPreparationService::class);
+        $user = auth()->user();
+        $preparationId = $this->preparationResult['preparation_id'] ?? null;
+
+        if ($preparationId !== null) {
+            try {
+                $result = $preparations->get($user, (string) $preparationId);
+                if ((int) ($result['snapshot']['opportunity']['id'] ?? 0) !== (int) $this->record->getKey()) {
+                    $this->preparationResult = null;
+                    $this->preparationOperations = [];
+                    $this->approvalData = null;
+
+                    return;
+                }
+                $this->preparationResult = $result;
+            } catch (ModelNotFoundException) {
+                $this->preparationResult = null;
+                $this->approvalData = null;
+            }
+        }
+
+        $operationIds = array_values(array_filter($this->preparationResult['operation_ids'] ?? [], 'is_int'));
+        $this->preparationOperations = AiOperation::query()->where('user_id', $user->id)->whereKey($operationIds)->get()
+            ->filter(fn (AiOperation $operation): bool => $operation->operation_type === AiOperationType::ResumeTranslation
+                ? $operation->target_type === 'user' && (int) $operation->target_id === $user->id
+                : $operation->job_posting_id === $this->record->getKey()
+                    && in_array($operation->operation_type, [AiOperationType::ResumeAdaptation, AiOperationType::AtsOptimization, AiOperationType::AtsScore], true))
+            ->map(fn (AiOperation $operation): array => [
+                'type' => $this->aiOperationLabel($operation),
+                'status' => $operation->status?->value,
+                'active' => $operation->isActive(),
+            ])->values()->all();
+
+        $this->refreshApplicationApproval();
+    }
+
+    public function refreshApplicationApproval(?ApplicationApprovalService $approvals = null): void
+    {
+        $preparationId = $this->preparationResult['preparation_id'] ?? null;
+
+        if ($preparationId === null) {
+            $this->approvalData = null;
+
+            return;
+        }
+
+        try {
+            $this->approvalData = ($approvals ?? app(ApplicationApprovalService::class))
+                ->forPreparation(auth()->user(), (string) $preparationId);
+        } catch (ModelNotFoundException|AuthorizationException) {
+            $this->approvalData = null;
+        }
+    }
+
+    public function revokeApplicationApproval(string $approvalId): void
+    {
+        $user = auth()->user();
+        $posting = JobPosting::query()->where('user_id', $user->id)->findOrFail($this->record->getKey());
+        $preparationId = $this->preparationResult['preparation_id'] ?? null;
+        $currentPreparationId = $posting->application()->value('current_preparation_id');
+
+        if ($preparationId === null || (string) $preparationId !== (string) $currentPreparationId) {
+            Notification::make()->warning()->title('Aprovação não pertence ao material atual')->send();
+
+            return;
+        }
+
+        $preparation = app(ApplicationPreparationService::class)->get($user, (string) $preparationId);
+
+        if (! ($preparation['current'] ?? false)
+            || (int) ($preparation['snapshot']['opportunity']['id'] ?? 0) !== (int) $posting->getKey()) {
+            Notification::make()->warning()->title('Material não está mais atual')->send();
+
+            return;
+        }
+
+        $approvalService = app(ApplicationApprovalService::class);
+        $approvalList = $approvalService->forPreparation($user, (string) $preparationId);
+        $ownedApproval = collect($approvalList['approvals'] ?? [])->first(fn (array $approval): bool => (string) $approval['id'] === $approvalId);
+
+        if ($ownedApproval === null) {
+            Notification::make()->danger()->title('Aprovação não encontrada para este material')->send();
+
+            return;
+        }
+
+        try {
+            $approvalService->revoke($user, $approvalId, ['source' => 'filament']);
+            Notification::make()->success()->title('Aprovação revogada')->body('A aprovação registrada não enviou candidatura.')->send();
+            $this->refreshApplicationApproval($approvalService);
+        } catch (AuthorizationException|ModelNotFoundException) {
+            Notification::make()->danger()->title('Não foi possível revogar a aprovação')->send();
+        }
+    }
+
+    public function approvalIntegrationName(int $integrationId): string
+    {
+        return AgentIntegration::query()->where('user_id', auth()->id())->find($integrationId)?->name ?? 'Integração indisponível';
+    }
+
+    public function approvalStatusLabel(array $approval): string
+    {
+        $canShowAsActive = ($approval['status'] ?? null) === 'active'
+            && ($this->preparationResult['current'] ?? false)
+            && ! ($this->preparationResult['stale'] ?? true)
+            && ($this->preparationResult['state'] ?? null) === 'awaiting_approval'
+            && ($this->preparationResult['pending'] ?? []) === [];
+
+        if ($canShowAsActive) {
+            return 'Aprovação registrada para este material';
+        }
+
+        return match ($approval['status'] ?? null) {
+            'revoked' => 'Aprovação revogada',
+            'expired' => 'Aprovação expirada',
+            default => 'Aprovação inválida ou material alterado',
+        };
+    }
+
+    public function hasActivePreparationOperation(): bool
+    {
+        return collect($this->preparationOperations)->contains(fn (array $operation): bool => $operation['active']);
+    }
+
+    public function canGenerateApplicationDocuments(): bool
+    {
+        return $this->record->fresh()->isEligibleForApplicationDocuments();
+    }
+
+    public function preparedArtifactUrl(string $artifactId): ?string
+    {
+        $preparations = app(ApplicationPreparationService::class);
+        $documents = app(DocumentArtifactService::class);
+        $this->refreshApplicationPreparation($preparations);
+        $preparationId = $this->preparationResult['preparation_id'] ?? null;
+
+        if ($preparationId === null) {
+            return null;
+        }
+
+        try {
+            $artifact = DocumentArtifact::query()->where('user_id', auth()->id())
+                ->where('preparation_id', $preparationId)->findOrFail($artifactId);
+
+            if ($artifact->revoked_at !== null || $artifact->expires_at->lte(now())
+                || ! Storage::disk('local')->exists($artifact->path)
+                || ($artifact->requires_ats_authorization && ! Gate::allows('useAtsOptimization'))) {
+                return null;
+            }
+
+            return $documents->deliver(auth()->user(), $artifact, session: true)['download_url'];
+        } catch (ModelNotFoundException) {
+            return null;
+        } catch (HttpExceptionInterface $exception) {
+            if (in_array($exception->getStatusCode(), [403, 410], true)) {
+                return null;
+            }
+
+            throw $exception;
+        }
+    }
+
+    public function preparationPendingLabel(array $pending): string
+    {
+        return match ($pending['code'] ?? null) {
+            'missing_resume' => 'Currículo no idioma escolhido ainda não está disponível. Cadastre essa versão ou, para EN, marque a opção de solicitar tradução.',
+            'unsupported_answer' => 'Resposta sem trecho literal correspondente no perfil ou currículo. Revise resposta e trecho de apoio antes de preparar novamente.',
+            'cover_letter_required' => 'Este destino exige carta de apresentação. Marque “Incluir carta de apresentação” e prepare novamente.',
+            default => 'Revise as informações pendentes antes de usar este material.',
+        };
+    }
+
+    private function preparationQuestions(): array
+    {
+        $questions = $this->preparationForm->getState()['questions'] ?? [];
+        $this->preparationQuestionLabels = [];
+
+        return collect(array_values($questions))
+            ->filter(fn (array $question): bool => filled($question['question'] ?? null))
+            ->values()
+            ->map(function (array $question, int $index): array {
+                $id = 'question-'.substr(hash('sha256', $index."\0".$question['question']), 0, 24);
+                $this->preparationQuestionLabels[$id] = $question['question'];
+
+                return [
+                    'id' => $id,
+                    'question' => $question['question'],
+                    'answer' => $question['answer'] ?? null,
+                    'support' => array_values(array_map(static fn (array $support): array => [
+                        'source' => $support['source'], 'path' => $support['path'], 'quote' => $support['quote'],
+                    ], $question['support'] ?? [])),
+                ];
+            })->all();
+    }
+
+    private function recoverCurrentApplicationPreparation(): void
+    {
+        $preparationId = $this->record->application()->value('current_preparation_id');
+
+        if ($preparationId === null) {
+            return;
+        }
+
+        $this->preparationResult = app(ApplicationPreparationService::class)->get(auth()->user(), (string) $preparationId);
+        $this->refreshApplicationPreparation();
     }
 
     public function atsScoreIsStale(): bool
@@ -441,6 +756,12 @@ class ApplicationPage extends Page implements HasTable
     {
         Gate::authorize('update', $this->record);
 
+        if (! $this->canGenerateApplicationDocuments()) {
+            $this->notifyIneligibleGeneration();
+
+            return;
+        }
+
         $this->atsConsent = false;
 
         try {
@@ -482,6 +803,13 @@ class ApplicationPage extends Page implements HasTable
     {
         Gate::authorize('useAtsOptimization');
         Gate::authorize('update', $this->record);
+
+        if (! $this->canGenerateApplicationDocuments()) {
+            $this->notifyIneligibleGeneration();
+
+            return;
+        }
+
         $this->atsConsent = false;
 
         try {
@@ -507,6 +835,12 @@ class ApplicationPage extends Page implements HasTable
     {
         Gate::authorize('useAtsOptimization');
         Gate::authorize('view', $this->record);
+
+        if (! $this->canGenerateApplicationDocuments()) {
+            $this->notifyIneligibleGeneration();
+
+            return;
+        }
 
         if (! $this->adaptation()) {
             Notification::make()
@@ -536,17 +870,23 @@ class ApplicationPage extends Page implements HasTable
         }
     }
 
+    private function notifyIneligibleGeneration(): void
+    {
+        Notification::make()->warning()->title('Vaga indisponível para novas gerações')
+            ->body('O histórico continua disponível, mas gere ou prepare material somente para uma vaga pronta.')->send();
+    }
+
     protected function getHeaderActions(): array
     {
         return [
             ActionGroup::make([
                 Action::make('adaptPtBr')
                     ->label(fn (): string => $this->adaptItemLabel(ResumeLanguage::PtBr))
-                    ->disabled(fn (): bool => $this->hasActiveAiOperation())
+                    ->disabled(fn (): bool => $this->hasActiveAiOperation() || ! $this->canGenerateApplicationDocuments())
                     ->action(fn () => $this->adapt(ResumeLanguage::PtBr)),
                 Action::make('adaptEn')
                     ->label(fn (): string => $this->adaptItemLabel(ResumeLanguage::En))
-                    ->disabled(fn (): bool => $this->hasActiveAiOperation() || ! $this->hasResume(ResumeLanguage::En))
+                    ->disabled(fn (): bool => $this->hasActiveAiOperation() || ! $this->hasResume(ResumeLanguage::En) || ! $this->canGenerateApplicationDocuments())
                     ->tooltip(fn (): ?string => $this->hasResume(ResumeLanguage::En)
                         ? null
                         : ResumeLanguage::En->missingResumeGuidance())

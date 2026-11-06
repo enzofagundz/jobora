@@ -12,6 +12,7 @@ use App\Filament\Pages\ProfessionalCompetenciesPage;
 use App\Filament\Pages\ProfessionalProfilePage;
 use App\Filament\Pages\ResumePage;
 use App\Filament\Pages\ScreeningPreferencesPage;
+use App\Filament\Pages\TelegramIdentityPage;
 use App\Filament\Resources\AgentIntegrations\AgentIntegrationResource;
 use App\Filament\Resources\DiscoverySources\DiscoverySourceResource;
 use App\Filament\Resources\JobCaptures\JobCaptureResource;
@@ -31,6 +32,7 @@ use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
 use App\Models\User;
 use App\Services\AiInputSnapshotService;
+use App\Services\ApplicationTrackingService;
 use App\Services\CaptureTokenService;
 use App\Services\JobAnalysisService;
 use App\Services\ResumeService;
@@ -338,23 +340,40 @@ it('renderiza a página de view com a descrição rica', function () {
         ->assertSeeHtml('<strong>Vaga</strong>');
 });
 
-it('a ação de Candidatura aparece na listagem para vagas confirmadas e esconde fora desse status', function () {
+it('exibe candidatura para vagas elegíveis e oculta vagas sem prontidão ou histórico', function () {
     $confirmed = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
     $pending = JobPosting::factory()->for(auth()->user(), 'user')->create(['description' => longDescription()]);
     $needsReview = JobPosting::factory()->for(auth()->user(), 'user')->needsReview()->create(['description' => longDescription()]);
+    $readyStructured = JobPosting::factory()->for(auth()->user(), 'user')->create([
+        'description' => longDescription(), 'readiness' => 'ready', 'status' => 'pending',
+    ]);
 
     Livewire::test(ListJobPostings::class)
         ->assertTableActionVisible('application', $confirmed)
+        ->assertTableActionVisible('application', $readyStructured)
         ->assertTableActionHidden('application', $pending)
         ->assertTableActionHidden('application', $needsReview)
         ->assertSeeHtml('href="'.ApplicationPage::getUrl(['record' => $confirmed]).'"');
 });
 
-it('ApplicationPage redireciona para a listagem em vaga não confirmada', function () {
+it('mantém ação de candidatura na listagem para vaga V2 com histórico após perder prontidão', function () {
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->create([
+        'description' => longDescription(), 'readiness' => 'ready', 'status' => 'pending',
+    ]);
+    app(ApplicationTrackingService::class)->start(auth()->user(), $posting);
+    $posting->update(['readiness' => 'archived']);
+
+    Livewire::test(ListJobPostings::class)
+        ->assertTableActionVisible('application', $posting)
+        ->assertSeeHtml('href="'.ApplicationPage::getUrl(['record' => $posting]).'"');
+});
+
+it('ApplicationPage mantém leitura autorizada para vaga não confirmada sem histórico', function () {
     $posting = JobPosting::factory()->for(auth()->user(), 'user')->create(['description' => longDescription()]);
 
     Livewire::test(ApplicationPage::class, ['record' => $posting->id])
-        ->assertRedirect(ListJobPostings::getUrl());
+        ->assertSuccessful()
+        ->assertSee('Esta vaga não está pronta para novas gerações ou preparação');
 });
 
 it('ApplicationPage renderiza os métodos confirmados com origem, plataforma, URL e e-mail', function () {
@@ -682,7 +701,7 @@ it('mostra estado sem credencial quando usuário não tem token', function () {
         ->assertSee('Gerar credencial');
 });
 it('exibe a marca Jobora no painel', function () {
-    $this->get('/')->assertSuccessful()->assertSee('Jobora');
+    $this->get('/')->assertSuccessful()->assertSee('Jobora')->assertSee('Vínculo Telegram');
 });
 
 it('ordena a navegação lateral conforme o fluxo do produto', function () {
@@ -708,6 +727,7 @@ it('ordena a navegação lateral conforme o fluxo do produto', function () {
         ScreeningPreferencesPage::class,
         ProfessionalCompetenciesPage::class,
         AgentIntegrationResource::class,
+        TelegramIdentityPage::class,
         MarketComparisonPage::class,
         MarketTrendsPage::class,
     ]);

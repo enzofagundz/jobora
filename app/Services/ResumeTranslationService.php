@@ -45,6 +45,9 @@ class ResumeTranslationService
         string $fingerprint,
         ?Closure $persistWithinAttempt = null,
     ): Resume {
+        $access = app(ApplicationDocumentAccess::class);
+        $access->authorize($user);
+        $sourceHash = $access->sourceHash($user);
         $original = $payload['resume'] ?? null;
 
         if (! is_string($original) || blank($original)) {
@@ -68,7 +71,7 @@ class ResumeTranslationService
         $usage = null;
 
         try {
-            $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
+            $jsonPayload = json_encode(array_diff_key($payload, ['document_guard' => true]), JSON_UNESCAPED_UNICODE);
 
             $gate = $this->gate ?? new AiRequestGate;
             $response = $gate->run(
@@ -88,11 +91,14 @@ class ResumeTranslationService
 
             $this->assertIntegrity($result, $original);
 
-            $persist = fn (): Resume => $this->resumeService->saveTranslation(
-                $user,
-                $result->translatedResume,
-                $fingerprint,
-            );
+            $persist = function () use ($access, $sourceHash, $user, $result, $fingerprint): Resume {
+                $access->authorize($user);
+                if ($sourceHash !== $access->sourceHash($user)) {
+                    throw new LogicException('O currículo mudou durante a tradução. Preserve a edição manual.');
+                }
+
+                return $this->resumeService->saveTranslation($user, $result->translatedResume, $fingerprint);
+            };
 
             $resume = $persistWithinAttempt !== null
                 ? $persistWithinAttempt($persist)

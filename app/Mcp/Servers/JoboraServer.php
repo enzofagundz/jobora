@@ -8,10 +8,16 @@ use App\Mcp\Resources\ProfessionalCompetenciesResource;
 use App\Mcp\Resources\ResumeAdaptationResource;
 use App\Mcp\Resources\ResumeResource;
 use App\Mcp\Server\Methods\ReadResource;
+use App\Mcp\Tools\Applications\GetApplicationApprovalTool;
+use App\Mcp\Tools\Applications\GetApplicationPreparationTool;
 use App\Mcp\Tools\Applications\GetApplicationTool;
 use App\Mcp\Tools\Applications\ListApplicationsTool;
+use App\Mcp\Tools\Applications\PrepareApplicationTool;
+use App\Mcp\Tools\Applications\RecordApplicationApprovalTool;
 use App\Mcp\Tools\Applications\RecordApplicationUpdateTool;
+use App\Mcp\Tools\Applications\RevokeApplicationApprovalTool;
 use App\Mcp\Tools\Applications\StartApplicationTool;
+use App\Mcp\Tools\Applications\SubmitTelegramLinkTool;
 use App\Mcp\Tools\Ats\AdaptResumeTool;
 use App\Mcp\Tools\Ats\ExportAdaptedResumePdfTool;
 use App\Mcp\Tools\Ats\GetResumeAdaptationTool;
@@ -54,6 +60,8 @@ use App\Mcp\Tools\Market\GetMarketComparisonTool;
 use App\Mcp\Tools\Market\GetMarketFrequenciesTool;
 use App\Mcp\Tools\Market\GetMarketPairsTool;
 use App\Mcp\Tools\Market\GetMarketTrendsTool;
+use App\Mcp\Tools\Matching\GetMatchingTool;
+use App\Mcp\Tools\Matching\RequestMatchingTool;
 use App\Mcp\Tools\Profile\ConfirmProfessionalProfileTool;
 use App\Mcp\Tools\Profile\ConfirmProfileImportTool;
 use App\Mcp\Tools\Profile\GetProfessionalProfileTool;
@@ -86,6 +94,8 @@ use Laravel\Mcp\Server\Attributes\Version;
 final class JoboraServer extends Server
 {
     protected array $tools = [
+        RequestMatchingTool::class,
+        GetMatchingTool::class,
         GetAiOperationTool::class,
         CaptureJobTool::class,
         IngestPageCaptureTool::class,
@@ -132,6 +142,12 @@ final class JoboraServer extends Server
         ScoreAtsTool::class,
         ExportAdaptedResumePdfTool::class,
         StartApplicationTool::class,
+        SubmitTelegramLinkTool::class,
+        RecordApplicationApprovalTool::class,
+        GetApplicationApprovalTool::class,
+        RevokeApplicationApprovalTool::class,
+        PrepareApplicationTool::class,
+        GetApplicationPreparationTool::class,
         GetApplicationTool::class,
         ListApplicationsTool::class,
         RecordApplicationUpdateTool::class,

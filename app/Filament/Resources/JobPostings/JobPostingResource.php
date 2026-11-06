@@ -6,6 +6,7 @@ use App\Enums\JobPostingStatus;
 use App\Filament\Resources\JobPostings\Pages\ApplicationPage;
 use App\Filament\Resources\JobPostings\Pages\CreateJobPosting;
 use App\Filament\Resources\JobPostings\Pages\ListJobPostings;
+use App\Filament\Resources\JobPostings\Pages\MatchingPage;
 use App\Filament\Resources\JobPostings\Pages\ViewJobPosting;
 use App\Filament\Resources\JobPostings\Schemas\JobPostingForm;
 use App\Filament\Resources\JobPostings\Schemas\OpportunityReviewForm;
@@ -313,6 +314,7 @@ class JobPostingResource extends Resource
             'create' => CreateJobPosting::route('/create'),
             'view' => ViewJobPosting::route('/{record}'),
             'application' => ApplicationPage::route('/{record}/application'),
+            'matching' => MatchingPage::route('/{record}/matching'),
         ];
     }
 }

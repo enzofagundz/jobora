@@ -12,4 +12,5 @@ enum AiOperationType: string
     case PublicationExtraction = 'publication_extraction';
     case PublicationTriage = 'publication_triage';
     case ProfileImport = 'profile_import';
+    case Matching = 'matching';
 }

@@ -36,6 +36,10 @@ Schedule::command('profile-imports:recover')
     ->everyMinute()
     ->withoutOverlapping();
 
+Schedule::command('matching:recover')
+    ->everyMinute()
+    ->withoutOverlapping();
+
 Schedule::command('publication-clef:recover')
     ->everyMinute()
     ->withoutOverlapping();

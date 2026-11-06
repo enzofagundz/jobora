@@ -2,6 +2,11 @@
 
 return [
 
+    'matching' => [
+        'provider' => 'opencode_go', 'model' => 'deepseek-v4.1-flash',
+        'criteria_version' => 'matching-v1', 'schema_version' => 'matching-result-v1',
+    ],
+
     'profile_import' => [
         'provider' => 'opencode_go',
         'model' => 'deepseek-v4.1-flash',
