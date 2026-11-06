@@ -6,8 +6,10 @@ use App\Enums\AiOperationType;
 use App\Mcp\Support\ToolException;
 use App\Mcp\Tools\JoboraTool;
 use App\Models\AiOperation;
+use App\Models\MatchingEvaluation;
 use App\Models\ProfileImportProposal;
 use App\Models\PublicationTriageResult;
+use App\Services\MatchingService;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -95,9 +97,13 @@ class GetAiOperationTool extends JoboraTool
 
         return [
             'id' => $operation->id,
+            'matching_evaluation_id' => $operation->operation_type === AiOperationType::Matching
+                ? MatchingEvaluation::query()->where('ai_operation_id', $operation->id)->where('run_token', $operation->run_token)->value('id') : null,
             'profile_import_proposal_id' => $operation->operation_type === AiOperationType::ProfileImport
                 ? ProfileImportProposal::query()->where('ai_operation_id', $operation->id)->where('run_token', $operation->run_token)->latest('id')->value('id') : null,
-            'retry_allowed' => $operation->operation_type === AiOperationType::ProfileImport && $operation->status?->value === 'failed' && $operation->attempts < 3 && $operation->failure_code !== 'authorization_revoked',
+            'retry_allowed' => $operation->operation_type === AiOperationType::Matching
+                ? app(MatchingService::class)->retryAllowed($this->user(), $operation)
+                : $operation->operation_type === AiOperationType::ProfileImport && $operation->status?->value === 'failed' && $operation->attempts < 3 && $operation->failure_code !== 'authorization_revoked',
             'type' => $operation->operation_type?->value,
             'status' => $operation->status?->value,
             'attempts' => $operation->attempts,

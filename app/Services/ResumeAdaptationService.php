@@ -4,7 +4,6 @@ namespace App\Services;
 
 use App\Agents\ResumeAdaptationAgent;
 use App\DTO\ResumeAdaptationResult;
-use App\Enums\JobPostingStatus;
 use App\Enums\ResumeLanguage;
 use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
@@ -63,13 +62,15 @@ class ResumeAdaptationService
             throw new \LogicException('Vaga não pertence ao usuário.');
         }
 
-        if ($posting->status !== JobPostingStatus::Confirmed) {
+        if (! $posting->fresh()->isEligibleForApplicationDocuments()) {
             throw new \LogicException('A adequação exige uma vaga confirmada.');
         }
 
         if (blank($payload['resume'] ?? null)) {
             throw new \LogicException('O snapshot da adequação não contém currículo.');
         }
+
+        app(ApplicationDocumentAccess::class)->posting($user, $posting->fresh());
 
         return $this->adaptPayload($user, $posting, $payload, $fingerprint, $persistWithinAttempt);
     }
@@ -86,6 +87,8 @@ class ResumeAdaptationService
     ): ResumeAdaptation {
 
         $language = ResumeLanguage::tryFrom((string) ($payload['language'] ?? '')) ?? ResumeLanguage::PtBr;
+
+        $sourceHash = app(ApplicationDocumentAccess::class)->sourceHash($user, $posting->fresh());
 
         $started = microtime(true);
         $inputChars = 0;
@@ -105,7 +108,7 @@ class ResumeAdaptationService
         }
 
         try {
-            $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE);
+            $jsonPayload = json_encode(array_diff_key($payload, ['document_guard' => true]), JSON_UNESCAPED_UNICODE);
             $inputChars = mb_strlen($jsonPayload);
 
             $gate = $this->gate ?? new AiRequestGate;
@@ -149,7 +152,11 @@ class ResumeAdaptationService
                     : null;
             }
 
-            $persist = function () use ($fingerprint, $posting, $language, $prompt, $promptFingerprint, $result, $wasOptimized): ResumeAdaptation {
+            $persist = function () use ($sourceHash, $user, $fingerprint, $posting, $language, $prompt, $promptFingerprint, $result, $wasOptimized): ResumeAdaptation {
+                app(ApplicationDocumentAccess::class)->posting($user, $posting->fresh());
+                if ($sourceHash !== app(ApplicationDocumentAccess::class)->sourceHash($user, $posting->fresh())) {
+                    throw new \LogicException('As fontes mudaram durante a adequação.');
+                }
                 $adaptation = ResumeAdaptation::updateOrCreate(
                     ['job_posting_id' => $posting->id, 'language' => $language->value],
                     [
@@ -230,7 +237,7 @@ class ResumeAdaptationService
             throw new \LogicException('Vaga não pertence ao usuário.');
         }
 
-        if ($posting->status !== JobPostingStatus::Confirmed) {
+        if (! $posting->fresh()->isEligibleForApplicationDocuments()) {
             throw new \LogicException('A otimização exige uma vaga confirmada.');
         }
 
@@ -322,7 +329,7 @@ class ResumeAdaptationService
             throw new \LogicException('Vaga não pertence ao usuário.');
         }
 
-        if ($posting->status !== JobPostingStatus::Confirmed) {
+        if (! $posting->fresh()->isEligibleForApplicationDocuments()) {
             throw new \LogicException('A otimização exige uma vaga confirmada.');
         }
 
@@ -382,6 +389,8 @@ class ResumeAdaptationService
 
     private function persistAtsOptimization(ResumeAdaptation $adaptation, bool $enabled, ?string $prompt, ?string $fingerprint): ResumeAdaptation
     {
+        $posting = $adaptation->jobPosting()->firstOrFail();
+        app(ApplicationDocumentAccess::class)->posting($posting->user, $posting);
         $adaptation->forceFill([
             'is_ats_optimized' => $enabled,
             'ats_prompt' => $prompt,
@@ -421,7 +430,8 @@ class ResumeAdaptationService
 
     private function assertEligible(User $user, JobPosting $posting, ResumeLanguage $language): void
     {
-        if ($posting->status !== JobPostingStatus::Confirmed) {
+        app(ApplicationDocumentAccess::class)->posting($user, $posting->fresh());
+        if (! $posting->fresh()->isEligibleForApplicationDocuments()) {
             throw new \LogicException('A adequação exige uma vaga confirmada.');
         }
 

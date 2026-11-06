@@ -124,6 +124,12 @@ class ViewJobPosting extends ViewRecord
                         )).'.')
                         ->send();
                 }),
+            Action::make('matching')
+                ->label('Ver compatibilidade')
+                ->icon(Heroicon::OutlinedScale)
+                ->color('gray')
+                ->visible(fn (): bool => $this->record->isStructuredOpportunity() && $this->record->readiness === 'ready')
+                ->url(fn (): string => JobPostingResource::getUrl('matching', ['record' => $this->record])),
             Action::make('reevaluatePublication')
                 ->label('Reavaliar publicação')
                 ->icon(Heroicon::OutlinedArrowPath)

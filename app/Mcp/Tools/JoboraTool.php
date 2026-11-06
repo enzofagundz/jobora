@@ -8,6 +8,7 @@ use App\Mcp\Support\AgentIntegrationContext;
 use App\Mcp\Support\McpUserResolver;
 use App\Mcp\Support\ToolException;
 use App\Models\User;
+use App\Services\MatchingException;
 use App\Services\ProfessionalProfileConflictException;
 use App\Services\ProfileImportException;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -61,6 +62,8 @@ abstract class JoboraTool extends Tool
             return $this->execute($request);
         } catch (ToolException $exception) {
             return $this->fail($exception);
+        } catch (MatchingException $exception) {
+            return $this->fail(ToolException::matching($exception->failureCode));
         } catch (ProfessionalProfileConflictException $exception) {
             return $this->fail(ToolException::conflict($exception->getMessage()));
         } catch (ProfileImportException $exception) {

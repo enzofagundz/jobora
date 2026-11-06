@@ -57,4 +57,17 @@ final class ToolException extends RuntimeException
     {
         return new self(McpErrorCode::Internal, $message, $hint);
     }
+
+    public static function matching(string $failureCode): self
+    {
+        $code = match ($failureCode) {
+            'profile_not_confirmed' => McpErrorCode::ProfileNotConfirmed,
+            'opportunity_not_ready' => McpErrorCode::OpportunityNotReady,
+            'conflict' => McpErrorCode::Conflict,
+            'authorization_revoked' => McpErrorCode::Forbidden,
+            default => McpErrorCode::Validation,
+        };
+
+        return new self($code, 'Matching não permitido: '.$failureCode.'.');
+    }
 }
