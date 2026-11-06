@@ -799,6 +799,15 @@ class AiOperationService
                 ->first();
 
             if ($failedOperation !== null) {
+                $snapshot = $failedOperation->input_snapshot ?? [];
+                Log::channel('ai')->warning('Publication triage output validation failed.', [
+                    'operation_id' => $failedOperation->id,
+                    'publication_id' => $snapshot['publication_id'],
+                    'content_version' => $snapshot['content_version'],
+                    'provider' => $snapshot['provider'],
+                    'model' => $snapshot['model'],
+                    ...$exception->diagnostic(),
+                ]);
                 $this->notifyFailed($failedOperation->fresh(['user']));
             }
 

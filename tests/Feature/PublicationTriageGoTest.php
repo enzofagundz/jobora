@@ -11,10 +11,13 @@ use App\Models\Publication;
 use App\Models\PublicationClefResult;
 use App\Models\PublicationTriageResult;
 use App\Services\AiOperationService;
+use App\Services\PublicationTriageInvalidOutput;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
+use Monolog\Handler\TestHandler;
 use Tests\Feature\Mcp\McpTestHelpers;
 
 uses(RefreshDatabase::class);
@@ -140,3 +143,61 @@ it('preserves old SDK snapshots and their retry model despite the new triage con
     Http::assertSent(fn (Request $request): bool => $request['model'] === 'deepseek-v4.1-flash-free'
         && $request->url() !== 'https://opencode.ai/inference/go/openai/v1/chat/completions');
 });
+
+it('records only safe validation diagnostics after public triage fails without partial opportunities', function (string $text, string $code, ?string $field) {
+    $operation = goTriageOperation();
+    $handler = new TestHandler;
+    Log::channel('ai')->getLogger()->pushHandler($handler);
+    Http::fake(['*' => Http::response(goTriageResponse($text))]);
+    (new ProcessAiOperation($operation->id, $operation->run_token, $operation->attempt_token))->handle(app(AiOperationService::class));
+    JoboraServer::tool(GetAiOperationTool::class, ['id' => $operation->id])->assertOk()
+        ->assertStructuredContent(fn ($json) => $json->where('data.status', 'failed')->where('data.failure_code', 'invalid_output')->etc());
+    $result = PublicationTriageResult::query()->sole();
+    expect($result->output)->toBeNull()
+        ->and($result->prompt_tokens)->toBe(6)
+        ->and($result->completion_tokens)->toBe(2)
+        ->and($operation->user->jobPostings()->count())->toBe(0);
+    $records = $handler->getRecords();
+    expect($records)->toHaveCount(1)
+        ->and($records[0]->message)->toBe('Publication triage output validation failed.')
+        ->and($records[0]->context)->toBe([
+            'operation_id' => $operation->id,
+            'publication_id' => $operation->target_id,
+            'content_version' => 1,
+            'provider' => 'opencode_go',
+            'model' => 'deepseek-v4.1-flash',
+            'validation_code' => $code,
+            ...($field === null ? [] : ['field' => $field]),
+        ])
+        ->and(json_encode($records, JSON_THROW_ON_ERROR))->not->toContain('CANARY', 'test-only-go-key', $text);
+})->with([
+    'invalid enum' => ['{"opportunities":[{}, {"application_methods":[{"type":"CANARY-credential-postdata"}]}]}', 'invalid_application_method_type', 'type'],
+    'invalid envelope' => ['{"CANARY-secret-postdata":[]}', 'invalid_envelope', null],
+    'invalid JSON' => ['CANARY-secret-postdata', 'invalid_json', null],
+    'invalid field' => ['{"opportunities":[{"role":{"CANARY":"secret"}}]}', 'invalid_field', 'role'],
+]);
+
+it('does not log validation diagnostics for a worker that lost its attempt lease', function () {
+    $operation = goTriageOperation();
+    $handler = new TestHandler;
+    Log::channel('ai')->getLogger()->pushHandler($handler);
+    Http::fake(function () use ($operation) {
+        $operation->update(['attempt_token' => 'new-owner-attempt']);
+
+        return Http::response(goTriageResponse('CANARY-secret-postdata'));
+    });
+    expect(fn () => (new ProcessAiOperation($operation->id, $operation->run_token, $operation->getOriginal('attempt_token')))
+        ->handle(app(AiOperationService::class)))->toThrow(LogicException::class);
+    expect($handler->getRecords())->toBe([])
+        ->and(PublicationTriageResult::query()->count())->toBe(0)
+        ->and($operation->user->jobPostings()->count())->toBe(0);
+});
+
+it('classifies unknown previous exceptions without copying messages or arbitrary field names', function (Throwable $previous) {
+    $exception = new PublicationTriageInvalidOutput(previous: $previous);
+    expect($exception->diagnostic())->toBe(['validation_code' => 'unknown']);
+})->with([
+    'arbitrary exception' => [new RuntimeException('CANARY-key-secret-postdata')],
+    'untrusted field name' => [new InvalidArgumentException('Structured output field CANARY-key-secret is invalid.')],
+    'known text from unrelated exception' => [new RuntimeException('Structured output application method type is invalid.')],
+]);
