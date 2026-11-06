@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use Livewire\Livewire;
 use Tests\Feature\AgentIntegrations\AgentIntegrationTestHelpers as Helpers;
 
@@ -149,6 +150,7 @@ it('revokes binding explicitly and does not silently replace it', function () {
         ->assertSee('Aprovações antigas não serão reativadas')
         ->assertSee('Criar vínculo');
     expect(app(TelegramIdentityService::class)->currentBinding($this->owner))->toBeNull();
-    expect(fn () => app(TelegramIdentityService::class)->revokeBinding($this->owner, '99999999'))
+    $unknownBindingId = (string) Str::uuid();
+    expect(fn () => app(TelegramIdentityService::class)->revokeBinding($this->owner, $unknownBindingId))
         ->toThrow(ModelNotFoundException::class);
 });

@@ -17,6 +17,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use Monolog\Handler\TestHandler;
 use Tests\Feature\Mcp\McpTestHelpers;
 
@@ -179,16 +180,20 @@ it('records only safe validation diagnostics after public triage fails without p
 
 it('does not log validation diagnostics for a worker that lost its attempt lease', function () {
     $operation = goTriageOperation();
+    $originalAttemptToken = $operation->attempt_token;
+    $replacementAttemptToken = (string) Str::uuid();
     $handler = new TestHandler;
     Log::channel('ai')->getLogger()->pushHandler($handler);
-    Http::fake(function () use ($operation) {
-        $operation->update(['attempt_token' => 'new-owner-attempt']);
+    Http::fake(function () use ($operation, $replacementAttemptToken) {
+        $operation->update(['attempt_token' => $replacementAttemptToken]);
 
         return Http::response(goTriageResponse('CANARY-secret-postdata'));
     });
-    expect(fn () => (new ProcessAiOperation($operation->id, $operation->run_token, $operation->getOriginal('attempt_token')))
+    expect(fn () => (new ProcessAiOperation($operation->id, $operation->run_token, $originalAttemptToken))
         ->handle(app(AiOperationService::class)))->toThrow(LogicException::class);
-    expect($handler->getRecords())->toBe([])
+    expect($operation->refresh()->attempt_token)->toBe($replacementAttemptToken)
+        ->not->toBe($originalAttemptToken)
+        ->and($handler->getRecords())->toBe([])
         ->and(PublicationTriageResult::query()->count())->toBe(0)
         ->and($operation->user->jobPostings()->count())->toBe(0);
 });
