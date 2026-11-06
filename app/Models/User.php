@@ -46,6 +46,11 @@ class User extends Authenticatable implements FilamentUser, MustVerifyEmail, OAu
         return $this->hasOne(ScreeningPreference::class);
     }
 
+    public function professionalProfile(): HasOne
+    {
+        return $this->hasOne(ProfessionalProfile::class);
+    }
+
     public function professionalCompetencies(): HasMany
     {
         return $this->hasMany(ProfessionalCompetency::class);

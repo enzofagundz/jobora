@@ -54,6 +54,13 @@ use App\Mcp\Tools\Market\GetMarketComparisonTool;
 use App\Mcp\Tools\Market\GetMarketFrequenciesTool;
 use App\Mcp\Tools\Market\GetMarketPairsTool;
 use App\Mcp\Tools\Market\GetMarketTrendsTool;
+use App\Mcp\Tools\Profile\ConfirmProfessionalProfileTool;
+use App\Mcp\Tools\Profile\ConfirmProfileImportTool;
+use App\Mcp\Tools\Profile\GetProfessionalProfileTool;
+use App\Mcp\Tools\Profile\GetProfileImportTool;
+use App\Mcp\Tools\Profile\RejectProfileImportTool;
+use App\Mcp\Tools\Profile\RequestProfileImportTool;
+use App\Mcp\Tools\Profile\SaveProfessionalProfileTool;
 use App\Mcp\Tools\Resume\GetResumeTool;
 use App\Mcp\Tools\Resume\SaveResumeTool;
 use App\Mcp\Tools\Screening\GetScreeningPreferencesTool;
@@ -100,6 +107,13 @@ final class JoboraServer extends Server
         ConfirmJobPostingTool::class,
         DiscardJobPostingSuggestionTool::class,
         GetResumeTool::class,
+        GetProfessionalProfileTool::class,
+        RequestProfileImportTool::class,
+        GetProfileImportTool::class,
+        ConfirmProfileImportTool::class,
+        RejectProfileImportTool::class,
+        SaveProfessionalProfileTool::class,
+        ConfirmProfessionalProfileTool::class,
         SaveResumeTool::class,
         GetScreeningPreferencesTool::class,
         SaveScreeningPreferencesTool::class,
