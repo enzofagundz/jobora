@@ -6,6 +6,7 @@ use App\Enums\AiOperationType;
 use App\Mcp\Support\ToolException;
 use App\Mcp\Tools\JoboraTool;
 use App\Models\AiOperation;
+use App\Models\ProfileImportProposal;
 use App\Models\PublicationTriageResult;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Request;
@@ -94,6 +95,9 @@ class GetAiOperationTool extends JoboraTool
 
         return [
             'id' => $operation->id,
+            'profile_import_proposal_id' => $operation->operation_type === AiOperationType::ProfileImport
+                ? ProfileImportProposal::query()->where('ai_operation_id', $operation->id)->where('run_token', $operation->run_token)->latest('id')->value('id') : null,
+            'retry_allowed' => $operation->operation_type === AiOperationType::ProfileImport && $operation->status?->value === 'failed' && $operation->attempts < 3 && $operation->failure_code !== 'authorization_revoked',
             'type' => $operation->operation_type?->value,
             'status' => $operation->status?->value,
             'attempts' => $operation->attempts,
