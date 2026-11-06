@@ -8,8 +8,8 @@ use Throwable;
 final class PublicationTriageInvalidOutput extends RuntimeException
 {
     public function __construct(
-        public readonly int $promptTokens,
-        public readonly int $completionTokens,
+        public readonly ?int $promptTokens = null,
+        public readonly ?int $completionTokens = null,
         ?Throwable $previous = null,
     ) {
         parent::__construct('Publication triage returned invalid structured output.', previous: $previous);
