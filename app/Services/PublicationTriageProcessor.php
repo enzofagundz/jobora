@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Agents\PublicationTriageAgent;
+use App\Agents\PublicationTriageGoGateway;
 use App\DTO\ApplicationMethodData;
 use App\DTO\PublicationTriageOutput;
 use App\Enums\ConceptCategory;
@@ -16,6 +17,7 @@ use App\Models\PublicationTriageResult;
 use App\Models\User;
 use Closure;
 use Illuminate\Support\Facades\DB;
+use Laravel\Ai\Ai;
 use LogicException;
 
 final class PublicationTriageProcessor
@@ -37,29 +39,43 @@ final class PublicationTriageProcessor
                 'evidence_block_ids' => $snapshot['evidence_block_ids'] ?? [],
             ],
         ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        $gateway = null;
+        if ($snapshot['provider'] === 'opencode_go') {
+            $gateway = new PublicationTriageGoGateway(app('events'));
+            Ai::textProvider('opencode_go')->useTextGateway($gateway);
+        }
         $response = $this->agent->prompt(
             $prompt,
             provider: (string) $snapshot['provider'],
             model: (string) $snapshot['model'],
+            timeout: $gateway === null ? null : 45,
         );
+        $promptTokens = $gateway === null ? $response->usage->promptTokens : $gateway->promptTokens;
+        $completionTokens = $gateway === null ? $response->usage->completionTokens : $gateway->completionTokens;
 
         try {
+            if ($gateway !== null) {
+                $shape = json_decode($response->text, false, 64, JSON_THROW_ON_ERROR);
+                if (! $shape instanceof \stdClass || ! is_array($shape->opportunities ?? null)) {
+                    throw new \InvalidArgumentException('Structured output envelope is invalid.');
+                }
+            }
             $output = PublicationTriageOutput::fromStructured(
                 $response->structured,
                 (string) $snapshot['content'],
                 (array) $snapshot['evidence_block_ids'],
                 $snapshot['url'] === null ? null : (string) $snapshot['url'],
             );
-        } catch (\InvalidArgumentException $exception) {
+        } catch (\InvalidArgumentException|\JsonException $exception) {
             throw new PublicationTriageInvalidOutput(
-                $response->usage->promptTokens,
-                $response->usage->completionTokens,
+                $promptTokens,
+                $completionTokens,
                 $exception,
             );
         }
 
-        $persist(function () use ($user, $operation, $snapshot, $runToken, $attemptToken, $response, $output): void {
-            DB::transaction(function () use ($user, $operation, $snapshot, $runToken, $attemptToken, $response, $output): void {
+        $persist(function () use ($user, $operation, $snapshot, $runToken, $attemptToken, $promptTokens, $completionTokens, $output): void {
+            DB::transaction(function () use ($user, $operation, $snapshot, $runToken, $attemptToken, $promptTokens, $completionTokens, $output): void {
                 $result = PublicationTriageResult::query()->create([
                     'ai_operation_id' => $operation->id,
                     'publication_id' => $snapshot['publication_id'],
@@ -78,8 +94,8 @@ final class PublicationTriageProcessor
                         'outcome' => $output->opportunities === [] ? 'not_a_job' : 'opportunities',
                         'opportunities' => $output->opportunities,
                     ],
-                    'prompt_tokens' => $response->usage->promptTokens,
-                    'completion_tokens' => $response->usage->completionTokens,
+                    'prompt_tokens' => $promptTokens,
+                    'completion_tokens' => $completionTokens,
                     'clef_result_id' => $snapshot['clef_result_id'] ?? null,
                     'clef_status' => $snapshot['clef_status'] ?? null,
                     'clef_bypassed' => $snapshot['clef_bypassed'] ?? false,

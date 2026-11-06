@@ -360,8 +360,8 @@ it('reutiliza operação de triagem para publicação e versão já solicitadas'
             'content_hash' => hash('sha256', $content),
             'url' => $publication->url,
             'content' => $content,
-            'provider' => 'opencode_zen',
-            'model' => 'deepseek-v4.1-flash-free',
+            'provider' => 'opencode_go',
+            'model' => 'deepseek-v4.1-flash',
             'schema_version' => 'publication-triage-v1',
         ]);
     Queue::assertPushed(ProcessAiOperation::class, 1);
