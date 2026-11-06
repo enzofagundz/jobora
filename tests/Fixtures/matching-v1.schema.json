@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:jobora:matching-result-v1",
+  "title": "Jobora matching-result-v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "criteria_version", "input_fingerprint", "basis", "criteria", "summary"],
+  "properties": {
+    "schema_version": {"const": "matching-result-v1"},
+    "criteria_version": {"const": "matching-v1"},
+    "input_fingerprint": {"$ref": "#/$defs/hash"},
+    "basis": {"$ref": "#/$defs/basis"},
+    "criteria": {"type": "array", "minItems": 5, "maxItems": 405, "items": {"$ref": "#/$defs/criterion"}},
+    "summary": {"$ref": "#/$defs/summary"}
+  },
+  "$defs": {
+    "hash": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "basis": {
+      "type": "object", "additionalProperties": false,
+      "required": ["profile_id", "confirmed_version", "opportunity_id", "opportunity_version", "profile_hash", "opportunity_hash"],
+      "properties": {
+        "profile_id": {"type": "integer", "minimum": 1},
+        "confirmed_version": {"type": "integer", "minimum": 1},
+        "opportunity_id": {"type": "integer", "minimum": 1},
+        "opportunity_version": {"type": "integer", "minimum": 1},
+        "profile_hash": {"$ref": "#/$defs/hash"},
+        "opportunity_hash": {"$ref": "#/$defs/hash"}
+      }
+    },
+    "evidence": {
+      "type": "object", "additionalProperties": false,
+      "required": ["anchor_id", "quote"],
+      "properties": {
+        "anchor_id": {"type": "string", "minLength": 1, "maxLength": 512},
+        "quote": {"type": "string", "minLength": 1, "maxLength": 5000}
+      }
+    },
+    "criterion": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "kind", "status", "reason_code", "explanation", "evidence", "missing_paths"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^(?:(?:requirement|technology|preference|restriction):(?:0|[1-9][0-9]*)|experience|seniority|education|location_modality|compensation)$"},
+        "kind": {"enum": ["requirement", "technology", "preference", "restriction", "experience", "seniority", "education", "location_modality", "compensation"]},
+        "status": {"enum": ["met", "unsupported", "incompatible", "uncertain"]},
+        "reason_code": {"enum": ["explicit_support", "criterion_not_stated", "profile_information_missing", "opportunity_information_missing", "bilateral_information_missing", "explicit_conflict", "ambiguous_evidence", "partial_overlap", "incomparable_compensation"]},
+        "explanation": {"type": "string", "minLength": 1, "maxLength": 2000},
+        "evidence": {"type": "array", "maxItems": 100, "items": {"$ref": "#/$defs/evidence"}},
+        "missing_paths": {"type": "array", "uniqueItems": true, "maxItems": 100, "items": {"type": "string", "pattern": "^(profile|opportunity):/(?:[^~]|~[01])*$"}}
+      },
+      "allOf": [
+        {"if": {"properties": {"status": {"const": "met"}}}, "then": {"properties": {"reason_code": {"const": "explicit_support"}, "evidence": {"minItems": 2}, "missing_paths": {"maxItems": 0}}}},
+        {"if": {"properties": {"status": {"const": "incompatible"}}}, "then": {"properties": {"reason_code": {"const": "explicit_conflict"}, "evidence": {"minItems": 2}, "missing_paths": {"maxItems": 0}}}},
+        {"if": {"properties": {"status": {"const": "unsupported"}}}, "then": {"properties": {"reason_code": {"enum": ["criterion_not_stated", "profile_information_missing", "opportunity_information_missing", "bilateral_information_missing"]}, "missing_paths": {"minItems": 1}}}},
+        {"if": {"properties": {"status": {"const": "uncertain"}}}, "then": {"properties": {"reason_code": {"enum": ["ambiguous_evidence", "partial_overlap", "incomparable_compensation"]}, "evidence": {"minItems": 1}, "missing_paths": {"maxItems": 0}}}}
+      ]
+    },
+    "summary": {
+      "type": "object", "additionalProperties": false,
+      "required": ["met", "unsupported", "incompatible", "uncertain"],
+      "properties": {
+        "met": {"type": "integer", "minimum": 0},
+        "unsupported": {"type": "integer", "minimum": 0},
+        "incompatible": {"type": "integer", "minimum": 0},
+        "uncertain": {"type": "integer", "minimum": 0}
+      }
+    },
+    "anchor": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "source", "entity_id", "version", "snapshot_hash", "path", "text"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1, "maxLength": 512},
+        "source": {"enum": ["profile", "opportunity", "publication"]},
+        "entity_id": {"type": "integer", "minimum": 1},
+        "version": {"type": "integer", "minimum": 1},
+        "snapshot_hash": {"$ref": "#/$defs/hash"},
+        "path": {"type": "string", "pattern": "^/(?:[^~]|~[01])*$"},
+        "text": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}
