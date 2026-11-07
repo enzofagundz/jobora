@@ -54,11 +54,12 @@ class DocumentArtifactService
         $artifact = $this->render($user, $adaptation->getAttributes(), $language);
         try {
             DB::transaction(function () use ($user, $posting, $source, $artifact): void {
+                User::query()->whereKey($user->id)->lockForUpdate()->firstOrFail();
                 $lockedPosting = JobPosting::query()->lockForUpdate()->findOrFail($posting->id);
                 $user->professionalProfile()->lockForUpdate()->first();
-                $user->resumes()->lockForUpdate()->get();
-                $lockedPosting->resumeAdaptations()->lockForUpdate()->get();
-                $lockedPosting->items()->lockForUpdate()->get();
+                $user->resumes()->orderBy('id')->lockForUpdate()->get();
+                $lockedPosting->resumeAdaptations()->orderBy('id')->lockForUpdate()->get();
+                $lockedPosting->items()->orderBy('id')->lockForUpdate()->get();
                 $this->access->posting($user, $lockedPosting);
                 $this->access->authorize($user, scope: AgentIntegrationScope::AtsRead);
                 if ($source !== $this->access->sourceHash($user, $lockedPosting)) {

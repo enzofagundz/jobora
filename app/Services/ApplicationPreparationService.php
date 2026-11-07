@@ -126,12 +126,13 @@ class ApplicationPreparationService
                 $rendered[] = $this->artifacts->render($user, ['adapted_content' => $coverLetter, 'is_ats_optimized' => false], $language, 'cover_letter');
             }
             $preparation = DB::transaction(function () use ($user, $input, $actorMetadata, $posting, $language, $sourceHash, $snapshot, $pending, $application, $expectedPointerVersion, $rendered): ApplicationPreparation {
+                User::query()->whereKey($user->id)->lockForUpdate()->firstOrFail();
                 $lockedPosting = JobPosting::query()->lockForUpdate()->findOrFail($posting->id);
                 $lockedProfile = ProfessionalProfile::query()->where('user_id', $user->id)->lockForUpdate()->first();
-                Resume::query()->where('user_id', $user->id)->lockForUpdate()->get();
-                $lockedPosting->resumeAdaptations()->lockForUpdate()->get();
-                $lockedPosting->items()->lockForUpdate()->get();
-                $lockedPosting->applicationMethods()->lockForUpdate()->get();
+                Resume::query()->where('user_id', $user->id)->orderBy('id')->lockForUpdate()->get();
+                $lockedPosting->resumeAdaptations()->orderBy('id')->lockForUpdate()->get();
+                $lockedPosting->items()->orderBy('id')->lockForUpdate()->get();
+                $lockedPosting->applicationMethods()->orderBy('id')->lockForUpdate()->get();
                 $this->access->authorize($user, $actorMetadata, AgentIntegrationScope::ApplicationsWrite);
                 $this->access->posting($user, $lockedPosting);
                 $this->assertVersions($lockedPosting, $lockedProfile, $input);

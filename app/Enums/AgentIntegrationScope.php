@@ -29,6 +29,7 @@ enum AgentIntegrationScope: string
     case AtsWrite = 'ats:write';
     case ApplicationsRead = 'applications:read';
     case ApplicationsWrite = 'applications:write';
+    case ApplicationsSubmit = 'applications:submit';
     case ApprovalsRead = 'approvals:read';
     case ApprovalsWrite = 'approvals:write';
     case SearchRead = 'search:read';
@@ -76,6 +77,7 @@ enum AgentIntegrationScope: string
             self::AtsWrite => 'Adaptar currículo e calcular ATS',
             self::ApplicationsRead => 'Ler candidaturas',
             self::ApplicationsWrite => 'Iniciar e movimentar candidaturas',
+            self::ApplicationsSubmit => 'Reservar, consumir e reconciliar tentativas de envio',
             self::ApprovalsRead => 'Consultar consentimentos de candidatura',
             self::ApprovalsWrite => 'Atestar e revogar consentimentos de candidatura',
             self::SearchRead => 'Gerar URLs de busca',
@@ -107,6 +109,8 @@ enum AgentIntegrationScope: string
     public static function forTool(string $tool): self
     {
         return match (class_basename($tool)) {
+            'ReserveApplicationSubmissionTool', 'ConsumeApplicationSubmissionTool', 'ReportApplicationSubmissionTool', 'ReconcileApplicationSubmissionTool' => self::ApplicationsSubmit,
+            'GetApplicationSubmissionTool' => self::ApplicationsRead,
             'GetApplicationApprovalTool' => self::ApprovalsRead,
             'SubmitTelegramLinkTool', 'RecordApplicationApprovalTool', 'RevokeApplicationApprovalTool' => self::ApprovalsWrite,
             'GetApplicationTool', 'ListApplicationsTool', 'GetApplicationPreparationTool' => self::ApplicationsRead,

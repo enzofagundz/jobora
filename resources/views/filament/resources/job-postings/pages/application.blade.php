@@ -519,6 +519,62 @@
             $lastEvent = $events->first();
         @endphp
 
+        <x-filament::section divided icon="heroicon-o-paper-airplane" heading="Estado do envio">
+            @if ($this->submissionSummary)
+                @php
+                    $submissionStateLabel = match ($this->submissionSummary['state']) {
+                        'reserved' => 'Reserva ativa', 'sending' => 'Envio em andamento',
+                        'unknown' => 'Resultado incerto', 'succeeded' => 'Envio confirmado',
+                        'failed' => 'Envio não concluído', 'expired' => 'Reserva expirada',
+                        default => 'Estado indisponível',
+                    };
+                @endphp
+                <div class="space-y-4" role="status">
+                    <div class="flex flex-wrap items-center gap-3">
+                        <x-filament::badge :color="$this->submissionSummary['blocked'] ? 'warning' : 'gray'">{{ $submissionStateLabel }}</x-filament::badge>
+                        <span class="text-sm text-gray-600 dark:text-gray-300">Tentativa {{ $this->submissionSummary['attempt_id'] }} · revisão {{ $this->submissionSummary['revision'] }}</span>
+                    </div>
+                    @if ($this->submissionDetails['events'] ?? [])
+                        <ul class="space-y-2 text-sm text-gray-600 dark:text-gray-300">
+                            @foreach ($this->submissionDetails['events'] as $event)
+                                <li>{{ match ($event['kind']) { 'reconciled' => 'Reconciliação registrada', 'reported' => 'Resultado informado', 'reservation' => 'Reserva criada', 'consumed' => 'Execução autorizada', default => 'Atualização registrada' } }} · {{ $event['received_at'] }}</li>
+                                @if ($event['evidence'])
+                                    <li class="break-words">Evidência: {{ $event['evidence']['kind'] }}@if ($event['evidence']['reference'] ?? null) · {{ $event['evidence']['reference'] }}@endif @if ($event['evidence']['details'] ?? null) · {{ $event['evidence']['details'] }}@endif</li>
+                                @endif
+                            @endforeach
+                        </ul>
+                    @endif
+                    <x-filament::button color="gray" size="sm" wire:click="refreshSubmissionStatus" wire:loading.attr="disabled" wire:target="refreshSubmissionStatus,reconcileSubmission">Atualizar estado</x-filament::button>
+                    @if ($this->submissionSummary['state'] === 'unknown')
+                        <div class="space-y-4 rounded-xl border border-warning-300 bg-warning-50 p-4 dark:border-warning-500/30 dark:bg-warning-400/10">
+                            <p class="text-sm text-warning-900 dark:text-warning-100">Confirme o resultado com evidência. Resultado incerto continua bloqueando novo envio.</p>
+                            @if ($this->submissionError)
+                                <p class="text-sm text-danger-600 dark:text-danger-400" role="alert">{{ $this->submissionError }}</p>
+                            @endif
+                            <label class="block text-sm font-medium">Resultado
+                                <x-filament::input.wrapper><x-filament::input.select wire:model.live="reconciliationData.outcome"><option value="unknown">Ainda incerto</option><option value="succeeded">Enviado</option><option value="failed">Não enviado</option></x-filament::input.select></x-filament::input.wrapper>
+                            </label>
+                            <label class="block text-sm font-medium">Tipo de evidência
+                                <x-filament::input.wrapper><x-filament::input.select wire:model="reconciliationData.evidence_kind"><option value="ambiguous">Inconclusiva</option><option value="submission_receipt">Comprovante de envio</option><option value="not_submitted">Comprovante de não envio</option></x-filament::input.select></x-filament::input.wrapper>
+                            </label>
+                            <label class="block text-sm font-medium">Referência da evidência
+                                <x-filament::input.wrapper><x-filament::input inputmode="text" wire:model="reconciliationData.reference" /></x-filament::input.wrapper>
+                            </label>
+                            <label class="block text-sm font-medium">Detalhes
+                                <x-filament::input.wrapper><textarea wire:model="reconciliationData.details" rows="3" maxlength="2000" class="fi-input block w-full border-none bg-transparent px-3 py-2 text-sm text-gray-950 outline-none dark:text-white"></textarea></x-filament::input.wrapper>
+                            </label>
+                            @if ($this->reconciliationData['outcome'] === 'failed')
+                                <label class="flex items-start gap-2 text-sm"><input type="checkbox" wire:model="reconciliationData.executor_stopped" class="mt-1 rounded border-gray-300 text-primary-600 focus:ring-primary-500" /><span>Confirmei que execução anterior foi encerrada.</span></label>
+                            @endif
+                            <x-filament::button wire:click="reconcileSubmission" wire:loading.attr="disabled" wire:target="reconcileSubmission">Reconciliar tentativa</x-filament::button>
+                        </div>
+                    @endif
+                </div>
+            @else
+                <p class="text-sm text-gray-600 dark:text-gray-300">Nenhuma tentativa de envio registrada. Acompanhar candidatura é separado do envio.</p>
+            @endif
+        </x-filament::section>
+
         <x-filament::section divided icon="heroicon-o-map" heading="Acompanhamento da candidatura">
             @if ($application === null)
                 <div class="rounded-xl border border-dashed border-gray-300 p-10 text-center dark:border-white/10">
