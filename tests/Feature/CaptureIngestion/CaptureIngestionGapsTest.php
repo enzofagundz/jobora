@@ -124,7 +124,8 @@ it('does not confirm the run and leaves a reconcilable orphan when metadata pers
     });
 
     try {
-        gapPost($user, $payload)->assertStatus(500);
+        $response = gapPost($user, $payload)->assertStatus(500);
+        expect($response->exceptions->contains(fn (Throwable $exception): bool => $exception instanceof RuntimeException && $exception->getMessage() === 'metadata down'))->toBeTrue();
     } finally {
         Event::forget('eloquent.creating: '.PageCapture::class);
     }

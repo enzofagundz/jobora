@@ -4,6 +4,7 @@ namespace App\Services\Discovery;
 
 use App\Enums\DiscoveryAccessOutcome;
 use App\Enums\DiscoveryRunStatus;
+use App\Enums\DiscoverySourceSurface;
 use App\Models\AgentIntegration;
 use App\Models\DiscoveryRun;
 use App\Models\DiscoveryRunEvent;
@@ -231,25 +232,24 @@ class DiscoveryRunService
     {
         $now ??= now();
 
-        $canonical = app(DiscoverySourceUrl::class)->canonical($url);
-        $hash = hash('sha256', $canonical);
-
-        $source = DiscoverySource::query()
-            ->where('user_id', $user->id)
-            ->where('canonical_url_hash', $hash)
-            ->first();
-
-        if ($source === null) {
-            throw (new ModelNotFoundException)->setModel(DiscoverySource::class);
-        }
-
         $runs = DiscoveryRun::query()
+            ->with('source')
             ->where('user_id', $user->id)
-            ->where('discovery_source_id', $source->id)
             ->where('status', DiscoveryRunStatus::Active)
             ->where('expires_at', '>', $now)
+            ->whereHas('source', fn (Builder $query) => $query->where('user_id', $user->id))
             ->orderBy('id')
-            ->get();
+            ->get()
+            ->filter(function (DiscoveryRun $run) use ($url): bool {
+                if ($run->surface !== DiscoverySourceSurface::LinkedInJobs->value) {
+                    return $run->source->canonical_url_hash === app(DiscoverySourceUrl::class)->hash($url);
+                }
+                try {
+                    return app(DiscoverySourceUrl::class)->matchesObservation(DiscoverySourceSurface::from($run->surface), $url, $run->initial_url);
+                } catch (\InvalidArgumentException) {
+                    return false;
+                }
+            });
 
         if ($runs->isEmpty()) {
             throw (new ModelNotFoundException)->setModel(DiscoveryRun::class);

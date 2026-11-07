@@ -7,6 +7,7 @@ use App\Models\PageCapture;
 use App\Models\User;
 use App\Services\CaptureTokenService;
 use App\Services\Discovery\DiscoveryRunService;
+use App\Services\Discovery\DiscoverySourceUrl;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Testing\TestResponse;
@@ -150,8 +151,132 @@ it('marks partial coverage distinctly without a successful source timestamp', fu
 
     expect($run->refresh()->completion_status)->toBe('partial')
         ->and($run->status)->toBe(DiscoveryRunStatus::Completed)
-        ->and($run->source->refresh()->last_success_at)->toBeNull();
+        ->and($run->source->refresh()->last_success_at)->toBeNull()
+        ->and($run->source->next_due_at->equalTo($run->completed_at->copy()->addMinutes($run->source->frequency_minutes)))->toBeTrue();
 });
+
+it('acknowledges empty no-content captures but retries only at the original reservation expiry', function () {
+    $this->freezeTime();
+    $user = User::factory()->create();
+    $source = DiscoverySource::factory()->for($user, 'user')->create(['frequency_minutes' => 1440, 'last_success_at' => now()->subDay()]);
+    $run = app(DiscoveryRunService::class)->acquire($user, null, 'empty-reservation')->sole();
+    $lastSuccess = $source->last_success_at->copy();
+    $this->travel(2)->minutes();
+    $payload = captureEnvelope($user, $run, ['blocks' => [], 'capture' => [
+        'coverage' => ['status' => 'partial', 'reason' => 'no_content', 'blocks_expected' => 0, 'blocks_captured' => 0],
+        'html' => '<main data-capture-surface="linkedin_jobs" data-capture-version="1"></main>',
+    ]]);
+    capturePost($user, $payload)->assertCreated()->assertJsonPath('coverage', 'partial');
+    expect($run->refresh()->status)->toBe(DiscoveryRunStatus::Completed)
+        ->and($source->refresh()->next_due_at->equalTo($run->expires_at))->toBeTrue()
+        ->and($source->last_success_at->equalTo($lastSuccess))->toBeTrue();
+    $this->travel(1)->minutes();
+    capturePost($user, $payload)->assertOk()->assertJsonPath('replay', true);
+    expect($source->refresh()->next_due_at->equalTo($run->expires_at))->toBeTrue();
+    expect(app(DiscoveryRunService::class)->acquire($user, null, 'not-yet-due'))->toBeEmpty();
+    $this->travelTo($run->expires_at);
+    expect(app(DiscoveryRunService::class)->acquire($user, null, 'due-at-expiry'))->toHaveCount(1);
+});
+
+it('rejects semantic filter changes in the final URL before persisting captures or schedules', function () {
+    $user = User::factory()->create();
+    $source = DiscoverySource::factory()->for($user, 'user')->create();
+    $run = app(DiscoveryRunService::class)->acquire($user, null, 'final-filter-change')->sole();
+    $due = $source->next_due_at->copy();
+    $payload = captureEnvelope($user, $run, ['capture' => ['final_url' => $source->url.'&f_TPR=r86400']]);
+    capturePost($user, $payload)->assertUnprocessable();
+    expect(PageCapture::query()->count())->toBe(0)
+        ->and($run->refresh()->status)->toBe(DiscoveryRunStatus::Active)
+        ->and($source->refresh()->next_due_at->equalTo($due))->toBeTrue()
+        ->and(Storage::disk('local')->allFiles())->toBeEmpty();
+});
+
+it('correlates both observed Jobs URLs with the frozen reservation and preserves real capture provenance', function () {
+    $this->travelTo(now()->startOfSecond());
+    $user = User::factory()->create();
+    $url = 'https://www.linkedin.com/jobs/search/?keywords=Laravel&f_WT=2&custom=kept';
+    $source = DiscoverySource::factory()->for($user, 'user')->create(['url' => $url, 'canonical_url_hash' => app(DiscoverySourceUrl::class)->hash($url), 'frequency_minutes' => 60]);
+    $run = app(DiscoveryRunService::class)->acquire($user, null, 'observed-capture')->sole();
+    $initial = str_replace('/jobs/search/', '/jobs/search-results', $url).'&skipRedirect=true&infoNotice=ai-job-search';
+    $final = $initial.'&currentJobId=123';
+    $payload = captureEnvelope($user, $run, ['capture' => ['initial_url' => $initial, 'final_url' => $final]]);
+    capturePost($user, $payload)->assertCreated();
+    expect(PageCapture::query()->sole()->url)->toBe($initial)
+        ->and($run->refresh()->initial_url)->toBe($url)
+        ->and($source->refresh()->next_due_at->equalTo(now()->addMinutes(60)))->toBeTrue()
+        ->and($source->last_success_at->equalTo(now()))->toBeTrue();
+});
+
+it('accepts known tracking decorations in both observed Jobs URLs without changing their provenance', function () {
+    $user = User::factory()->create();
+    $source = DiscoverySource::factory()->for($user, 'user')->create();
+    $run = app(DiscoveryRunService::class)->acquire($user, null, 'capture-tracking')->sole();
+    $initial = str_replace('/jobs/search/', '/jobs/search-results', $source->url).'&trk=abc&utm_source=synthetic';
+    $payload = captureEnvelope($user, $run, ['capture' => ['initial_url' => $initial, 'final_url' => $initial.'&currentJobId=123&utm_campaign=smoke']]);
+    capturePost($user, $payload)->assertCreated();
+    expect(PageCapture::query()->sole()->url)->toBe($initial);
+});
+
+it('returns typed validation errors for unsafe or semantically changed final Jobs URLs without side effects', function (string $final) {
+    $user = User::factory()->create();
+    $url = 'https://www.linkedin.com/jobs/search/?keywords=Laravel&f_WT=2';
+    $source = DiscoverySource::factory()->for($user, 'user')->create(['url' => $url, 'canonical_url_hash' => app(DiscoverySourceUrl::class)->hash($url)]);
+    $run = app(DiscoveryRunService::class)->acquire($user, null, 'invalid-final')->sole();
+    capturePost($user, captureEnvelope($user, $run, ['capture' => ['final_url' => $final]]))->assertUnprocessable()->assertJsonStructure(['message']);
+    expect(PageCapture::query()->count())->toBe(0)
+        ->and($run->refresh()->status)->toBe(DiscoveryRunStatus::Active)
+        ->and(Storage::disk('local')->allFiles())->toBeEmpty();
+})->with([
+    'credentials' => ['https://person:password@www.linkedin.com/jobs/search-results?keywords=Laravel&f_WT=2'],
+    'other host' => ['https://other.example/jobs/search-results?keywords=Laravel&f_WT=2'],
+    'different allowed host' => ['https://br.linkedin.com/jobs/search-results?keywords=Laravel&f_WT=2'],
+    'other surface' => ['https://www.linkedin.com/search/results/content/?keywords=Laravel&f_WT=2'],
+    'other path' => ['https://www.linkedin.com/jobs/search-results-extra?keywords=Laravel&f_WT=2'],
+    'changed filter' => ['https://www.linkedin.com/jobs/search-results?keywords=Laravel&f_WT=1'],
+    'added salary' => ['https://www.linkedin.com/jobs/search-results?keywords=Laravel&f_WT=2&f_SAL=salary'],
+    'added period' => ['https://www.linkedin.com/jobs/search-results?keywords=Laravel&f_WT=2&f_TPR=r86400'],
+    'duplicate keyword' => ['https://www.linkedin.com/jobs/search-results?keywords=PHP&keywords=Laravel&f_WT=2'],
+    'array period' => ['https://www.linkedin.com/jobs/search-results?keywords=Laravel&f_WT=2&f_TPR[]=r86400'],
+]);
+
+it('maps invalid initial source URLs to 422 instead of leaking an invalid argument exception', function () {
+    $user = User::factory()->create();
+    $payload = captureEnvelope($user, null, ['capture' => ['initial_url' => 'https://www.linkedin.com/feed/']]);
+    capturePost($user, $payload)->assertUnprocessable()->assertJsonStructure(['message']);
+    expect(PageCapture::query()->count())->toBe(0);
+});
+
+it('accepts manual Jobs capture on the redirected path without inventing a reservation', function () {
+    $user = User::factory()->create();
+    $url = 'https://www.linkedin.com/jobs/search-results?keywords=Laravel&f_WT=2&skipRedirect=true';
+    $payload = captureEnvelope($user, null, ['capture' => ['initial_url' => $url, 'final_url' => $url.'&currentJobId=123']]);
+    capturePost($user, $payload)->assertCreated()->assertJsonPath('execution_id', null);
+    expect(DiscoveryRun::query()->count())->toBe(0)
+        ->and(PageCapture::query()->sole()->url)->toBe($url);
+});
+
+it('does not overwrite a source edited or disabled while its empty run is reserved', function (string $change) {
+    $this->freezeTime();
+    $user = User::factory()->create();
+    $source = DiscoverySource::factory()->for($user, 'user')->create(['frequency_minutes' => 1440]);
+    $run = app(DiscoveryRunService::class)->acquire($user, null, 'source-edited')->sole();
+    $payload = captureEnvelope($user, $run, ['blocks' => [], 'capture' => [
+        'coverage' => ['status' => 'partial', 'reason' => 'no_content', 'blocks_expected' => 0, 'blocks_captured' => 0],
+        'html' => '<main data-capture-surface="linkedin_jobs" data-capture-version="1"></main>',
+    ]]);
+    $this->travel(1)->minutes();
+    $attributes = match ($change) {
+        'postponed' => ['next_due_at' => now()->addDays(2)],
+        'disabled' => ['active' => false, 'next_due_at' => null],
+        'unscheduled' => ['next_due_at' => null],
+        'identity' => ['url' => $source->url.'&f_WT=2', 'canonical_url_hash' => app(DiscoverySourceUrl::class)->hash($source->url.'&f_WT=2')],
+    };
+    $source->update([...$attributes, 'version' => 2]);
+    $before = $source->fresh()->getAttributes();
+    capturePost($user, $payload)->assertCreated();
+    expect($source->fresh()->getAttributes())->toBe($before)
+        ->and($run->refresh()->status)->toBe(DiscoveryRunStatus::Completed);
+})->with(['postponed', 'disabled', 'unscheduled', 'identity']);
 
 it('accepts a manual capture without execution id and does not complete any run', function () {
     $user = User::factory()->create();

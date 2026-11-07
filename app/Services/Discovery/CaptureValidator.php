@@ -55,12 +55,26 @@ class CaptureValidator
             throw new CaptureValidationException('execution_id deve ser string de 1 a 200 caracteres ou null.');
         }
 
-        app(DiscoverySourceUrl::class)->validate($platform, $surface, (string) ($capture['initial_url'] ?? ''));
+        try {
+            app(DiscoverySourceUrl::class)->validate($platform, $surface, (string) ($capture['initial_url'] ?? ''));
+        } catch (\InvalidArgumentException $exception) {
+            throw new CaptureValidationException($exception->getMessage(), 0, $exception);
+        }
 
         $final = $capture['final_url'] ?? null;
 
         if (! is_string($final) || ! $this->isHttpsUrl($final)) {
             throw new CaptureValidationException('final_url inválida.');
+        }
+
+        if ($execution !== null && $surface === DiscoverySourceSurface::LinkedInJobs) {
+            try {
+                if (! app(DiscoverySourceUrl::class)->matchesObservation($surface, $final, $capture['initial_url'])) {
+                    throw new CaptureValidationException('A URL final não corresponde à pesquisa reservada.');
+                }
+            } catch (\InvalidArgumentException $exception) {
+                throw new CaptureValidationException($exception->getMessage(), 0, $exception);
+            }
         }
 
         if (! is_string($capture['captured_at'] ?? null) || strtotime((string) $capture['captured_at']) === false) {

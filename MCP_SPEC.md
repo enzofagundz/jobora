@@ -35,6 +35,12 @@ O catálogo V2 inclui `get_page_capture`, `list_publications`, fontes (`list_dis
 
 `MarketAnalysisService` e normalização compartilhada permanecem no domínio. A retirada do catálogo não exige apagar esses serviços nem trocar silenciosamente suas semânticas por matching. Os resources restantes são currículo, competências profissionais, vaga e adequação.
 
+### Correlação de descoberta e captura
+
+Para reservas de LinkedIn Jobs, `/jobs/search-results` e `/jobs/search` são caminhos equivalentes no mesmo host e porta. A comparação mantém o tracking conhecido e as decorações `currentJobId`, `skipRedirect` e `infoNotice` fora da identidade, sem alterar hashes já persistidos. Filtros como `f_TPR` e `f_SAL`, parâmetros desconhecidos e valores duplicados continuam relevantes. Hosts permitidos distintos não são intercambiáveis. A URL final de uma captura vinculada à reserva também deve preservar essa pesquisa; divergência retorna `422` antes da persistência.
+
+Uma captura `partial/no_content` com zero blocos pode ter upload confirmado e execução `completed/partial`, sem representar sucesso da busca. Não atualiza `last_success_at`; a próxima elegibilidade usa o vencimento original da reserva, respeitando adiamentos explícitos, desativação e mudanças de identidade. Replay não repete agenda ou dispatch, e callbacks de acesso não reagendam fontes. Essa política vale para novas conclusões; não repara automaticamente agendas existentes.
+
 ### Envio externo e autorização (#36)
 
 1. `prepare_application` prepara; aprovação humana registra consentimento. Nenhuma dessas etapas envia a candidatura.
