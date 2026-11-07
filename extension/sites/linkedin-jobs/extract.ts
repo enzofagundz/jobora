@@ -14,7 +14,10 @@ const PANE_SELECTOR = '.scaffold-layout__detail.jobs-search__job-details';
 const DESCRIPTION_SELECTOR = '#job-details';
 
 export function isLinkedInJobsRoute(url: URL | Location): boolean {
-  return LINKEDIN_JOBS_ROUTE.includes(url);
+  return LINKEDIN_JOBS_ROUTE.includes(url) || (
+    url.origin === 'https://www.linkedin.com' &&
+    (url.pathname === '/jobs/search-results' || url.pathname === '/jobs/search-results/')
+  );
 }
 
 export function isJobCard(el: Element): boolean {
