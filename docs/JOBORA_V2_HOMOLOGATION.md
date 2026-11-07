@@ -4,7 +4,7 @@
 
 Registro das evidências automatizadas e do smoke real supervisionado em 07/11/2026, sobre as bases #36 (`630acfa`) e #37 (`98f6e4d`). Os ensaios automatizados e restores usam dados sintéticos e bancos descartáveis; essa restrição não descreve o smoke externo, que coletou páginas reais e está registrado separadamente abaixo. As correções motivadas pelo smoke estão em validação. Nenhum envio real de candidatura foi autorizado ou executado.
 
-Esta evidência **não significa homologação integral**. Suíte completa, fluxo integrado controlado, upgrade e restore possuem o baseline automatizado registrado abaixo, anterior às correções do smoke. O retorno real do Hermes foi recebido: LinkedIn publicações teve duas páginas com captura completa e ACK correlacionado; LinkedIn Jobs e Indeed Jobs permaneceram bloqueados nos limites descritos adiante. A revalidação dessas superfícies e a implantação dos backups continuam pendentes. O fechamento de #29 ocorreu por pedido humano, sem comprovação integral das três superfícies.
+Esta evidência **não significa homologação integral**. Suíte completa, fluxo integrado controlado, upgrade e restore possuem os baselines automatizados registrados abaixo. No primeiro smoke, LinkedIn publicações teve duas páginas com captura completa e ACK correlacionado. No segundo, Indeed Jobs produziu uma captura útil e durável, mas parcial; LinkedIn Jobs revelou perda de vínculo da reserva após mudança semântica dos filtros. Esse problema foi corrigido e validado automaticamente; a revalidação supervisionada e a implantação dos backups continuam pendentes. O fechamento de #29 ocorreu por pedido humano, sem comprovação integral das três superfícies.
 
 ## Isolamento das execuções focadas
 
@@ -152,7 +152,7 @@ O usuário aprovou uma mudança de **código para comportamento futuro**: permit
 
 As correções da extensão passaram nos recortes focados: **29 testes LinkedIn** e **28 testes Indeed**. No Indeed, o RED com a estrutura real reproduziu detalhe ausente e título incorreto; o GREEN usa descrição delimitada e mantém compatibilidade com o DOM antigo e a correlação de identidade. Outra regressão reproduziu título atualizado com descrição da vaga anterior: sem identidade explícita, a troca de vaga agora exige mudança no texto da descrição, não apenas no cabeçalho ou spinner. Sem evidência suficiente, a captura permanece parcial. Esses testes não equivalem a captura real usando a nova versão instalada.
 
-Para o próximo smoke, o usuário autorizou posteriormente uma antecipação pontual **somente de `next_due_at` da fonte 5**, após releitura da sua versão atual. Essa autorização ainda não foi executada pela sessão principal. Frequências, URLs, filtros e demais fontes permanecem fora dessa permissão; em particular, a fonte 4 não deve ser reordenada para facilitar o teste. Os filtros originalmente aprovados devem ser restaurados no navegador, sem adotar silenciosamente os filtros extras do LinkedIn.
+Para o próximo smoke, o usuário autorizou posteriormente uma antecipação pontual **somente de `next_due_at` da fonte 5**, após releitura da sua versão atual. O Hermes executou essa antecipação no segundo smoke registrado adiante; a sessão principal não alterou a agenda. Frequências, URLs, filtros e demais fontes permanecem fora dessa permissão; em particular, a fonte 4 não deve ser reordenada para facilitar o teste. Os filtros originalmente aprovados devem ser restaurados no navegador, sem adotar silenciosamente os filtros extras do LinkedIn.
 
 Não houve solicitação real de triagem, matching, preparação, aprovação ou envio de candidatura durante esse smoke; somente o Clef automático participou do processamento de IA observado. A ausência de inspeção retrospectiva de JavaScript e rede no LinkedIn permanece uma limitação. Os backups operacionais continuam não implantados.
 
@@ -168,8 +168,68 @@ Não houve solicitação real de triagem, matching, preparação, aprovação ou
 
 As configurações temporárias foram recriadas após reinício do servidor com bootstrap/diretórios absolutos e variáveis de teste forçadas. Artefatos antigos em `/tmp/opencode` podem não sobreviver a reinícios; seus caminhos históricos não implicam disponibilidade permanente. Nenhuma agenda real foi alterada pelos testes ou por essa recuperação. A validação automatizada não converte o smoke anterior parcialmente falho em sucesso das três superfícies.
 
+## Segundo smoke real Hermes de 07/11/2026 — vínculo de reserva e resultado parcial
+
+Esta seção acrescenta o segundo relatório sem substituir o primeiro smoke nem os baselines automatizados anteriores. Todas as horas abaixo estão em **UTC**; a conversão do relato em BRT é **UTC = BRT + 3 horas**. A sessão principal correlacionou os metadados por consultas de banco somente leitura, sem ler cabeçalhos de autenticação e sem alterar dados ou agendas. O estado de cada execução é o observado na consulta, não uma afirmação sobre seu estado ou TTL no momento de leitura deste documento.
+
+### Indeed: captura 19 confirmada, útil e parcial
+
+**Fonte 6, versão 1; execução 6; captura 19:** `execution_id=aace8c02-104f-4887-b337-cb6299aa1be1`. A reserva ocorreu às **19:55:07 UTC** e a conclusão às **19:59:00 UTC**. O Hermes leu o ACK `201` antes de passar para LinkedIn. No service worker, observou validação da credencial `200`, resolução `200` e captura `201`.
+
+A conferência do banco confirmou cobertura `partial`, motivo `timeout`, **29/30 blocos**, **15 observações e 15 publicações**, extração marcada como `completed`, expiração do bruto em **07/12/2026 às 19:59 UTC**, próximo vencimento em **08/11/2026 às 19:59 UTC** e `last_success_at=NULL`. Não foram reportados conflitos. Trata-se de conteúdo persistido e aproveitável com confirmação durável, **não sucesso pleno nem cobertura completa**.
+
+O console Indeed apresentou avisos Apollo, falhas de fetch e bloqueios `blocked_by_client`. Essas mensagens não foram isoladas na janela exata da captura 19; não é possível atribuir cada aviso a essa captura nem declarar o console limpo.
+
+### LinkedIn Jobs: reserva sem ACK e capturas manuais persistidas
+
+**Fonte 5, versão 2; execução 7:** `execution_id=67e7ac0b-f296-4064-b0e2-9a6f1601f998`. A reserva foi registrada em **20:00:02 UTC**, com vencimento em **20:30:02 UTC**. Na consulta, a execução estava `active`, sem captura associada. Esses horários não significam que a reserva continue vigente agora.
+
+A URL inicial era `/jobs/search/?keywords=Laravel&f_WT=2`. O LinkedIn passou a exibir `/jobs/search-results/?currentJobId=4486639255&keywords=Laravel&f_TPR=r86400`: removeu `f_WT=2` e acrescentou `f_TPR=r86400`. Essa mudança altera os filtros da pesquisa; não é somente tracking ou um alias de caminho. O usuário não aceitou adotar os novos filtros. Portanto, a rejeição de correlação dessa URL modificada é intencional e não deve ser contornada afrouxando a equivalência semântica.
+
+O Hermes observou resolução `200` vinculada à execução na URL original e, depois, `404` para a URL modificada. Em seguida, ocorreram uploads pelo caminho manual, com `execution_id=null`:
+
+- **Captura 20, às 20:00:48 UTC:** `no_content`, zero blocos.
+- **Captura 21, às 20:01:21 UTC:** `timeout`, um bloco e uma publicação.
+- **Captura 22, às 20:03:41 UTC:** `no_content`, zero blocos.
+
+O banco confirmou essas capturas manuais persistidas; elas não são objetos órfãos de storage e **não constituem ACK da execução 7**, que permanecia sem conclusão na consulta. As capturas **20–22 devem ser preservadas**, não apagadas para fazer o smoke parecer limpo. O relatório também informou o evento de acesso `3`, de falha, às **20:05 UTC**.
+
+Na mesma conferência, a fonte 5 tinha `next_due_at=07/11/2026 19:54 UTC` e `last_success_at=NULL`. A fonte 4 permanecia na versão **2**, com próximo vencimento em **08/11/2026 às 17:15 UTC**. A sessão principal não alterou esses valores.
+
+### Ações observadas e limites dos diagnósticos
+
+O Hermes executou a antecipação aprovada **somente de `next_due_at` da fonte 5**, passando da versão **1 para 2**, ativou a captura no popup com token e API já configurados e reiniciou o Brave com CDP na porta **9222**. Não mudou frequência, URLs ou outras fontes. Essas ações pertencem ao relato do smoke; as consultas posteriores da sessão principal foram somente leitura.
+
+As tentativas de restaurar a pesquisa pela interface e por `history.replaceState` não produziram uma pesquisa equivalente verificada. A leitura de console LinkedIn apresentou `ERR_FAILED` e **249 mensagens omitidas**; o painel de todos os filtros não foi aberto. Alterar cosmeticamente a URL não comprova que os filtros foram aplicados e não é uma recomendação para contornar a divergência.
+
+Os diagnósticos backend disponíveis ficaram limitados ao MCP e ao `Laravel.log`, sem linhas na janela examinada. Essa ausência não comprova backend limpo nem correlação integral de todos os diagnósticos. As limitações de console e rede descritas aqui devem permanecer no aceite, sem preencher retrospectivamente janelas não observadas.
+
+### Regressão isolada e decisão de correção mínima
+
+A conclusão é dupla: o Indeed demonstrou captura durável **parcial**; no LinkedIn, a divergência semântica foi corretamente rejeitada, mas uma tentativa que já conhecia sua reserva degradou silenciosamente para captura manual. Esse segundo comportamento é o bug, não o `404` isolado nem a preservação dos filtros originais.
+
+O teste público composto [reservation-context-regression.test.ts](../extension/tests/reservation-context-regression.test.ts), com controller, background e fila reais e transporte simulado, reproduziu sobre a base `5b90636` **3 falhas RED e 2 controles aprovados**. As falhas mostram resolução reservada `200`, re-resolução `404` e upload `201` com `execution_id=null`, além da tentativa de enviar a execução antiga com filtros incompatíveis. Os controles preservam alias/tracking com a mesma semântica e captura manual legítima em uma página inicialmente sem reserva. Esses casos passaram após a correção, junto às regressões adicionais de isolamento e replay descritas abaixo.
+
+A decisão do usuário é **“Só bloquear (mínimo)”**: depois de uma reserva conhecida, não permitir fallback manual silencioso; bloquear com erro claro. Captura manual legítima iniciada sem reserva, inclusive em outra aba, deve continuar possível. Não estão aprovados um botão novo, um modo novo ou uma funcionalidade de escolha manual explícita. Não se deve forçar o identificador antigo sobre a pesquisa errada.
+
+Não houve solicitação real de triagem, matching, preparação, aprovação ou envio de candidatura nesse segundo smoke. Backups operacionais continuam **não implantados**. A correção foi validada automaticamente; novos diagnósticos e coleta real continuam pendentes e não estão automaticamente autorizados por este relatório.
+
+### Correção e validação do bloqueio reservado
+
+- O background recebe o remetente real do runtime e vincula a intenção reservada a **aba/frame**, credencial, proprietário e API. Não há alegação de isolamento por `documentId`: o reload da mesma aba preserva deliberadamente a intenção pendente.
+- O vínculo persiste em `storage.session`. Erro de resolução, expiração ou mudança de execução não transforma uma tentativa já reservada em captura manual. Uma aba inicialmente sem reserva continua podendo realizar captura manual legítima; não existe latch global por proprietário. Capacidade de 100 contextos falha fechada, sem eviction silenciosa; fechar a aba remove contextos, sem abandonar a fila.
+- Novos envelopes LinkedIn Jobs revalidam a pesquisa no backend antes de enfileirar. Filtros divergentes permanecem bloqueados; não se falsifica a URL final nem se consulta somente a URL inicial para forçar correspondência.
+- O hash imutável do envelope é persistido antes do efeito. Replay exato mantém validações de remetente, credencial, proprietário, API e pin; corpo diferente é rejeitado. Após ACK perdido, flush e recriação do background, o replay continua possível mesmo com a fila esvaziada. Quando necessário, a API deduplica a repetição exata ou rejeita primeira chegada expirada; não há renovação de reserva ou TTL.
+- Falha auxiliar ao salvar receipt/status não invalida ACK recebido. Testes reproduzem falha de storage somente depois de HTTP `201`, perda do ACK e replay posterior. O painel apresenta alerta acessível: “Captura bloqueada para preservar a reserva. Verifique a pesquisa e a validade da execução.” Não foi criado botão nem modo manual novo.
+- **Extensão completa:** 255 testes aprovados em 32 arquivos, saída 0; log `/tmp/opencode/jobora38-ack-replay-full.log`. Typecheck passou. As 14 verificações focadas de UI/controller usam Vue real e se sobrepõem à suíte; não são somadas aos 255 testes.
+- **Revisões:** eixos spec e padrões executados; achados de ACK/replay foram corrigidos e revisados novamente em modo somente leitura, sem novos testes. Não houve alteração em backend PHP, migrations, configuração ou permissões nesta correção; suas evidências anteriores permanecem delimitadas aos respectivos commits.
+- **Recursos locais:** após solicitação do usuário, não foram repetidas suítes já verdes. Antes do build, havia 4.196 MiB disponíveis e 3.485 MiB de swap usados. O build passou em escopo transitório com `MemoryMax=768M`, `MemorySwapMax=0`, `CPUQuota=100%` e heap Node limitado a 384 MiB. Esses valores são limites impostos, não medição de pico. Futuras execuções devem conferir RAM e usar um teste focado, um processo e um worker por vez, sem suítes paralelas.
+
+O build atualizado está em `extension/.output/chrome-mv3`, fora do Git. Isso não comprova a extensão recarregada no navegador nem uma nova coleta real. Fontes, agendas e capturas 20–22 não foram modificadas ou apagadas pela correção.
+
 ## Pendências para aceite integral
 
 - Implantar e verificar a política de backups, incluindo retenção das cópias e prevenção de restauração de bruto expirado.
-- Retomar o smoke supervisionado com Hermes e a versão corrigida da extensão instalada, respeitando a autorização do usuário para a próxima interação. LinkedIn publicações já possui evidência parcial positiva em duas páginas; LinkedIn Jobs e Indeed Jobs exigem nova validação, com filtros originais restaurados e correlação de ACK, JavaScript, rede e backend. Não inventar diagnósticos retrospectivos das páginas anteriores.
+- Revalidar o comportamento de retentativa e planejar novos diagnósticos com a sessão principal, sem reagendar fontes existentes nem apagar as capturas 20–22 para facilitar o ensaio.
+- Retomar o smoke supervisionado com Hermes e a versão corrigida da extensão instalada somente após confirmar a autorização do usuário para a próxima interação. LinkedIn publicações possui evidência positiva delimitada em duas páginas; Indeed possui captura útil, porém parcial. LinkedIn Jobs ainda exige pesquisa semanticamente equivalente à fonte original, sem troca silenciosa de filtros, com correlação de ACK, JavaScript, rede e backend. Não inventar diagnósticos retrospectivos das páginas anteriores.
 - Não confundir autorização do smoke ou destes tickets com aprovação de uma candidatura real. Nenhum envio real foi executado ou autorizado por esta entrega.
