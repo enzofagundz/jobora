@@ -22,9 +22,10 @@ export default defineBackground(() => {
 
   // Único canal content → background. O token só existe no storage/background.
   browser.runtime.onMessage.addListener(
-    (message: unknown): Promise<CaptureMessageResult | undefined> | undefined =>
-      handler(message),
+    (message: unknown, sender): Promise<CaptureMessageResult | undefined> | undefined =>
+      handler(message, sender),
   );
+  browser.tabs.onRemoved.addListener((tabId) => void handler?.tabClosed(tabId));
 
   // Restart do service worker ou troca de destino/credencial retomam a fila.
   void handler.flush();

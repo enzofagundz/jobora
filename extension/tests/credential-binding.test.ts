@@ -2,8 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import type { CaptureEnvelope } from '@/types/capture';
-import { createCaptureMessageHandler } from '@/api/capture-message-handler';
-import { createCaptureQueue } from '@/utils/capture-queue';
+import { createTestCaptureMessageHandler as createCaptureMessageHandler } from './helpers/memory-credential-context';
+import { createCaptureQueue, credentialFingerprint } from '@/utils/capture-queue';
 import { apiBaseUrl, apiToken, captureEnabled } from '@/utils/storage';
 import { createMemoryQueueStore } from './helpers/memory-queue-store';
 import { createMemoryCredentialContextStore } from './helpers/memory-credential-context';
@@ -149,17 +149,12 @@ describe('contexto opaco de credencial', () => {
       context: resolved.context!,
     })) as { ok: boolean; error?: string; queued?: boolean };
 
-    expect(result).toMatchObject({ ok: false, error: 'credential_changed', queued: true });
+    expect(result).toMatchObject({ ok: false, error: 'credential_changed' });
     expect(uploads).toHaveLength(0);
-    expect(store.records.size).toBe(1);
-    expect([...store.records.values()][0]!.ownerUserId).toBe(1);
+    expect(store.records.size).toBe(0);
 
     await apiToken.setValue(TOKEN_A1);
-    const drain = (await handler({ type: 'capture:queue-drain' })) as {
-      ok: true;
-      drain: { captured: number };
-    };
-    expect(drain.drain.captured).toBe(1);
+    expect(await handler({ type: 'capture:submit-envelope', envelope: captured, context: resolved.context! })).toMatchObject({ ok: true });
     expect(uploads).toHaveLength(1);
     expect(uploads[0]!.token).toBe(TOKEN_A1);
     expect(store.records.size).toBe(0);
@@ -182,7 +177,7 @@ describe('contexto opaco de credencial', () => {
 
     expect(result).toMatchObject({ ok: false, error: 'credential_changed' });
     expect(uploads).toHaveLength(0);
-    expect(store.records.size).toBe(1);
+    expect(store.records.size).toBe(0);
   });
 
   it('contexto ausente ou desconhecido não enfileira nem envia', async () => {
@@ -265,11 +260,12 @@ describe('contexto opaco de credencial', () => {
   });
 
   it('token B de owner diferente não lista, não resume e não descarta material de A', async () => {
-    const { store, handler } = setup();
+    const { store, handler, queue } = setup();
     const { uploads } = mockBackend();
 
     const resolved = await resolveContext(handler);
     const captured = envelope('exec-1');
+    await queue.enqueue(captured, { origin: 'http://localhost:8000', credentialFingerprint: await credentialFingerprint(TOKEN_A1), ownerUserId: 1 });
     await apiToken.setValue(TOKEN_B);
     expect(
       await handler({

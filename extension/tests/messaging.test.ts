@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import type { CaptureEnvelope } from '@/types/capture';
-import { createCaptureMessageHandler } from '@/api/capture-message-handler';
+import { createTestCaptureMessageHandler as createCaptureMessageHandler } from './helpers/memory-credential-context';
 import { createCaptureQueue } from '@/utils/capture-queue';
 import { apiToken, captureEnabled } from '@/utils/storage';
 import { lastApiStatus } from '@/utils/session-storage';
@@ -98,7 +98,7 @@ describe('messaging background → API', () => {
     await apiToken.setValue('segredo-do-env');
     const fetchSpy = mockFetch(201);
 
-    const context = await seedCredentialContext(contexts, { token: 'segredo-do-env', origin: 'https://vagas.test' });
+    const context = await seedCredentialContext(contexts, { token: 'segredo-do-env', origin: 'https://vagas.test', executionId: 'exec-1' });
     const message = { type: 'capture:submit-envelope' as const, envelope: envelope(), context };
     expect(JSON.stringify(message)).not.toContain('segredo-do-env');
 
@@ -119,7 +119,7 @@ describe('messaging background → API', () => {
     await captureEnabled.setValue(true);
     await apiToken.setValue('segredo-do-env');
     mockFetch(status);
-    const context = await seedCredentialContext(contexts, { token: 'segredo-do-env', origin: 'https://vagas.test' });
+    const context = await seedCredentialContext(contexts, { token: 'segredo-do-env', origin: 'https://vagas.test', executionId: 'exec-1' });
     const result = await handleMessage({ type: 'capture:submit-envelope', envelope: envelope(), context });
     expect(result).toBeDefined();
     if (!result || !('error' in result)) throw new Error('resultado inesperado');

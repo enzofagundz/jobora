@@ -8,7 +8,7 @@ import type { CaptureEnvelope, CaptureSource, CaptureSurface } from '@/types/cap
 import { createLinkedInController } from '@/sites/linkedin/controller';
 import { createLinkedInJobsController } from '@/sites/linkedin-jobs/controller';
 import { createIndeedController } from '@/sites/indeed/controller';
-import { createCaptureMessageHandler } from '@/api/capture-message-handler';
+import { createTestCaptureMessageHandler as createCaptureMessageHandler } from './helpers/memory-credential-context';
 import { createCaptureQueue } from '@/utils/capture-queue';
 import { apiBaseUrl, apiToken, captureEnabled } from '@/utils/storage';
 import { createMemoryQueueStore } from './helpers/memory-queue-store';

@@ -1,16 +1,20 @@
 <script lang="ts" setup>
-import { onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref, type Ref } from 'vue';
 import { panelPosition } from '@/utils/storage';
 import { createPanelDrag, type PanelDrag } from '@/utils/panel-drag';
+import type { CaptureErrorKind } from '@/types/capture';
 
-defineProps<{
+const props = defineProps<{
   siteLabel: string;
   counters: { found: number; sent: number; duplicates: number; errors: number };
+  error?: Ref<CaptureErrorKind | null>;
   jumpActive?: boolean;
   jumpCount?: number;
   jump?: { active: boolean; count: number };
   onCancelJump?: () => void;
 }>();
+
+const reservationBlocked = computed(() => props.error?.value === 'reservation_changed');
 
 const visible = defineModel<boolean>({ default: true });
 
@@ -58,6 +62,9 @@ onUnmounted(() => {
         <span class="vagas-value">{{ counters[key] }}</span>
       </template>
     </div>
+    <p v-if="reservationBlocked" class="vagas-reservation-error" role="alert" aria-live="assertive">
+      Captura bloqueada para preservar a reserva. Verifique a pesquisa e a validade da execução.
+    </p>
     <div v-if="jump?.active ?? jumpActive" class="vagas-jump">
       <span>pulando para o fim · {{ jump?.count ?? jumpCount ?? 0 }} posts</span>
       <button type="button" class="vagas-cancel" @click="onCancelJump?.()">
@@ -133,6 +140,15 @@ const counterLabels = {
 .vagas-value {
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+.vagas-reservation-error {
+  margin: 8px 0 0;
+  border: 1px solid #7f1d1d;
+  border-radius: 6px;
+  background: rgba(127, 29, 29, 0.32);
+  color: #fecaca;
+  overflow-wrap: anywhere;
+  padding: 6px 8px;
 }
 .vagas-jump {
   display: flex;

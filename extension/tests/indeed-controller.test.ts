@@ -6,7 +6,7 @@ import { ContentScriptContext } from 'wxt/utils/content-script-context';
 import type { CaptureEnvelope, CaptureMessage } from '@/types/capture';
 import { createIndeedController } from '@/sites/indeed/controller';
 import { extractJob } from '@/sites/indeed/extract';
-import { createCaptureMessageHandler } from '@/api/capture-message-handler';
+import { createTestCaptureMessageHandler as createCaptureMessageHandler } from './helpers/memory-credential-context';
 import { createCaptureQueue } from '@/utils/capture-queue';
 import { apiBaseUrl, apiToken, captureEnabled } from '@/utils/storage';
 import { createMemoryQueueStore } from './helpers/memory-queue-store';
