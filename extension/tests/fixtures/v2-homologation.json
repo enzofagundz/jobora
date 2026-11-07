@@ -1,0 +1,135 @@
+[
+  {
+    "surface": "linkedin_publications",
+    "source": "linkedin",
+    "title": "Desenvolvedora PHP Publicação",
+    "initialUrl": "https://www.linkedin.com/search/results/content/?keywords=php",
+    "finalUrl": "https://www.linkedin.com/search/results/content/?keywords=php",
+    "html": "<div class=\"feed\"><article role=\"listitem\"><a href=\"https://www.linkedin.com/in/recrutadora-exemplo\">Recrutadora Exemplo</a><div data-testid=\"expandable-text-box\"><p>Desenvolvedora PHP Publicação. Requisito PHP.</p></div><a href=\"https://www.linkedin.com/feed/update/urn:li:activity:38001\">Ver publicação</a></article></div>",
+    "detailHtml": "",
+    "envelope": {
+      "format": "jobora.capture-envelope",
+      "version": 1,
+      "capture": {
+        "idempotency_key": "homologation-linkedin_publications",
+        "execution_id": "00000000-0000-4000-8000-000000003800",
+        "source": "linkedin",
+        "surface": "linkedin_publications",
+        "initial_url": "https://www.linkedin.com/search/results/content/?keywords=php",
+        "final_url": "https://www.linkedin.com/search/results/content/?keywords=php",
+        "captured_at": "2026-11-07T12:00:07.400Z",
+        "coverage": {
+          "status": "complete",
+          "reason": null,
+          "blocks_expected": 1,
+          "blocks_captured": 1
+        },
+        "html": "<main data-capture-surface=\"linkedin_publications\" data-capture-version=\"1\"><article data-block-id=\"post-1\" data-kind=\"post\" data-platform-id=\"urn:li:activity:38001\" data-permalink=\"https://www.linkedin.com/feed/update/urn:li:activity:38001\"><a href=\"https://www.linkedin.com/in/recrutadora-exemplo\">Recrutadora Exemplo</a><div><p>Desenvolvedora PHP Publicação. Requisito PHP.</p></div><a href=\"https://www.linkedin.com/feed/update/urn:li:activity:38001\">Ver publicação</a></article></main>"
+      },
+      "blocks": [
+        {
+          "block_id": "post-1",
+          "kind": "post",
+          "platform_id": "urn:li:activity:38001",
+          "permalink": "https://www.linkedin.com/feed/update/urn:li:activity:38001",
+          "card_block_id": null,
+          "detail_block_id": null
+        }
+      ]
+    }
+  },
+  {
+    "surface": "linkedin_jobs",
+    "source": "linkedin",
+    "title": "Desenvolvedora PHP LinkedIn",
+    "initialUrl": "https://www.linkedin.com/jobs/search/?keywords=php",
+    "finalUrl": "https://www.linkedin.com/jobs/search/?keywords=php&currentJobId=38002",
+    "html": "<ul class=\"scaffold-layout__list-container\"><li data-occludable-job-id=\"38002\" class=\"scaffold-layout__list-item\"><div data-job-id=\"38002\" class=\"job-card-container\"><a href=\"/jobs/view/38002/\" class=\"job-card-container__link\">Desenvolvedora PHP LinkedIn</a><div class=\"artdeco-entity-lockup__subtitle\">Empresa Exemplo</div></div></li></ul>",
+    "detailHtml": "<div class=\"scaffold-layout__detail jobs-search__job-details\"><div data-job-id=\"38002\"><h1 class=\"job-details-jobs-unified-top-card__job-title\"><a href=\"/jobs/view/38002/\">Desenvolvedora PHP LinkedIn</a></h1><div id=\"job-details\" class=\"jobs-description-content__text--stretch\"><p>Desenvolvedora PHP LinkedIn. Requisito PHP.</p></div></div></div>",
+    "envelope": {
+      "format": "jobora.capture-envelope",
+      "version": 1,
+      "capture": {
+        "idempotency_key": "homologation-linkedin_jobs",
+        "execution_id": "00000000-0000-4000-8000-000000003800",
+        "source": "linkedin",
+        "surface": "linkedin_jobs",
+        "initial_url": "https://www.linkedin.com/jobs/search/?keywords=php",
+        "final_url": "https://www.linkedin.com/jobs/search/?keywords=php&currentJobId=38002",
+        "captured_at": "2026-11-07T12:00:02.000Z",
+        "coverage": {
+          "status": "complete",
+          "reason": null,
+          "blocks_expected": 2,
+          "blocks_captured": 2
+        },
+        "html": "<main data-capture-surface=\"linkedin_jobs\" data-capture-version=\"1\"><article data-block-id=\"card-1\" data-kind=\"card\" data-platform-id=\"38002\" data-permalink=\"https://www.linkedin.com/jobs/view/38002\" data-detail-block-id=\"detail-1\"><a href=\"https://www.linkedin.com/jobs/view/38002/\">Desenvolvedora PHP LinkedIn</a><div>Empresa Exemplo</div></article><section data-block-id=\"detail-1\" data-kind=\"detail\" data-platform-id=\"38002\" data-permalink=\"https://www.linkedin.com/jobs/view/38002\" data-card-block-id=\"card-1\"><div><h1><a href=\"https://www.linkedin.com/jobs/view/38002/\">Desenvolvedora PHP LinkedIn</a></h1><div><p>Desenvolvedora PHP LinkedIn. Requisito PHP.</p></div></div></section></main>"
+      },
+      "blocks": [
+        {
+          "block_id": "card-1",
+          "kind": "card",
+          "platform_id": "38002",
+          "permalink": "https://www.linkedin.com/jobs/view/38002",
+          "card_block_id": null,
+          "detail_block_id": "detail-1"
+        },
+        {
+          "block_id": "detail-1",
+          "kind": "detail",
+          "platform_id": "38002",
+          "permalink": "https://www.linkedin.com/jobs/view/38002",
+          "card_block_id": "card-1",
+          "detail_block_id": null
+        }
+      ]
+    }
+  },
+  {
+    "surface": "indeed_jobs",
+    "source": "indeed",
+    "title": "Desenvolvedora PHP Indeed",
+    "initialUrl": "https://br.indeed.com/jobs?q=php",
+    "finalUrl": "https://br.indeed.com/jobs?q=php&vjk=homologacao38",
+    "html": "<ul class=\"jobsearch-ResultsList\"><a data-jk=\"homologacao38\" href=\"/rc/clk?jk=homologacao38\"><h2><span title=\"Desenvolvedora PHP Indeed\">Desenvolvedora PHP Indeed</span></h2></a></ul>",
+    "detailHtml": "<div id=\"jobsearch-ViewjobPaneWrapper\" data-jk=\"homologacao38\"><h1 data-testid=\"jobsearch-JobInfoHeader-title\">Desenvolvedora PHP Indeed</h1><div id=\"jobDescriptionText\"><p>Desenvolvedora PHP Indeed. Requisito PHP.</p></div></div>",
+    "envelope": {
+      "format": "jobora.capture-envelope",
+      "version": 1,
+      "capture": {
+        "idempotency_key": "homologation-indeed_jobs",
+        "execution_id": "00000000-0000-4000-8000-000000003800",
+        "source": "indeed",
+        "surface": "indeed_jobs",
+        "initial_url": "https://br.indeed.com/jobs?q=php",
+        "final_url": "https://br.indeed.com/jobs?q=php&vjk=homologacao38",
+        "captured_at": "2026-11-07T12:00:02.000Z",
+        "coverage": {
+          "status": "complete",
+          "reason": null,
+          "blocks_expected": 2,
+          "blocks_captured": 2
+        },
+        "html": "<main data-capture-surface=\"indeed_jobs\" data-capture-version=\"1\"><article data-block-id=\"card-1\" data-kind=\"card\" data-platform-id=\"homologacao38\" data-permalink=\"https://br.indeed.com/viewjob?jk=homologacao38\" data-detail-block-id=\"detail-1\"><h2><span title=\"Desenvolvedora PHP Indeed\">Desenvolvedora PHP Indeed</span></h2></article><section data-block-id=\"detail-1\" data-kind=\"detail\" data-platform-id=\"homologacao38\" data-permalink=\"https://br.indeed.com/viewjob?jk=homologacao38\" data-card-block-id=\"card-1\"><h1>Desenvolvedora PHP Indeed</h1><div><p>Desenvolvedora PHP Indeed. Requisito PHP.</p></div></section></main>"
+      },
+      "blocks": [
+        {
+          "block_id": "card-1",
+          "kind": "card",
+          "platform_id": "homologacao38",
+          "permalink": "https://br.indeed.com/viewjob?jk=homologacao38",
+          "card_block_id": null,
+          "detail_block_id": "detail-1"
+        },
+        {
+          "block_id": "detail-1",
+          "kind": "detail",
+          "platform_id": "homologacao38",
+          "permalink": "https://br.indeed.com/viewjob?jk=homologacao38",
+          "card_block_id": "card-1",
+          "detail_block_id": null
+        }
+      ]
+    }
+  }
+]

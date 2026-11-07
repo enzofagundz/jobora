@@ -328,11 +328,10 @@ describe('indeed controller — integridade observer/SPA', () => {
 
     const { controller, deactivate } = await activateUntilDone();
     await advance(3_000);
-    for (let index = 0; index < 100 && (controller.getCaptureState().pending || store.records.size === 0); index++) {
-      await advance(50);
-    }
-    expect(controller.getCaptureState()).toMatchObject({ captured: false, pending: false });
-    expect(store.records.size).toBe(1);
+    await vi.waitFor(() => {
+      expect(controller.getCaptureState()).toMatchObject({ captured: false, pending: false });
+      expect(store.records.size).toBe(1);
+    });
     const queued = [...store.records.values()][0]!;
     expect(queued.envelope.capture).toMatchObject({
       source: 'indeed',

@@ -21,6 +21,7 @@ const TARGET = {
 
 describe('LinkedIn publicação anônima hidratada', () => {
   let store: ReturnType<typeof createMemoryQueueStore>;
+  let cleanup: (() => void) | undefined;
 
   beforeEach(() => {
     fakeBrowser.reset();
@@ -40,6 +41,8 @@ describe('LinkedIn publicação anônima hidratada', () => {
   });
 
   afterEach(() => {
+    cleanup?.();
+    cleanup = undefined;
     vi.clearAllTimers();
     vi.useRealTimers();
     vi.restoreAllMocks();
@@ -74,6 +77,10 @@ describe('LinkedIn publicação anônima hidratada', () => {
     const controller = createLinkedInController({
       resolveHydrationIdentity: (componentKey) => identities.resolve(componentKey),
     });
+    cleanup = () => {
+      controller.deactivate();
+      identities.dispose();
+    };
     const activation = controller.activate(
       new ContentScriptContext('linkedin-publication-hydration-regression'),
     );
@@ -95,8 +102,8 @@ describe('LinkedIn publicação anônima hidratada', () => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await vi.advanceTimersByTimeAsync(2000);
 
+    await vi.waitFor(() => expect(store.records.size).toBe(1));
     const records = [...store.records.values()];
-    expect(records).toHaveLength(1);
     const envelope: CaptureEnvelope = records[0]!.envelope;
     expect(envelope.blocks).toHaveLength(1);
     expect(envelope.blocks[0]).toMatchObject({
@@ -119,7 +126,5 @@ describe('LinkedIn publicação anônima hidratada', () => {
     });
     expect(store.records.size).toBe(1);
 
-    controller.deactivate();
-    identities.dispose();
   });
 });
