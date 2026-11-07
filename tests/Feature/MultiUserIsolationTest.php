@@ -13,6 +13,7 @@ use App\Jobs\AnalyzeJobPosting;
 use App\Jobs\TriageJobCaptures;
 use App\Models\JobCapture;
 use App\Models\JobPosting;
+use App\Models\PageCapture;
 use App\Models\Resume;
 use App\Models\User;
 use App\Services\ApplicationTrackingService;
@@ -31,7 +32,9 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
+use Tests\Feature\CaptureIngestion\CaptureEnvelopeFixture;
 
 uses(RefreshDatabase::class);
 
@@ -250,43 +253,31 @@ it('AnalyzeJobPosting com posting de owner diferente não analisa nem notifica',
 });
 
 it('token por usuário: token A cria captura para A e token B para B; sem token 401 e B não vê captura de A', function () {
+    Storage::fake('local');
     $owner = User::factory()->create();
     $userB = User::factory()->create();
     $tokenA = app(CaptureTokenService::class)->issueToken($owner);
     $tokenB = app(CaptureTokenService::class)->issueToken($userB);
 
     // sem token -> 401
-    $this->postJson('/api/job-captures', [
-        'source' => 'linkedin',
-        'description' => 'test',
-    ])->assertStatus(401);
+    $this->postJson('/api/page-captures', CaptureEnvelopeFixture::make('missing-token'))->assertStatus(401);
 
     // token inválido -> 401
-    $this->postJson('/api/job-captures', [
-        'source' => 'linkedin',
-        'description' => 'test',
-    ], ['Authorization' => 'Bearer invalido'])->assertStatus(401);
+    $this->postJson('/api/page-captures', CaptureEnvelopeFixture::make('invalid-token'), ['Authorization' => 'Bearer invalido'])->assertStatus(401);
 
-    $response2 = $this->postJson('/api/job-captures', [
-        'source' => 'linkedin',
-        'description' => 'test '.str_repeat('x', 50),
-        'url' => 'https://example.com/job/1',
-    ], ['Authorization' => 'Bearer '.$tokenA]);
+    $response2 = $this->postJson('/api/page-captures', CaptureEnvelopeFixture::make('owner-a'), ['Authorization' => 'Bearer '.$tokenA]);
 
     $response2->assertStatus(201)->assertJsonMissing(['user_id']);
-    $capture = JobCapture::latest()->first();
-    expect($capture->user_id)->toBe($owner->id);
+    $pageCapture = PageCapture::query()->findOrFail($response2->json('id'));
+    expect($pageCapture->user_id)->toBe($owner->id);
 
     // B cria sua própria captura com seu token
-    $response3 = $this->postJson('/api/job-captures', [
-        'source' => 'linkedin',
-        'description' => 'outra vaga '.str_repeat('x', 50),
-        'url' => 'https://example.com/job/2',
-    ], ['Authorization' => 'Bearer '.$tokenB]);
+    $response3 = $this->postJson('/api/page-captures', CaptureEnvelopeFixture::make('owner-b'), ['Authorization' => 'Bearer '.$tokenB]);
     $response3->assertStatus(201);
-    $captureB = JobCapture::where('url', 'https://example.com/job/2')->first();
-    expect($captureB)->not->toBeNull();
-    expect($captureB->user_id)->toBe($userB->id);
+    $pageCaptureB = PageCapture::query()->findOrFail($response3->json('id'));
+    expect($pageCaptureB->user_id)->toBe($userB->id);
+    $capture = JobCapture::factory()->for($owner, 'user')->create();
+    $captureB = JobCapture::factory()->for($userB, 'user')->create();
 
     $this->actingAs($userB);
     Livewire::test(ListJobCaptures::class)->assertCanNotSeeTableRecords(collect([$capture]));

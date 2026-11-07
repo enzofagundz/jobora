@@ -1,58 +1,36 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Jobora
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Aplicação Laravel/Filament para descoberta de oportunidades, perfil profissional confirmado, matching explicável, adequação de currículo e acompanhamento de candidaturas.
 
-## About Laravel
+## Fluxo V2
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+Fontes e execuções de descoberta organizam a coleta. A [extensão deste monorepo](extension/README.md) envia envelopes para `/api/page-captures` com credencial individual do proprietário, obtida no setup de captura do painel. A triagem de publicações é solicitada explicitamente; oportunidades revisadas e perfil confirmado alimentam o matching versionado. Currículos PT-BR/EN, competências estratégicas, adequação e ATS permanecem disponíveis.
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+O painel oferece consultas somente leitura, limitadas ao proprietário:
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+- Execuções: `filament.admin.pages.discovery-runs`.
+- Capturas de página: `filament.admin.resources.page-captures.index`.
+- Operações de IA: `filament.admin.pages.ai-operations`.
 
-## Learning Laravel
+Administração exige Gate explícito; autoelevação é bloqueada. Mercado fica fora da navegação principal e do catálogo MCP, mas suas rotas históricas, serviços e normalização compartilhada permanecem. `ready` V2 não equivale a `confirmed` V1.
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+## Hermes e envio de candidaturas
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+O MCP remoto HTTP/OAuth já existe, com identidade por proprietário e scopes por integração. Stdio também existe; não é a única forma de acesso. Downloads remotos usam artefatos privados autenticados com hash e TTL, não caminhos locais do servidor.
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+Preparação, aprovação e reserva não enviam candidatura. Somente o primeiro consumo remoto autenticado, com aprovação vigente e scope `applications:submit` concedido explicitamente, pode autorizar o Hermes a executar externamente. Consulta e replay nunca autorizam. Revogação antes do consumo bloqueia; depois não cancela navegador já autorizado. Resultado `unknown` impede repetição até reconciliação; o proprietário pode reconciliar pela web mesmo com integração revogada. Não há garantia externa de exactly-once. Tracking é separado do envio.
 
-## Agentic Development
+## Transição e pendências
 
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+O usuário confirmou migração de todos os clientes e instalações Hermes para V2; userscripts e extensão antiga não estão em uso. `/api/job-captures` está aposentado sem efeito. Captura/triagem/promoção V1 não são aliases da ingestão e triagem V2. Consulte o [contrato vigente](MCP_SPEC.md#contrato-v2-vigente-37) antes de configurar agentes.
 
-```bash
-composer require laravel/boost --dev
+Backups **ainda não foram implantados**. O teste de restore em ambiente descartável e o smoke real Hermes de LinkedIn publicações, LinkedIn Jobs e Indeed Jobs, incluindo browser/JS/rede/backend, continuam pendentes em #38. O fechamento de #29 por pedido do usuário não comprova homologação integral.
 
-php artisan boost:install
-```
+## Documentação
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
-
-## Contributing
-
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
-
-## Code of Conduct
-
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
-
-## Security Vulnerabilities
-
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
-
-## License
-
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+- [Contexto de domínio](CONTEXT.md).
+- [Produto e histórico do MVP](PRD.md).
+- [Plano técnico e transição V2](TECHNICAL_PLAN.md).
+- [Plano de implementação e evidências](IMPLEMENTATION_PLAN.md).
+- [Contrato MCP e histórico V1](MCP_SPEC.md).
+- [Currículos por idioma](docs/adr/0001-versoes-de-curriculo-por-idioma.md) e [pré-filtro V1](docs/adr/0002-pre-filtro-clef-na-triagem.md), com supersessão parcial explicitada.

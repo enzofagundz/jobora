@@ -4,7 +4,9 @@ use App\Agents\JobExtractionAgent;
 use App\Agents\ResumeAdaptationAgent;
 use App\Enums\JobPostingStatus;
 use App\Enums\ResumeLanguage;
+use App\Filament\Pages\AiOperationsPage;
 use App\Filament\Pages\CaptureSetupPage;
+use App\Filament\Pages\DiscoveryRunsPage;
 use App\Filament\Pages\JobSearchPage;
 use App\Filament\Pages\MarketComparisonPage;
 use App\Filament\Pages\MarketTrendsPage;
@@ -20,6 +22,7 @@ use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Filament\Resources\JobPostings\Pages\ApplicationPage;
 use App\Filament\Resources\JobPostings\Pages\ListJobPostings;
 use App\Filament\Resources\JobPostings\Pages\ViewJobPosting;
+use App\Filament\Resources\PageCaptures\PageCaptureResource;
 use App\Filament\Widgets\ComparisonSummaryWidget;
 use App\Filament\Widgets\StatsOverviewWidget;
 use App\Filament\Widgets\TopConceptsWidget;
@@ -155,13 +158,15 @@ it('renderiza as tendências com série mensal', function () {
 });
 
 it('widgets exibem dados corretos', function () {
-    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription(), 'readiness' => 'ready']);
     $posting->items()->create(['category' => 'skill', 'name' => 'Python', 'source' => 'ai']);
-    JobPosting::factory()->for(auth()->user(), 'user')->needsReview()->create(['description' => longDescription()]);
+    JobPosting::factory()->for(auth()->user(), 'user')->create(['description' => longDescription(), 'readiness' => 'needs_review']);
 
     Livewire::test(StatsOverviewWidget::class)
         ->assertSee('2')
-        ->assertSee('Aguardando revisão');
+        ->assertSee('Oportunidades prontas')
+        ->assertSee('com prontidão V2 marcada como pronta')
+        ->assertSee('Precisam de revisão');
 
     Livewire::test(TopConceptsWidget::class)
         ->assertSee('Python');
@@ -720,16 +725,17 @@ it('ordena a navegação lateral conforme o fluxo do produto', function () {
         JobSearchPage::class,
         CaptureSetupPage::class,
         JobCaptureResource::class,
+        PageCaptureResource::class,
+        DiscoveryRunsPage::class,
         JobPostingResource::class,
         DiscoverySourceResource::class,
+        AiOperationsPage::class,
         ProfessionalProfilePage::class,
         ResumePage::class,
         ScreeningPreferencesPage::class,
         ProfessionalCompetenciesPage::class,
         AgentIntegrationResource::class,
         TelegramIdentityPage::class,
-        MarketComparisonPage::class,
-        MarketTrendsPage::class,
     ]);
 });
 

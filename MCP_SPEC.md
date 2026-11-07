@@ -8,7 +8,49 @@
 > Escopo deste documento: especificação (contrato + arquitetura + plano). A implementação do
 > código é derivada dele.
 
-## 1. Visão e objetivo
+## Contrato V2 vigente (#37)
+
+Esta seção prevalece sobre a especificação V1 preservada nas seções 1–16 abaixo. Essas seções documentam o desenho original e seus critérios históricos, não um catálogo operacional atual. Em particular, HTTP/OAuth não é evolução futura, a identidade remota não é single-user fixa e caminho local de PDF não é contrato de download remoto.
+
+### Transporte, identidade e artefatos
+
+- O MCP remoto HTTP/OAuth já existe. O token identifica proprietário e integração; scopes limitam as operações, além de Gates/Policies e ownership. Nenhuma chamada pode escolher outro proprietário por `user_id`.
+- Stdio continua disponível com `JOBORA_MCP_USER`; sua identidade configurada não substitui autenticação remota. Não exponha esse processo como se fosse endpoint autenticado.
+- Downloads remotos usam artefatos privados com hash, TTL e acesso autenticado. O agente remoto não deve tentar ler caminhos do filesystem do servidor. A descrição local de PDF em §9 permanece apenas como histórico do desenho stdio.
+- Administração exige Gate explícito; o MCP não concede admin, ATS ou novos scopes automaticamente.
+
+### Superfícies e transição
+
+| Superfície aposentada do catálogo principal | Fluxo V2 e limite da transição |
+| --- | --- |
+| `capture_job` | `ingest_page_capture` recebe envelope de página; não aceita o contrato V1 como sinônimo. A extensão usa `/api/page-captures` com credencial individual. |
+| `triage_job_captures` | `request_publication_triage` solicita triagem explícita de publicações; Clef não a autoriza automaticamente. |
+| `promote_job_capture`, `promote_eligible_job_captures` | Oportunidades V2 seguem extração e revisão próprias; não há alias de promoção nem conversão automática de `confirmed` V1 em `ready` V2. |
+| `get_market_frequencies`, `get_market_pairs`, `get_market_comparison`, `get_market_trends` | Retiradas, sem ferramenta V2 equivalente de mercado. Matching é avaliação individual explicável, não frequência agregada renomeada. |
+| `MarketSnapshotResource` (`jobora://market-snapshot`) | Retirado, sem resource substituto de mercado. |
+
+Leitura/exclusão de capturas V1 (`get_job_capture`, `list_job_captures`, `delete_job_capture`) preservam acesso ao histórico; não reativam ingestão, triagem ou promoção antigas. `/api/job-captures` está aposentado sem efeito. O usuário confirmou migração de todas as instalações/clientes Hermes e ausência de userscripts ou extensão antiga em uso.
+
+O catálogo V2 inclui `get_page_capture`, `list_publications`, fontes (`list_discovery_sources`, `get_discovery_source`, `create_discovery_source`, `update_discovery_source`, `delete_discovery_source`, `list_pending_discovery_sources`) e execuções (`acquire_discovery_runs`, `list_discovery_runs`, `get_discovery_run`, `report_discovery_access`). O perfil profissional confirmado e a oportunidade revisada alimentam `request_matching`/`get_matching`. Currículos PT-BR/EN, competências, adequação/ATS, acompanhamento de candidaturas e operações de IA continuam com contratos próprios. PT-BR é referência de tradução, não verdade única do perfil V2.
+
+`MarketAnalysisService` e normalização compartilhada permanecem no domínio. A retirada do catálogo não exige apagar esses serviços nem trocar silenciosamente suas semânticas por matching. Os resources restantes são currículo, competências profissionais, vaga e adequação.
+
+### Envio externo e autorização (#36)
+
+1. `prepare_application` prepara; aprovação humana registra consentimento. Nenhuma dessas etapas envia a candidatura.
+2. `reserve_application_submission` reserva uma tentativa, sem autorizar execução externa.
+3. Somente o primeiro `consume_application_submission` remoto autenticado, com aprovação vigente e scope `applications:submit`, pode autorizar execução até `execute_before`. Esse scope não é concedido automaticamente.
+4. `get_application_submission`, reserva repetida e replay de consumo nunca autorizam. Revogação anterior ao consumo bloqueia; posterior ao consumo não cancela um navegador já autorizado.
+5. Hermes executa externamente e usa `report_application_submission` para relatar resultado e evidência. Não há garantia de exactly-once no sistema externo.
+6. Resultado `unknown` bloqueia nova tentativa até `reconcile_application_submission`. O proprietário pode reconciliar pela web mesmo se a integração tiver sido revogada.
+
+Tracking (`start_application`, `record_application_update` e consultas) não constitui autorização de envio. Um registro de status não substitui consumo nem comprova execução externa.
+
+### Validação e operação pendentes (#38)
+
+Os testes registrados de #36 são evidência automatizada, não smoke real Hermes. A homologação das três superfícies (LinkedIn publicações, LinkedIn Jobs e Indeed Jobs), incluindo browser/JS/rede/backend, continua incompleta. #29 foi fechado por pedido humano, sem prova integral desse fluxo. Backups ainda não estão implantados; restore em ambiente descartável será testado em #38. Os critérios e instruções de smoke V1 abaixo não comprovam essas pendências nem devem ser executados sobre dados reais com `migrate:fresh`.
+
+## 1. Visão e objetivo (histórico V1)
 
 O **jobora-mcp** é um servidor MCP (Model Context Protocol) embutido na aplicação Laravel do
 Jobora. Ele expõe as capacidades do sistema como **tools**, **resources** e (não no MVP)

@@ -7,6 +7,7 @@ use App\Enums\AiOperationStatus;
 use App\Enums\AiOperationType;
 use App\Enums\ResumeLanguage;
 use App\Filament\Pages\ProfessionalCompetenciesPage;
+use App\Filament\Pages\ProfessionalProfilePage;
 use App\Filament\Pages\ResumePage;
 use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Jobs\ClassifyPublicationWithClef;
@@ -1568,10 +1569,12 @@ class AiOperationService
                 : [null, null],
             AiOperationType::StrategicCompetencyClassification => [ProfessionalCompetenciesPage::getUrl(), 'Ver competências'],
             AiOperationType::ResumeTranslation => [ResumePage::getUrl(), 'Ver currículo'],
-            AiOperationType::PublicationExtraction => [null, null],
-            AiOperationType::PublicationTriage => [null, null],
-            AiOperationType::ProfileImport => [null, null],
-            AiOperationType::Matching => [null, null],
+            AiOperationType::PublicationExtraction,
+            AiOperationType::PublicationTriage => [route('filament.admin.resources.page-captures.index'), 'Ver capturas de página'],
+            AiOperationType::ProfileImport => [ProfessionalProfilePage::getUrl(), 'Revisar perfil profissional'],
+            AiOperationType::Matching => $operation->target_id
+                ? [JobPostingResource::getUrl('matching', ['record' => $operation->target_id]), 'Ver matching']
+                : [route('filament.admin.pages.ai-operations'), 'Ver operação'],
         };
     }
 }

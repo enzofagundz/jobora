@@ -15,6 +15,11 @@ use UnitEnum;
 
 class MarketTrendsPage extends Page
 {
+    public static function shouldRegisterNavigation(): bool
+    {
+        return false;
+    }
+
     protected string $view = 'filament.pages.market-trends';
 
     protected static ?string $slug = 'market-trends';
