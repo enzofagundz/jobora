@@ -216,6 +216,8 @@ it('resolves the active run for the extension by canonical search url', function
     DiscoveryRun::factory()->for($user, 'user')->create([
         'discovery_source_id' => $source->id,
         'canonical_url_hash' => $source->canonical_url_hash,
+        'initial_url' => $run->initial_url,
+        'surface' => $run->surface,
     ]);
 
     expect(fn () => runService()->resolveForExtension($user, $source->url))

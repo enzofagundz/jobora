@@ -25,7 +25,7 @@ class DiscoverySourceUrl
     private const LINKEDIN_DATE_POSTED = ['["past-24h"]', '["past-week"]', '["past-month"]'];
 
     private const PATHS = [
-        'linkedin_jobs' => ['/jobs/search/', '/jobs/search'],
+        'linkedin_jobs' => ['/jobs/search/', '/jobs/search', '/jobs/search-results', '/jobs/search-results/'],
         'linkedin_publications' => ['/search/results/content/', '/search/results/content'],
         'indeed_jobs' => ['/jobs', '/m/jobs'],
     ];
@@ -69,6 +69,12 @@ class DiscoverySourceUrl
     private function validateSemanticFilters(DiscoverySourceSurface $surface, array $query): void
     {
         $periodKeys = array_values(array_intersect(array_keys($query), ['f_TPR', 'fromage', 'datePosted']));
+
+        foreach ($periodKeys as $key) {
+            if (! is_string($query[$key])) {
+                throw new InvalidArgumentException('O filtro de período da URL deve ser um valor único.');
+            }
+        }
 
         if (count($periodKeys) > 1) {
             throw new InvalidArgumentException('A URL da fonte mistura filtros de período conflitantes.');
@@ -150,5 +156,40 @@ class DiscoverySourceUrl
     public function hash(string $url): string
     {
         return hash('sha256', $this->canonical($url));
+    }
+
+    public function matchesObservation(DiscoverySourceSurface $surface, string $observed, string $reserved): bool
+    {
+        $this->validate($surface->platform(), $surface, $observed);
+        $this->validate($surface->platform(), $surface, $reserved);
+
+        if ($surface !== DiscoverySourceSurface::LinkedInJobs) {
+            return $this->hash($observed) === $this->hash($reserved);
+        }
+
+        return mb_strtolower((string) parse_url($observed, PHP_URL_HOST)) === mb_strtolower((string) parse_url($reserved, PHP_URL_HOST))
+            && (parse_url($observed, PHP_URL_PORT) ?? 443) === (parse_url($reserved, PHP_URL_PORT) ?? 443)
+            && $this->observationParameters($observed) === $this->observationParameters($reserved);
+    }
+
+    /** @return array<string, list<string>> */
+    private function observationParameters(string $url): array
+    {
+        $parameters = [];
+        foreach (explode('&', (string) parse_url($url, PHP_URL_QUERY)) as $pair) {
+            if ($pair === '') {
+                continue;
+            }
+            [$key, $value] = array_pad(explode('=', $pair, 2), 2, '');
+            $key = urldecode($key);
+            if (in_array(mb_strtolower($key), self::TRACKING_PARAMETERS, true)
+                || in_array($key, ['currentJobId', 'skipRedirect', 'infoNotice'], true)) {
+                continue;
+            }
+            $parameters[$key][] = urldecode($value);
+        }
+        ksort($parameters);
+
+        return $parameters;
     }
 }
