@@ -1,8 +1,8 @@
-import { createApp, type App as VueApp } from 'vue';
+import { createApp, ref, type App as VueApp } from 'vue';
 import type { ContentScriptContext, ShadowRootContentScriptUi } from '#imports';
 import CapturePanel from '@/components/CapturePanel.vue';
 import { createCaptureSession, type CaptureSession } from '@/utils/capture-session';
-import type { CaptureCoverageReason, EnvelopeResult, ResolveRunResult } from '@/types/capture';
+import type { CaptureCoverageReason, CaptureErrorKind, EnvelopeResult, ResolveRunResult } from '@/types/capture';
 import {
   OBSERVER_DEBOUNCE_MS,
   extractLinkedInJob,
@@ -24,6 +24,7 @@ export interface LinkedInJobsCaptureState {
   executionId: string | null;
   cards: number;
   details: number;
+  error: CaptureErrorKind | null;
 }
 
 export interface LinkedInJobsController {
@@ -46,10 +47,12 @@ interface JobAttempt {
   coverage: 'complete' | 'partial' | null;
   cancelled: boolean;
   detailFailure: boolean;
+  error: CaptureErrorKind | null;
 }
 
 export function createLinkedInJobsController(): LinkedInJobsController {
   const session: CaptureSession = createCaptureSession();
+  const panelError = ref<CaptureErrorKind | null>(null);
   let observer: MutationObserver | null = null;
   let debounceTimer: number | undefined;
   let finalizeTimer: number | undefined;
@@ -72,6 +75,13 @@ export function createLinkedInJobsController(): LinkedInJobsController {
       !context.isInvalid &&
       isLinkedInJobsRoute(location)
     );
+  }
+
+  function setAttemptError(current: JobAttempt, error: CaptureErrorKind | null): void {
+    current.error = error;
+    if (attempt === current && isGenerationActive(current.generation)) {
+      panelError.value = error === 'reservation_changed' ? error : null;
+    }
   }
 
   function isCardCandidate(el: Element): boolean {
@@ -238,8 +248,10 @@ export function createLinkedInJobsController(): LinkedInJobsController {
       if (response?.context) current.credentialContext = response.context;
 
       if (response && response.ok === false) {
+        setAttemptError(current, response.error);
         if (
           response.error === 'conflict' ||
+          response.error === 'reservation_changed' ||
           response.error === 'auth' ||
           response.error === 'invalid'
         ) {
@@ -250,12 +262,15 @@ export function createLinkedInJobsController(): LinkedInJobsController {
       }
 
       if (response?.ok && response.run) {
+        setAttemptError(current, null);
         if (response.run.source !== 'linkedin' || response.run.surface !== 'linkedin_jobs') {
           current.blocked = true;
           session.counters.phase = 'error';
           return;
         }
         current.executionId = response.run.executionId;
+      } else if (response?.ok) {
+        setAttemptError(current, null);
       }
     } catch {
       // Falha de correlação não impede acumular; o ACK do backend decide.
@@ -303,6 +318,7 @@ export function createLinkedInJobsController(): LinkedInJobsController {
       })) as EnvelopeResult | undefined;
 
       if (!result || result.ok !== true) {
+        setAttemptError(current, result?.error ?? 'network');
         for (const card of cards) {
           session.applyResult(jobIdentity(card.platform_id), result ?? { ok: false, error: 'network' });
         }
@@ -313,6 +329,7 @@ export function createLinkedInJobsController(): LinkedInJobsController {
       }
 
       current.captured = true;
+      setAttemptError(current, null);
       current.coverage = result.coverage ?? envelope.capture.coverage.status;
       for (const card of cards) session.applyResult(jobIdentity(card.platform_id), result);
       session.counters.phase = 'completed';
@@ -346,6 +363,7 @@ export function createLinkedInJobsController(): LinkedInJobsController {
       coverage: null,
       cancelled: false,
       detailFailure: false,
+      error: null,
     };
   }
 
@@ -359,6 +377,7 @@ export function createLinkedInJobsController(): LinkedInJobsController {
   async function activate(ctx: ContentScriptContext): Promise<void> {
     const generation = lifecycleGeneration;
     context = ctx;
+    panelError.value = null;
     pendingElements = [];
     pendingSet.clear();
     const current = newAttempt(generation);
@@ -373,6 +392,7 @@ export function createLinkedInJobsController(): LinkedInJobsController {
         const panelApp = createApp(CapturePanel, {
           siteLabel: 'Jobora Job Capture',
           counters: session.counters,
+          error: panelError,
           visible: panelVisible,
           'onUpdate:visible': (value: boolean) => {
             panelVisible = value;
@@ -446,6 +466,7 @@ export function createLinkedInJobsController(): LinkedInJobsController {
     lifecycleGeneration++;
     for (const remove of removeInvalidatedListeners.splice(0)) remove();
     context = undefined;
+    panelError.value = null;
     const interrupted = attempt;
     removeUi();
     if (interrupted && !interrupted.finalized && !interrupted.blocked) {
@@ -456,6 +477,7 @@ export function createLinkedInJobsController(): LinkedInJobsController {
   function getCaptureState(): LinkedInJobsCaptureState {
     const blocks = attempt?.builder.blocks() ?? [];
     return {
+      error: attempt?.error ?? null,
       captured: attempt?.captured ?? false,
       pending: attempt?.pending ?? false,
       coverage: attempt?.coverage ?? null,

@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { nextTick } from 'vue';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { ContentScriptContext } from 'wxt/utils/content-script-context';
 import type { CaptureEnvelope, CaptureMessage } from '@/types/capture';
 import { createLinkedInJobsController } from '@/sites/linkedin-jobs/controller';
 import { OBSERVER_DEBOUNCE_MS } from '@/sites/linkedin-jobs/extract';
-import { createCaptureMessageHandler } from '@/api/capture-message-handler';
+import { createTestCaptureMessageHandler as createCaptureMessageHandler } from './helpers/memory-credential-context';
 import { createCaptureQueue } from '@/utils/capture-queue';
 import { apiBaseUrl, apiToken, captureEnabled } from '@/utils/storage';
 import { lastApiStatus } from '@/utils/session-storage';
@@ -201,6 +202,29 @@ describe('linkedin-jobs controller — envelope consolidado', () => {
     await advance(OBSERVER_DEBOUNCE_MS);
     expect(envelopes).toHaveLength(1);
     deactivate();
+  });
+
+  it('propaga reservation_changed à UI e bloqueia captura sem enviar envelope', async () => {
+    mountJobsList(0);
+    const sendMessage = vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValue({
+      ok: false,
+      error: 'reservation_changed',
+    } as never);
+
+    const controller = createLinkedInJobsController();
+    await controller.activate(new ContentScriptContext(`reservation-ui-${Math.random()}`));
+    await nextTick();
+
+    expect(controller.getCaptureState().error).toBe('reservation_changed');
+    expect(controller.getCaptureState().captured).toBe(false);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const shadowRoots = Array.from(document.querySelectorAll('*'))
+      .map((element) => element.shadowRoot)
+      .filter((root): root is ShadowRoot => root !== null);
+    expect(shadowRoots.some((root) => root.querySelector('[role="alert"]')?.textContent?.includes(
+      'Captura bloqueada para preservar a reserva. Verifique a pesquisa e a validade da execução.',
+    ))).toBe(true);
+    controller.deactivate();
   });
 
   it.each(['cold load', 'legacy SPA entry'])('captures redirected search-results after %s without dropping filters or URL provenance', async (entry) => {
@@ -520,6 +544,9 @@ describe('linkedin-jobs controller — envelope consolidado', () => {
     const bodies: CaptureEnvelope[] = [];
     vi.spyOn(globalThis, 'fetch').mockImplementation(
       async (_url: string | URL | Request, init?: RequestInit) => {
+        if (String(_url).endsWith('/discovery-runs/resolve')) {
+          return new Response(JSON.stringify({ execution_id: 'exec-jobs-1', source: 'linkedin', surface: 'linkedin_jobs', initial_url: SEARCH_URL }), { status: 200 });
+        }
         fetchCalls++;
         bodies.push(JSON.parse((init?.body as string) ?? '{}') as CaptureEnvelope);
         if (fetchCalls === 1) throw new TypeError('offline depois do persist');

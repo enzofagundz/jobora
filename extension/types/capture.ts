@@ -27,6 +27,7 @@ export type CaptureErrorKind =
   | 'conflict'
   | 'too_large'
   | 'credential_changed'
+  | 'reservation_changed'
   | 'not_found'
   | 'ambiguous'
   | 'storage';

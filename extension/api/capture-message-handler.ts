@@ -5,8 +5,6 @@ import type {
   CaptureQueueDrainResult,
   CaptureQueueStatus,
   CaptureResult,
-  CaptureSource,
-  CaptureSurface,
   EnvelopeResult,
   ResolveRunResult,
 } from '@/types/capture';
@@ -47,9 +45,15 @@ interface Credential {
 }
 
 export interface CaptureMessageHandler {
-  (message: unknown): Promise<CaptureMessageResult | undefined>;
+  (message: unknown, sender?: CaptureSender): Promise<CaptureMessageResult | undefined>;
   /** Retoma fila pendente após restart/suspensão do service worker. */
   flush(): Promise<void>;
+  tabClosed(tabId: number): Promise<void>;
+}
+
+export interface CaptureSender {
+  tab?: { id?: number };
+  frameId?: number;
 }
 
 const NOOP_WAKE: CaptureQueueWake = { schedule: () => {} };
@@ -65,6 +69,8 @@ export function createCaptureMessageHandler(
   let draining: Promise<CaptureQueueDrainResult | null> | null = null;
   const ownerLookups = new Map<string, Promise<number | null>>();
   const ownerNegativeUntil = new Map<string, number>();
+  const generations = new Map<string, number>();
+  const closedTabs = new Set<number>();
 
   async function currentCredential(): Promise<Credential | null> {
     if (!(await isCaptureReady())) return null;
@@ -170,6 +176,12 @@ export function createCaptureMessageHandler(
     return !!current && sameCredential(current, credential);
   }
 
+  async function bindingCurrent(credential: Credential, binding: CredentialContext): Promise<boolean> {
+    if (!(await stillCurrent(credential))) return false;
+    const owner = await owners.get(credential.origin, credential.fingerprint);
+    return !owner || owner.ownerUserId === binding.ownerUserId;
+  }
+
   async function drainCurrent(
     force = false,
     credentialOverride?: Credential,
@@ -209,30 +221,29 @@ export function createCaptureMessageHandler(
     await drainCurrent(false);
   }
 
-  async function issueContext(
-    credential: Credential,
-    ownerUserId: number,
-    run: {
-      executionId: string | null;
-      source: CaptureSource | null;
-      surface: CaptureSurface | null;
-    },
-  ): Promise<string> {
+  async function issueContext(scopeKey: string, binding: CredentialContext): Promise<string> {
     const id = newCredentialContextId();
-    await contexts.put(id, {
-      origin: credential.origin,
-      credentialFingerprint: credential.fingerprint,
-      ownerUserId,
-      executionId: run.executionId,
-      source: run.source,
-      surface: run.surface,
-      createdAt: Date.now(),
-    });
+    if (!(await contexts.putIfRevision(scopeKey, binding.revision, binding))) {
+      throw new Error('Capture resolution superseded');
+    }
+    await contexts.put(id, { ...binding, scopeKey });
+    if (!(await contexts.putIfRevision(scopeKey, binding.revision, { ...binding, contextId: id }))) {
+      throw new Error('Capture resolution superseded');
+    }
     return id;
   }
 
-  async function handler(message: unknown): Promise<CaptureMessageResult | undefined> {
+  async function handler(message: unknown, sender?: CaptureSender): Promise<CaptureMessageResult | undefined> {
     if (!isCaptureMessage(message)) return undefined;
+    if (sender?.tab?.id !== undefined && closedTabs.has(sender.tab.id)) return { ok: false, error: 'invalid' };
+    const senderKey = Number.isInteger(sender?.tab?.id) && sender!.tab!.id! >= 0 && Number.isInteger(sender?.frameId) && sender!.frameId! >= 0
+      ? `${sender!.tab!.id}:${sender!.frameId}` : null;
+    let generation: number | undefined;
+    if (message.type === 'capture:resolve-run') {
+      if (!senderKey) return { ok: false, error: 'invalid' };
+      generation = (generations.get(senderKey) ?? 0) + 1;
+      generations.set(senderKey, generation);
+    }
 
     if (message.type === 'capture:queue-status') {
       const credential = await currentCredential();
@@ -334,35 +345,55 @@ export function createCaptureMessageHandler(
       const validated = await validatedCredential();
       if (!validated.ok) return validated;
       const credential = validated.credential;
-
+      if (generations.get(senderKey!) !== generation) return { ok: false, error: 'reservation_changed' };
+      const scopeKey = JSON.stringify(['capture-scope', senderKey, credential.origin, credential.fingerprint, validated.ownerUserId]);
+      const previous = await contexts.get(scopeKey);
+      if (generations.get(senderKey!) !== generation) return { ok: false, error: 'reservation_changed' };
+      const revision = newCredentialContextId();
+      const pending: CredentialContext = previous ?? {
+        origin: credential.origin, credentialFingerprint: credential.fingerprint, ownerUserId: validated.ownerUserId,
+        executionId: null, source: null, surface: null, senderKey: senderKey!, createdAt: Date.now(),
+      };
+      try {
+        await contexts.put(scopeKey, { ...pending, revision });
+      } catch {
+        return { ok: false, error: 'storage' };
+      }
       const result = await resolveDiscoveryRun(message.url, {
         origin: credential.origin,
         token: credential.token,
       });
-
-      if (result.ok) {
-        return {
-          ...result,
-          context: await issueContext(credential, validated.ownerUserId, {
-            executionId: result.run?.executionId ?? null,
-            source: result.run?.source ?? null,
-            surface: result.run?.surface ?? null,
-          }),
-        };
+      if (!(await stillCurrent(credential))) return { ok: false, error: 'credential_changed' };
+      if (closedTabs.has(sender!.tab!.id!) || generations.get(senderKey!) !== generation || (await contexts.get(scopeKey))?.revision !== revision) {
+        return { ok: false, error: 'reservation_changed' };
       }
-
-      if (result.error === 'network' || result.error === 'timeout' || result.error === 'http') {
-        return {
-          ...result,
-          context: await issueContext(credential, validated.ownerUserId, {
-            executionId: null,
-            source: null,
-            surface: null,
-          }),
-        };
+      if (pending.executionId !== null) {
+        if (!result.ok || result.run?.executionId !== pending.executionId || result.run.source !== pending.source || result.run.surface !== pending.surface || expired(pending)) {
+          await contexts.putIfRevision(scopeKey, revision, { ...pending, revision, blocked: true });
+          await writeStatus({ ok: false, error: 'reservation_changed' });
+          return { ok: false, error: 'reservation_changed' };
+        }
+        if (!(await contexts.putIfRevision(scopeKey, revision, { ...pending, revision, blocked: false }))) return { ok: false, error: 'reservation_changed' };
+        if (!(await bindingCurrent(credential, pending))) return { ok: false, error: 'credential_changed' };
+        if (generations.get(senderKey!) !== generation) return { ok: false, error: 'reservation_changed' };
+        return { ...result, context: pending.contextId };
       }
-
-      return result;
+      if (previous && !previous.contextId && (!result.ok || !result.run)) {
+        return { ok: false, error: 'reservation_changed' };
+      }
+      if (!result.ok && !['network', 'timeout', 'http'].includes(result.error)) return result;
+      try {
+        const run = result.ok ? result.run : null;
+        const context = await issueContext(scopeKey, { ...pending, revision,
+          executionId: run?.executionId ?? null, source: run?.source ?? null, surface: run?.surface ?? null,
+          observedUrl: message.url, expiresAt: run?.expiresAt ?? null,
+        });
+        if (!(await bindingCurrent(credential, pending))) return { ok: false, error: 'credential_changed' };
+        if (closedTabs.has(sender!.tab!.id!) || generations.get(senderKey!) !== generation || (await contexts.get(scopeKey))?.revision !== revision) return { ok: false, error: 'reservation_changed' };
+        return { ...result, context };
+      } catch {
+        return { ok: false, error: 'storage' };
+      }
     }
 
     if (message.type === 'capture:submit-envelope') {
@@ -374,24 +405,66 @@ export function createCaptureMessageHandler(
       }
 
       const binding = await contexts.get(message.context);
-      if (!binding || !envelopeMatchesBinding(message.envelope, binding)) {
+      if (!senderKey || !binding || binding.senderKey !== senderKey || !binding.scopeKey || !envelopeMatchesBinding(message.envelope, binding)) {
         return { ok: false, error: 'invalid' };
       }
-
+      const pin = await contexts.get(binding.scopeKey);
+      if (pin?.contextId !== message.context || pin.executionId !== binding.executionId) return { ok: false, error: 'reservation_changed' };
+      const credential = await currentCredential();
+      if (!credential || !sameTarget(credential, binding) || !(await bindingCurrent(credential, binding))) {
+        return { ok: false, error: credential ? 'credential_changed' : 'auth' };
+      }
       const target: CaptureQueueTarget = {
         origin: binding.origin,
         credentialFingerprint: binding.credentialFingerprint,
         ownerUserId: binding.ownerUserId,
       };
+      const payloadHash = await credentialFingerprint(JSON.stringify(message.envelope));
+      if (!(await bindingCurrent(credential, binding))) return { ok: false, error: 'credential_changed' };
+      if (binding.acceptedPayloadHash && binding.acceptedPayloadHash !== payloadHash) return { ok: false, error: 'reservation_changed' };
+      if (binding.receipt && binding.acceptedPayloadHash === payloadHash) return { ...binding.receipt, duplicate: true };
+      const exactReplay = binding.acceptedPayloadHash === payloadHash;
+      if (!exactReplay && pin.blocked) return { ok: false, error: 'reservation_changed' };
+      if (!exactReplay && binding.executionId !== null) {
+        if (expired(binding)) return { ok: false, error: 'reservation_changed' };
+        if (binding.surface === 'linkedin_jobs') {
+          const urls = new Set([message.envelope.capture.final_url]);
+          if (message.envelope.capture.initial_url !== binding.observedUrl) urls.add(message.envelope.capture.initial_url);
+          for (const url of urls) {
+            const resolved = await resolveDiscoveryRun(url, { origin: credential.origin, token: credential.token });
+            if (!(await bindingCurrent(credential, binding))) return { ok: false, error: 'credential_changed' };
+            if ((await contexts.get(binding.scopeKey))?.revision !== pin.revision) return { ok: false, error: 'reservation_changed' };
+            if (!resolved.ok || resolved.run?.executionId !== binding.executionId || resolved.run.source !== binding.source || resolved.run.surface !== binding.surface) {
+              await contexts.putIfRevision(binding.scopeKey, pin.revision, { ...pin, blocked: true });
+              await writeStatus({ ok: false, error: 'reservation_changed' });
+              return { ok: false, error: 'reservation_changed' };
+            }
+          }
+        }
+      }
+      if (!(await bindingCurrent(credential, binding))) return { ok: false, error: 'credential_changed' };
+      const currentPin = await contexts.get(binding.scopeKey);
+      if (currentPin?.contextId !== message.context || currentPin.revision !== pin.revision) return { ok: false, error: 'reservation_changed' };
+      const accepted = exactReplay ? binding : { ...binding, acceptedPayloadHash: payloadHash, revision: newCredentialContextId() };
+      if (!exactReplay) {
+        try {
+          if (!(await contexts.putIfRevision(message.context, binding.revision, accepted))) return { ok: false, error: 'reservation_changed' };
+        } catch {
+          return { ok: false, error: 'storage' };
+        }
+      }
+      if (!(await bindingCurrent(credential, binding))) return { ok: false, error: 'credential_changed' };
+      if ((await contexts.get(binding.scopeKey))?.revision !== pin.revision) return { ok: false, error: 'reservation_changed' };
       const enqueued = await queue.enqueue(message.envelope, target);
       if (!enqueued.ok) return { ok: false, error: enqueued.error };
 
-      const credential = await currentCredential();
-      if (!credential || !sameTarget(credential, binding)) {
+      const credentialCurrent = await bindingCurrent(credential, binding);
+      if (!credentialCurrent || (await contexts.get(binding.scopeKey))?.revision !== pin.revision) {
+        if (!enqueued.existing) await queue.discard(message.envelope.capture.idempotency_key, target);
         const visible: EnvelopeResult = {
           ok: false,
-          error: credential ? 'credential_changed' : 'auth',
-          queued: true,
+          error: credentialCurrent ? 'reservation_changed' : 'credential_changed',
+          queued: enqueued.existing,
           executionId: message.envelope.capture.execution_id,
           coverage: message.envelope.capture.coverage.status,
         };
@@ -406,12 +479,21 @@ export function createCaptureMessageHandler(
       const visible = queued ? { ...result, queued } : result;
 
       await writeStatus(visible);
+      if (result.ok) {
+        try {
+          await contexts.putIfRevision(message.context, accepted.revision, { ...accepted, receipt: visible });
+        } catch {}
+      }
       return visible;
     }
 
   }
 
   handler.flush = flush;
+  handler.tabClosed = async (tabId: number) => {
+    closedTabs.add(tabId);
+    await contexts.removeTab(tabId);
+  };
   return handler;
 }
 
@@ -419,12 +501,16 @@ function envelopeMatchesBinding(
   envelope: CaptureEnvelope,
   binding: CredentialContext,
 ): boolean {
-  if (binding.executionId !== null && envelope.capture.execution_id !== binding.executionId) {
+  if (envelope.capture.execution_id !== binding.executionId) {
     return false;
   }
   if (binding.source !== null && envelope.capture.source !== binding.source) return false;
   if (binding.surface !== null && envelope.capture.surface !== binding.surface) return false;
   return true;
+}
+
+function expired(binding: CredentialContext): boolean {
+  return binding.expiresAt != null && (!Number.isFinite(Date.parse(binding.expiresAt)) || Date.parse(binding.expiresAt) <= Date.now());
 }
 
 function sameTarget(credential: Credential, binding: CredentialContext): boolean {
@@ -469,13 +555,15 @@ function fallbackResult(record: CaptureQueueRecord | null): EnvelopeResult {
 }
 
 async function writeStatus(result: CaptureResult): Promise<void> {
-  await lastApiStatus.setValue({
-    ok: result.ok,
-    duplicate: result.duplicate,
-    error: result.error,
-    status: result.status,
-    at: new Date().toISOString(),
-  });
+  try {
+    await lastApiStatus.setValue({
+      ok: result.ok,
+      duplicate: result.duplicate,
+      error: result.error,
+      status: result.status,
+      at: new Date().toISOString(),
+    });
+  } catch {}
 }
 
 function isCaptureMessage(message: unknown): message is CaptureMessage {
