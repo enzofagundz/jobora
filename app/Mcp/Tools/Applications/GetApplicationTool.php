@@ -8,6 +8,7 @@ use App\Mcp\Tools\JoboraTool;
 use App\Models\ApplicationEvent;
 use App\Models\JobPosting;
 use App\Services\ApplicationPreparationService;
+use App\Services\ApplicationSubmissionService;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -40,6 +41,7 @@ class GetApplicationTool extends JoboraTool
 
         return $this->ok([
             'application' => ApplicationPresenter::toArray($application),
+            'submission' => app(ApplicationSubmissionService::class)->summary($this->user(), $application->id),
             'preparation' => $application->current_preparation_id === null ? null
                 : app(ApplicationPreparationService::class)->get($this->user(), $application->current_preparation_id),
             'events' => $application->events()

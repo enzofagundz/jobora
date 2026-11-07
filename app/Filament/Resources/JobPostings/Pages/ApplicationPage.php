@@ -10,17 +10,20 @@ use App\Enums\ResumeLanguage;
 use App\Filament\Pages\ResumePage;
 use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Filament\Resources\JobPostings\Schemas\ApplicationMethodForm;
+use App\Mcp\Support\ToolException;
 use App\Models\AgentIntegration;
 use App\Models\AiOperation;
 use App\Models\Application;
 use App\Models\ApplicationEvent;
 use App\Models\ApplicationMethod;
+use App\Models\ApplicationSubmissionAttempt;
 use App\Models\DocumentArtifact;
 use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
 use App\Services\AiOperationService;
 use App\Services\ApplicationApprovalService;
 use App\Services\ApplicationPreparationService;
+use App\Services\ApplicationSubmissionService;
 use App\Services\ApplicationTrackingService;
 use App\Services\DocumentArtifactService;
 use App\Services\JobReviewService;
@@ -50,6 +53,8 @@ use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use LogicException;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
@@ -106,6 +111,25 @@ class ApplicationPage extends Page implements HasTable
 
     public ?array $approvalData = null;
 
+    public ?array $submissionSummary = null;
+
+    public ?array $submissionDetails = null;
+
+    public array $reconciliationData = [
+        'outcome' => 'unknown',
+        'evidence_kind' => 'ambiguous',
+        'reference' => '',
+        'details' => '',
+        'executor_stopped' => false,
+    ];
+
+    public ?string $reconciliationEventKey = null;
+
+    /** @var array{attempt_id: string, expected_revision: int, event_key: string, form: array<string, mixed>}|null */
+    public ?array $reconciliationRequest = null;
+
+    public ?string $submissionError = null;
+
     public function mount(int|string $record): void
     {
         $this->record = $this->resolveRecord($record);
@@ -121,6 +145,7 @@ class ApplicationPage extends Page implements HasTable
         $this->fillAdaptedForm();
         $this->refreshAiOperation();
         $this->recoverCurrentApplicationPreparation();
+        $this->refreshSubmissionStatus();
     }
 
     /**
@@ -632,6 +657,101 @@ class ApplicationPage extends Page implements HasTable
     public function application(): ?Application
     {
         return $this->record->application;
+    }
+
+    public function refreshSubmissionStatus(?ApplicationSubmissionService $submissions = null): void
+    {
+        $submissions ??= app(ApplicationSubmissionService::class);
+        $this->submissionSummary = $submissions->summary(auth()->user(), (int) $this->record->application?->id);
+        $this->submissionDetails = null;
+
+        if ($this->submissionSummary === null) {
+            return;
+        }
+
+        try {
+            $this->submissionDetails = $submissions->get(auth()->user(), $this->submissionSummary['attempt_id']);
+        } catch (AuthorizationException) {
+        }
+
+        if ($this->reconciliationEventKey === null) {
+            $this->reconciliationEventKey = (string) Str::uuid();
+        }
+    }
+
+    public function updatedReconciliationData(mixed $value, ?string $key = null): void
+    {
+        if ($this->reconciliationRequest !== null
+            && $this->reconciliationFormPayload() !== $this->reconciliationRequest['form']) {
+            $this->reconciliationRequest = null;
+            $this->reconciliationEventKey = (string) Str::uuid();
+            $this->submissionError = null;
+        }
+    }
+
+    public function reconcileSubmission(ApplicationSubmissionService $submissions): void
+    {
+        $user = auth()->user();
+        $attemptId = $this->submissionSummary['attempt_id'] ?? null;
+        $application = $this->application();
+        $attempt = $attemptId === null ? null : ApplicationSubmissionAttempt::query()
+            ->where('user_id', $user->id)->where('application_id', $application?->id)->find($attemptId);
+
+        if ($attempt === null || ($this->submissionSummary['state'] ?? null) !== 'unknown') {
+            $this->submissionError = 'Esta tentativa não pode ser reconciliada. Atualize o estado e tente novamente.';
+
+            return;
+        }
+
+        $form = $this->reconciliationFormPayload();
+        $request = $this->reconciliationRequest;
+
+        if ($request === null || $request['attempt_id'] !== (string) $attempt->id || $request['form'] !== $form) {
+            $request = [
+                'attempt_id' => (string) $attempt->id,
+                'expected_revision' => (int) $this->submissionSummary['revision'],
+                'event_key' => (string) Str::uuid(),
+                'form' => $form,
+            ];
+            $this->reconciliationRequest = $request;
+            $this->reconciliationEventKey = $request['event_key'];
+        }
+
+        $evidence = ['kind' => $form['evidence_kind']];
+        foreach (['reference', 'details'] as $field) {
+            if (filled($form[$field] ?? null)) {
+                $evidence[$field] = $form[$field];
+            }
+        }
+
+        try {
+            $submissions->reconcileForOwner($user, [
+                'attempt_id' => $attempt->id,
+                'expected_revision' => $request['expected_revision'],
+                'event_key' => $request['event_key'],
+                'outcome' => $form['outcome'],
+                'evidence' => $evidence,
+                'executor_stopped' => $form['executor_stopped'],
+            ]);
+            $this->submissionError = null;
+            $this->refreshSubmissionStatus($submissions);
+        } catch (AuthorizationException|ModelNotFoundException) {
+            $this->submissionError = 'Não foi possível reconciliar esta tentativa.';
+        } catch (ValidationException|ToolException) {
+            $this->submissionError = 'O estado mudou ou as evidências não permitem resolver a tentativa. Atualize o estado.';
+        }
+    }
+
+    /** @return array{outcome: mixed, evidence_kind: mixed, reference: mixed, details: mixed, executor_stopped: bool} */
+    private function reconciliationFormPayload(): array
+    {
+        return [
+            'outcome' => $this->reconciliationData['outcome'] ?? null,
+            'evidence_kind' => $this->reconciliationData['evidence_kind'] ?? null,
+            'reference' => $this->reconciliationData['reference'] ?? null,
+            'details' => $this->reconciliationData['details'] ?? null,
+            'executor_stopped' => (bool) ($this->reconciliationData['executor_stopped'] ?? false),
+        ];
     }
 
     /**

@@ -12,6 +12,8 @@ use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 
 class ApplicationApprovalService
@@ -52,11 +54,11 @@ class ApplicationApprovalService
                 $preparation = ApplicationPreparation::query()->where('user_id', $user->id)->lockForUpdate()->findOrFail($input['preparation_id']);
                 $posting = $preparation->application->jobPosting()->lockForUpdate()->firstOrFail();
                 $user->professionalProfile()->lockForUpdate()->first();
-                $user->resumes()->lockForUpdate()->get();
-                $posting->resumeAdaptations()->lockForUpdate()->get();
-                $posting->items()->lockForUpdate()->get();
-                $posting->applicationMethods()->lockForUpdate()->get();
-                $artifacts = $preparation->artifacts()->lockForUpdate()->get();
+                $user->resumes()->orderBy('id')->lockForUpdate()->get();
+                $posting->resumeAdaptations()->orderBy('id')->lockForUpdate()->get();
+                $posting->items()->orderBy('id')->lockForUpdate()->get();
+                $posting->applicationMethods()->orderBy('id')->lockForUpdate()->get();
+                $artifacts = $preparation->artifacts()->orderBy('id')->lockForUpdate()->get();
                 if (! hash_equals($preparation->fingerprint, $input['expected_fingerprint'])) {
                     throw ToolException::conflict('O fingerprint não corresponde ao material congelado.');
                 }
@@ -126,8 +128,8 @@ class ApplicationApprovalService
         });
     }
 
-    /** @return array<string, mixed> */
-    private function present(User $user, ApplicationApproval $approval): array
+    /** @return list<string> */
+    public function invalidReasons(User $user, ApplicationApproval $approval): array
     {
         $reasons = [];
         $currentUser = $user->fresh();
@@ -157,9 +159,21 @@ class ApplicationApprovalService
             $reasons[] = 'preparation_stale';
         }
         $artifacts = $preparation?->artifacts()->get();
-        if ($artifacts === null || $artifacts->isEmpty() || $artifacts->contains(fn ($artifact): bool => $artifact->revoked_at !== null || $artifact->expires_at->lte(now()))) {
+        if ($artifacts === null || $artifacts->isEmpty() || $artifacts->contains(fn ($artifact): bool => $artifact->revoked_at !== null
+            || $artifact->expires_at->lte(now()) || ! Storage::disk('local')->exists($artifact->path))) {
             $reasons[] = 'artifacts_unavailable';
         }
+        if (($preparation?->snapshot['ats_consent'] ?? false) && ! Gate::forUser($currentUser ?? $user)->allows('useAtsOptimization')) {
+            $reasons[] = 'ats_permission_revoked';
+        }
+
+        return $reasons;
+    }
+
+    /** @return array<string, mixed> */
+    private function present(User $user, ApplicationApproval $approval): array
+    {
+        $reasons = $this->invalidReasons($user, $approval);
         $status = $approval->revoked_at !== null ? 'revoked' : ($approval->expires_at->lte(now()) ? 'expired' : ($reasons === [] ? 'active' : 'invalid'));
 
         return ['id' => $approval->id, 'preparation_id' => $approval->preparation_id, 'binding_id' => $approval->binding_id, 'integration_id' => $approval->integration_id,
