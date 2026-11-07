@@ -13,7 +13,6 @@ import type {
 import {
   resolveDiscoveryRun,
   sanitizeApiBaseUrl,
-  submitCapture,
   submitEnvelope,
   validateCaptureCredential,
 } from '@/api/captures';
@@ -410,13 +409,6 @@ export function createCaptureMessageHandler(
       return visible;
     }
 
-    if (!message.payload || typeof message.payload !== 'object') {
-      return { ok: false, error: 'invalid' };
-    }
-
-    const result = await submitCapture(message.payload);
-    await writeStatus(result);
-    return result;
   }
 
   handler.flush = flush;
@@ -490,7 +482,6 @@ function isCaptureMessage(message: unknown): message is CaptureMessage {
   if (typeof message !== 'object' || message === null) return false;
   const type = (message as { type?: unknown }).type;
   return (
-    type === 'capture:submit' ||
     type === 'capture:resolve-run' ||
     type === 'capture:submit-envelope' ||
     type === 'capture:queue-status' ||

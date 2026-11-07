@@ -1,11 +1,13 @@
 # 2. Pré-filtro Clef Flash na triagem de capturas
 
-- **Status:** aceito
+- **Status:** aceito; superfície de triagem V1 parcialmente superada pelo V2 (#37)
 - **Data:** 2026-11-03
 - **Glossário:** CONTEXT.md
 - **Relacionado:** #8, #9, #10, #11, #12, #13
 
 ## Contexto
+
+**Atualização V2 (#37):** este ADR registra o pré-filtro e a triagem de `JobCapture` V1. As ferramentas de captura, triagem e promoção V1 não pertencem mais ao catálogo MCP principal. A ingestão de envelopes (`ingest_page_capture`) e a solicitação explícita de triagem de publicações (`request_publication_triage`) têm contratos próprios: não são aliases desse fluxo. Clef não autoriza triagem automática. A retirada da superfície V1 não apaga as evidências abaixo nem elimina normalização, competências ou adequação compartilhadas.
 
 A triagem de capturas é um único prompt de chat por lote de até 50 publicações: o agente decide `relevant`, `rejected`, `not_a_job` ou `uncertain` para cada uma. No banco local de 2026-11-03, 791 capturas estavam registradas — 729 concluídas, das quais 366 eram `not_a_job`. Ou seja, cerca de metade do custo do LLM era gasto para responder uma pergunta binária ("isto é uma vaga?") que um classificador calibrado e mais barato resolve.
 

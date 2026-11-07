@@ -1,9 +1,10 @@
 // ==UserScript==
 // @name         Jobora Job Capture — Indeed → API
 // @namespace    vagas.local
-// @version      0.1.0
-// @description  Captura vagas da página de resultados do Indeed e envia à API do Jobora para revisão manual no painel.
+// @version      0.2.0
+// @description  Aposentado. Use a extensão Jobora V2; este script não executa captura nem acessa credenciais.
 // @match        https://*.indeed.com/jobs*
+// @exclude      *://*/*
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @grant        GM_xmlhttpRequest
@@ -31,6 +32,7 @@
 
 (() => {
     'use strict';
+    return;
 
     // ------------------------------------------------------------------ CONFIG
 

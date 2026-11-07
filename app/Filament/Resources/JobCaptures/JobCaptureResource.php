@@ -21,7 +21,7 @@ class JobCaptureResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedInboxArrowDown;
 
-    protected static ?string $navigationLabel = 'Capturas';
+    protected static ?string $navigationLabel = 'Capturas legadas';
 
     protected static string|UnitEnum|null $navigationGroup = 'Vagas';
 

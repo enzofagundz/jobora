@@ -9,6 +9,7 @@ use App\Services\CaptureTokenService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Tests\Feature\AgentIntegrations\AgentIntegrationTestHelpers as Helpers;
+use Tests\Feature\CaptureIngestion\CaptureEnvelopeFixture;
 
 uses(RefreshDatabase::class);
 
@@ -86,10 +87,6 @@ it('keeps the OAuth credential from authenticating the capture API', function ()
     $token = Helpers::accessToken($user, $client);
 
     $this->withToken($token)
-        ->postJson('/api/job-captures', [
-            'source' => 'linkedin',
-            'description' => 'Vaga de teste',
-            'captured_at' => now()->toDateTimeString(),
-        ])
+        ->postJson('/api/page-captures', CaptureEnvelopeFixture::make('oauth-is-not-capture-token'))
         ->assertStatus(401);
 });

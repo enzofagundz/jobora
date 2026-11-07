@@ -4,15 +4,11 @@ use App\Enums\JobCaptureTriageResult;
 use App\Enums\JobCaptureTriageStatus;
 use App\Enums\TriageOrigin;
 use App\Jobs\AnalyzeJobPosting;
-use App\Jobs\PrefilterJobCaptures;
 use App\Jobs\ProcessAiOperation;
 use App\Mcp\Servers\JoboraServer;
-use App\Mcp\Tools\Captures\CaptureJobTool;
 use App\Mcp\Tools\Captures\DeleteJobCaptureTool;
 use App\Mcp\Tools\Captures\GetJobCaptureTool;
 use App\Mcp\Tools\Captures\ListJobCapturesTool;
-use App\Mcp\Tools\Captures\PromoteEligibleJobCapturesTool;
-use App\Mcp\Tools\Captures\PromoteJobCaptureTool;
 use App\Mcp\Tools\Captures\RequestPublicationTriageTool;
 use App\Mcp\Tools\Captures\TriageJobCapturesTool;
 use App\Mcp\Tools\JobPostings\AnalyzeJobPostingTool;
@@ -37,54 +33,55 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Mcp\Server\Attributes\Description;
+use Tests\Feature\AgentIntegrations\AgentIntegrationTestHelpers as IntegrationHelpers;
 use Tests\Feature\Mcp\McpTestHelpers;
 
 uses(RefreshDatabase::class);
 
-it('captura uma vaga para o usuário configurado', function () {
-    McpTestHelpers::user();
+/** @param array<string, mixed> $arguments */
+function assertRetiredCaptureTool(User $user, string $name, array $arguments = []): void
+{
+    $client = IntegrationHelpers::client();
+    IntegrationHelpers::integration($user, $client);
+    $token = IntegrationHelpers::accessToken($user, $client);
+    app('auth')->forgetGuards();
+    test()->withToken($token)->postJson('/mcp', IntegrationHelpers::toolCall($name, $arguments))
+        ->assertOk()->assertJsonPath('error.code', -32602)->assertJsonPath('error.message', "Tool [{$name}] not found.");
+}
 
-    JoboraServer::tool(CaptureJobTool::class, [
+it('aposenta captura direta sem converter o payload antigo em envelope', function () {
+    $user = McpTestHelpers::user();
+
+    assertRetiredCaptureTool($user, 'capture_job', [
         'source' => 'LinkedIn',
         'external_id' => 'urn:li:activity:123',
         'title' => 'Desenvolvedor PHP',
         'description' => 'Vaga para desenvolvedor PHP com Laravel.',
-    ])
-        ->assertOk()
-        ->assertStructuredContent(function ($json) {
-            $json->where('ok', true)
-                ->where('data.duplicate', false)
-                ->where('data.capture.source', 'linkedin')
-                ->where('data.capture.external_id', 'urn:li:activity:123')
-                ->where('data.capture.title', 'Desenvolvedor PHP')
-                ->etc();
-        });
+    ]);
+    $this->assertDatabaseCount('job_captures', 0);
+    $this->assertDatabaseCount('page_captures', 0);
 });
 
-it('não duplica a mesma captura', function () {
-    McpTestHelpers::user();
+it('rejeita repetições da captura direta aposentada sem criar dados', function () {
+    $user = McpTestHelpers::user();
 
     $payload = ['source' => 'linkedin', 'external_id' => 'abc-1', 'description' => 'Vaga X'];
 
-    JoboraServer::tool(CaptureJobTool::class, $payload)->assertOk();
-
-    JoboraServer::tool(CaptureJobTool::class, $payload)
-        ->assertOk()
-        ->assertStructuredContent(fn ($json) => $json->where('ok', true)->where('data.duplicate', true)->etc());
+    assertRetiredCaptureTool($user, 'capture_job', $payload);
+    assertRetiredCaptureTool($user, 'capture_job', $payload);
+    $this->assertDatabaseCount('job_captures', 0);
 });
 
-it('exige source na captura', function () {
-    McpTestHelpers::user();
+it('não reativa captura aposentada para validar source ausente', function () {
+    $user = McpTestHelpers::user();
 
-    JoboraServer::tool(CaptureJobTool::class, ['description' => 'Vaga sem origem'])
-        ->assertHasErrors(['validation']);
+    assertRetiredCaptureTool($user, 'capture_job', ['description' => 'Vaga sem origem']);
 });
 
-it('exige external_id, url ou description na captura', function () {
-    McpTestHelpers::user();
+it('não reativa captura aposentada para validar identidade ausente', function () {
+    $user = McpTestHelpers::user();
 
-    JoboraServer::tool(CaptureJobTool::class, ['source' => 'linkedin'])
-        ->assertHasErrors(['validation']);
+    assertRetiredCaptureTool($user, 'capture_job', ['source' => 'linkedin']);
 });
 
 it('devolve uma captura do usuário configurado', function () {
@@ -162,7 +159,7 @@ it('exclui a captura com confirmação e ela deixa de aparecer', function () {
         ->assertHasErrors(['not_found']);
 });
 
-it('dispara a triagem das capturas elegíveis e as marca como em processamento', function () {
+it('não dispara triagem V1 aposentada nem altera capturas pendentes', function () {
     $user = McpTestHelpers::user();
     Queue::fake();
 
@@ -173,25 +170,19 @@ it('dispara a triagem das capturas elegíveis e as marca como em processamento',
         'triage_result' => JobCaptureTriageResult::Relevant,
     ]);
 
-    JoboraServer::tool(TriageJobCapturesTool::class, ['ids' => [$a->id, $b->id]])
-        ->assertOk()
-        ->assertStructuredContent(fn ($json) => $json
-            ->where('ok', true)
-            ->where('data.batch_size', 2)
-            ->where('data.state', 'processing')
-            ->etc());
-
-    Queue::assertPushed(PrefilterJobCaptures::class);
+    assertRetiredCaptureTool($user, 'triage_job_captures', ['ids' => [$a->id, $b->id]]);
+    Queue::assertNothingPushed();
+    expect($b->fresh()->triage_status)->toBe(JobCaptureTriageStatus::Pending);
 
     JoboraServer::tool(GetJobCaptureTool::class, ['id' => $a->id])
         ->assertOk()
         ->assertStructuredContent(fn ($json) => $json
             ->where('ok', true)
-            ->where('data.capture.triage_status', 'processing')
+            ->where('data.capture.triage_status', 'pending')
             ->etc());
 });
 
-it('não dispara triagem quando não há capturas elegíveis', function () {
+it('também rejeita triagem V1 aposentada sem capturas elegíveis', function () {
     $user = McpTestHelpers::user();
     Queue::fake();
 
@@ -200,13 +191,7 @@ it('não dispara triagem quando não há capturas elegíveis', function () {
         'triage_result' => JobCaptureTriageResult::Relevant,
     ]);
 
-    JoboraServer::tool(TriageJobCapturesTool::class, [])
-        ->assertOk()
-        ->assertStructuredContent(fn ($json) => $json
-            ->where('ok', true)
-            ->where('data.batch_size', 0)
-            ->where('data.state', 'idle')
-            ->etc());
+    assertRetiredCaptureTool($user, 'triage_job_captures');
 
     Queue::assertNothingPushed();
 });
@@ -705,7 +690,7 @@ it('bloqueia confirmação e descarte V1 para oportunidade estruturada', functio
         ->and($posting->fresh()->suggested_data)->toBe(['items' => []]);
 });
 
-it('promove uma captura elegível para vaga e a vincula', function () {
+it('não promove capturas históricas pela ferramenta V1 aposentada', function () {
     $user = McpTestHelpers::user();
     Queue::fake();
 
@@ -715,25 +700,19 @@ it('promove uma captura elegível para vaga e a vincula', function () {
         'description' => 'Vaga para desenvolvedor PHP com Laravel e testes.',
     ]);
 
-    $response = JoboraServer::tool(PromoteJobCaptureTool::class, ['id' => $capture->id])
-        ->assertOk();
-
-    $response->assertStructuredContent(fn ($json) => $json
-        ->where('ok', true)
-        ->where('data.status', 'pending')
-        ->etc());
-
-    Queue::assertPushed(AnalyzeJobPosting::class);
+    assertRetiredCaptureTool($user, 'promote_job_capture', ['id' => $capture->id]);
+    Queue::assertNothingPushed();
+    $this->assertDatabaseCount('job_postings', 0);
 
     JoboraServer::tool(GetJobCaptureTool::class, ['id' => $capture->id])
         ->assertOk()
         ->assertStructuredContent(fn ($json) => $json
             ->where('ok', true)
-            ->whereNot('data.capture.job_posting_id', null)
+            ->where('data.capture.job_posting_id', null)
             ->etc());
 });
 
-it('recusa promover captura sem triagem relevante', function () {
+it('rejeita promoção aposentada também para captura sem triagem relevante', function () {
     $user = McpTestHelpers::user();
     Queue::fake();
 
@@ -743,13 +722,12 @@ it('recusa promover captura sem triagem relevante', function () {
         'description' => 'Vaga descartada pela triagem com texto suficiente.',
     ]);
 
-    JoboraServer::tool(PromoteJobCaptureTool::class, ['id' => $capture->id])
-        ->assertHasErrors(['precondition']);
+    assertRetiredCaptureTool($user, 'promote_job_capture', ['id' => $capture->id]);
 
     Queue::assertNothingPushed();
 });
 
-it('promove em lote todas as capturas elegíveis', function () {
+it('não promove lotes históricos pela ferramenta V1 aposentada', function () {
     $user = McpTestHelpers::user();
     Queue::fake();
 
@@ -764,14 +742,10 @@ it('promove em lote todas as capturas elegíveis', function () {
         'description' => 'Vaga rejeitada com descrição suficiente para promoção.',
     ]);
 
-    JoboraServer::tool(PromoteEligibleJobCapturesTool::class, [])
-        ->assertOk()
-        ->assertStructuredContent(fn ($json) => $json
-            ->where('ok', true)
-            ->where('data.promoted_count', 2)
-            ->etc());
-
-    Queue::assertPushed(AnalyzeJobPosting::class, 2);
+    assertRetiredCaptureTool($user, 'promote_eligible_job_captures');
+    Queue::assertNothingPushed();
+    $this->assertDatabaseCount('job_captures', 3);
+    $this->assertDatabaseCount('job_postings', 0);
 });
 
 it('describes the real prefilter and triage cost in the tool description', function () {

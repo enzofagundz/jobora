@@ -10,20 +10,20 @@ uses(RefreshDatabase::class);
 it('blocks a tool when the integration lacks its internal capability', function () {
     $user = User::factory()->create();
     $client = Helpers::client();
-    Helpers::integration($user, $client, [AgentIntegrationScope::MarketRead]);
+    Helpers::integration($user, $client, [AgentIntegrationScope::CapturesRead]);
     $token = Helpers::accessToken($user, $client);
 
-    $market = $this->withToken($token)
-        ->postJson('/mcp', Helpers::toolCall('get_market_frequencies'))
+    $publications = $this->withToken($token)
+        ->postJson('/mcp', Helpers::toolCall('list_publications', ['clef_status' => 'eligible']))
         ->assertOk();
 
-    $captures = $this->withToken($token)
-        ->postJson('/mcp', Helpers::toolCall('list_job_captures'))
+    $resume = $this->withToken($token)
+        ->postJson('/mcp', Helpers::toolCall('get_resume'))
         ->assertOk();
 
-    expect(Helpers::decodeToolResult($market->getContent())['ok'] ?? null)->toBeTrue()
-        ->and(Helpers::decodeToolResult($captures->getContent())['ok'] ?? null)->toBeFalse()
-        ->and(Helpers::decodeToolResult($captures->getContent())['error']['code'] ?? null)->toBe('forbidden');
+    expect(Helpers::decodeToolResult($publications->getContent())['ok'] ?? null)->toBeTrue()
+        ->and(Helpers::decodeToolResult($resume->getContent())['ok'] ?? null)->toBeFalse()
+        ->and(Helpers::decodeToolResult($resume->getContent())['error']['code'] ?? null)->toBe('forbidden');
 });
 
 it('blocks a write tool when only its read capability is granted', function () {

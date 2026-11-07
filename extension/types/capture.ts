@@ -1,4 +1,3 @@
-/** Payload exato aceito por POST /api/job-captures (JobCaptureController::store). */
 export interface CaptureAuthor {
   name: string | null;
   profile_url: string | null;
@@ -170,11 +169,8 @@ export type CaptureQueueResult =
   | { ok: true; drain: CaptureQueueDrainResult }
   | { ok: false; error: CaptureErrorKind; status?: number };
 
-export type CaptureSubmitMessage = { type: 'capture:submit'; payload: CapturePayload };
-
 /** Canal content script → background. O token nunca entra em nenhuma mensagem. */
 export type CaptureMessage =
-  | CaptureSubmitMessage
   | { type: 'capture:resolve-run'; url: string }
   | { type: 'capture:submit-envelope'; envelope: CaptureEnvelope; context: string }
   | { type: 'capture:queue-status' }

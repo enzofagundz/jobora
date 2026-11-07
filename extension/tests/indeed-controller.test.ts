@@ -184,7 +184,7 @@ describe('indeed controller — integridade observer/SPA', () => {
       'capture:resolve-run',
       'capture:submit-envelope',
     ]);
-    expect(sendMessageMock.mock.calls.some(([message]) => (message as CaptureMessage).type === 'capture:submit')).toBe(false);
+    expect(sendMessageMock.mock.calls.map(([message]) => (message as CaptureMessage).type)).not.toContain('capture:submit');
     expect(submissions).toHaveLength(1);
     const envelope: CaptureEnvelope = submissions[0]!.envelope;
     expect(envelope).toMatchObject({
