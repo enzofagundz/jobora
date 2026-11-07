@@ -13,6 +13,7 @@ import {
   frozenSearchUrl,
   isCard,
   isIndeedRoute,
+  indeedDescriptionElement,
   indeedPaneMatches,
   waitForPane,
 } from './extract';
@@ -121,7 +122,9 @@ export function createIndeedController(): IndeedController {
       || null;
     const previousVjk = new URLSearchParams(location.search).get('vjk');
     const previousPane = document.querySelector('#jobsearch-ViewjobPaneWrapper');
-    const previousPaneHtml = previousPane?.innerHTML ?? null;
+    const previousDescriptionText = previousPane
+      ? indeedDescriptionElement(previousPane)?.textContent.replace(/\s+/g, ' ').trim() ?? null
+      : null;
     try {
       (element as HTMLElement).click();
     } catch {
@@ -135,8 +138,7 @@ export function createIndeedController(): IndeedController {
       isGenerationActive,
       jk,
       previousVjk,
-      previousPane,
-      previousPaneHtml,
+      previousDescriptionText,
     );
     if (!isGenerationActive(generation) || attempt !== current) return;
     if (!paneReady) {
@@ -148,17 +150,27 @@ export function createIndeedController(): IndeedController {
     const raw = await extractJob(jk, title, element);
     if (!isGenerationActive(generation) || attempt !== current) return;
     const pane = document.querySelector('#jobsearch-ViewjobPaneWrapper');
+    const description = pane ? indeedDescriptionElement(pane) : null;
     if (
       !raw?.description ||
       !pane ||
-      !indeedPaneMatches(pane, jk, previousVjk, previousPane, previousPaneHtml)
+      !description ||
+      !indeedPaneMatches(pane, jk, previousVjk, previousDescriptionText)
     ) {
       current.detailFailure = true;
       session.counters.errors++;
       return;
     }
 
-    current.builder.addDetail(jk, pane);
+    const detail = document.createElement('section');
+    for (const [index, value] of [raw.title, raw.company, raw.location].entries()) {
+      if (!value) continue;
+      const metadata = document.createElement(index === 0 ? 'h1' : 'p');
+      metadata.textContent = value;
+      detail.append(metadata);
+    }
+    detail.append(description.cloneNode(true));
+    current.builder.addDetail(jk, detail);
   }
 
   async function processNewCards(): Promise<void> {

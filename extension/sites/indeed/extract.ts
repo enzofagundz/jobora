@@ -10,6 +10,16 @@ const EXPAND_WAIT_MS = 150;
 
 const PANE_SELECTOR = '#jobsearch-ViewjobPaneWrapper';
 
+export function indeedDescriptionElement(pane: Element): Element | null {
+  const legacy = pane.querySelector('#jobDescriptionText');
+  if (legacy) return legacy;
+
+  const heading = pane.querySelector(
+    '[data-testid="viewjob-job-content"] [data-testid="vj-job-description-heading"]',
+  );
+  return heading?.parentElement?.querySelector(':scope > .simple-job-description-html') ?? null;
+}
+
 export function isIndeedRoute(url: URL | Location): boolean {
   return url.pathname.startsWith('/jobs');
 }
@@ -30,8 +40,7 @@ export function waitForPane(
   isGenerationActive: (generation: number) => boolean,
   jk: string,
   previousVjk: string | null,
-  previousPane: Element | null,
-  previousPaneHtml: string | null,
+  previousDescriptionText: string | null,
 ): Promise<boolean> {
   const { promise, resolve } = Promise.withResolvers<boolean>();
   const started = Date.now();
@@ -44,13 +53,13 @@ export function waitForPane(
     }
 
     const pane = document.querySelector(PANE_SELECTOR);
-    const desc = pane?.querySelector('#jobDescriptionText') ?? null;
+    const desc = pane ? indeedDescriptionElement(pane) : null;
     const hasDescription = desc !== null && desc.textContent.trim().length > 0;
 
     if (
       pane &&
       hasDescription &&
-      indeedPaneMatches(pane, jk, previousVjk, previousPane, previousPaneHtml)
+      indeedPaneMatches(pane, jk, previousVjk, previousDescriptionText)
     ) {
       clearInterval(timer);
       resolve(true);
@@ -71,8 +80,7 @@ export function indeedPaneMatches(
   pane: Element,
   jk: string,
   previousVjk: string | null = null,
-  previousPane: Element | null = null,
-  previousPaneHtml: string | null = null,
+  previousDescriptionText: string | null = null,
 ): boolean {
   const candidates = [pane, ...pane.querySelectorAll('[data-jk]')];
   for (const candidate of candidates) {
@@ -89,9 +97,10 @@ export function indeedPaneMatches(
     }
   }
 
+  const descriptionText = indeedDescriptionElement(pane)?.textContent.replace(/\s+/g, ' ').trim() ?? null;
   return (
     new URLSearchParams(location.search).get('vjk') === jk &&
-    (previousVjk === jk || pane !== previousPane || pane.innerHTML !== previousPaneHtml)
+    (previousVjk === jk || (descriptionText !== null && descriptionText !== previousDescriptionText))
   );
 }
 
@@ -139,16 +148,19 @@ export async function extractJob(
     return el ? el.textContent.trim() : null;
   };
 
-  const title = q('[data-testid="jobsearch-JobInfoHeader-title"]') || cardTitle;
+  const title = q('[data-testid="jobsearch-JobInfoHeader-title"]')
+    || q('[data-testid="vj-job-title"]')
+    || cardTitle;
   const company =
     q('[data-testid="inlineHeader-companyName"]') ||
+    q('[data-testid="company-info-metadata"] a[role="link"]') ||
     cardEl.querySelector('[data-testid="company-name"]')?.textContent.trim() ||
     null;
   const jobLocation =
     q('[data-testid="inlineHeader-companyLocation"]') ||
     cardEl.querySelector('[data-testid="text-location"]')?.textContent.trim() ||
     null;
-  const description = toText(pane.querySelector('#jobDescriptionText'));
+  const description = toText(indeedDescriptionElement(pane));
 
   return {
     jk,

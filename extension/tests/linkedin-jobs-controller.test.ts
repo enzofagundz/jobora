@@ -203,6 +203,54 @@ describe('linkedin-jobs controller — envelope consolidado', () => {
     deactivate();
   });
 
+  it.each(['cold load', 'legacy SPA entry'])('captures redirected search-results after %s without dropping filters or URL provenance', async (entry) => {
+    const redirected = 'https://www.linkedin.com/jobs/search-results?skipRedirect=true&currentJobId=4486639255&keywords=Laravel&f_WT=2&f_SAL=f_SA_id_225001%3A272001&infoNotice=ai-job-search&f_TPR=r86400';
+    document.removeEventListener('click', spaClickHandler, true);
+    mountJobsList(1);
+    const messaging = setupMessaging();
+    const controller = createLinkedInJobsController();
+    const ctx = new ContentScriptContext(`redirected-jobs-${entry}`);
+    const openRedirectedPane = (event: Event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const card = target?.closest('div[data-job-id]');
+      if (!card) return;
+      openJobsPane('1', 'Vaga 1');
+      const selected = new URL(redirected);
+      selected.searchParams.set('currentJobId', '1');
+      window.happyDOM.setURL(selected.href);
+    };
+    document.addEventListener('click', openRedirectedPane, true);
+    try {
+      window.happyDOM.setURL(entry === 'legacy SPA entry' ? redirected.replace('/jobs/search-results?', '/jobs/search/?') : redirected);
+      const activation = controller.activate(ctx);
+      await vi.waitFor(async () => {
+        await vi.advanceTimersByTimeAsync(OBSERVER_DEBOUNCE_MS);
+        expect(messaging.envelopes).toHaveLength(1);
+      });
+      await activation;
+      const envelope = messaging.envelopes[0]!;
+      expect(envelope.blocks.map((block) => block.kind)).toEqual(['card', 'detail']);
+      expect(envelope.capture.execution_id).toBe('exec-jobs-1');
+      expect(envelope.capture.coverage.status).toBe('complete');
+      const initial = new URL(envelope.capture.initial_url);
+      const final = new URL(envelope.capture.final_url);
+      expect(initial.pathname).toBe(entry === 'legacy SPA entry' ? '/jobs/search/' : '/jobs/search-results');
+      expect(initial.searchParams.has('currentJobId')).toBe(false);
+      expect(final.pathname).toBe('/jobs/search-results');
+      expect(final.searchParams.get('currentJobId')).toBe('1');
+      for (const url of [initial, final]) {
+        expect(url.searchParams.get('keywords')).toBe('Laravel');
+        expect(url.searchParams.get('f_WT')).toBe('2');
+        expect(url.searchParams.get('f_SAL')).toBe('f_SA_id_225001:272001');
+        expect(url.searchParams.get('f_TPR')).toBe('r86400');
+      }
+    } finally {
+      controller.deactivate();
+      ctx.notifyInvalidated();
+      document.removeEventListener('click', openRedirectedPane, true);
+    }
+  });
+
   it('card novo durante a coleta entra no mesmo envelope', async () => {
     mountJobsList(2);
     const { envelopes, deactivate } = await activateJobs();
