@@ -96,6 +96,10 @@ tests/fixtures/         fixtures LinkedIn publicações, LinkedIn vagas (.refs/)
 
 Fluxo: o content script solicita `browser.runtime.sendMessage({ type: 'capture:resolve-run', url })` e recebe o contexto da captura. Depois de extrair o DOM, envia `browser.runtime.sendMessage({ type: 'capture:submit-envelope', envelope, context })`, usando o contexto retornado. O background valida a associação, persiste o envelope na fila durável e envia a `/api/page-captures` com a credencial individual. A confirmação durável do backend permite avançar; extração, Clef e triagem têm acompanhamento separado. Falhas recuperáveis permanecem na fila para retomada. O token nunca entra nas mensagens, no DOM ou nos logs.
 
+Uma tentativa que reconheceu uma reserva não passa silenciosamente para modo manual se a pesquisa mudar ou a reserva deixar de ser válida. O vínculo é mantido por aba/frame, credencial, proprietário e API, inclusive após reload. O erro `reservation_changed` bloqueia a coleta e aparece no painel; não autoriza ignorar filtros nem enviar o identificador antigo para outra pesquisa. Captura manual inicialmente sem reserva continua disponível em outra aba. Não existe botão novo para abandonar o vínculo.
+
+Após perda de ACK, a fila e o contexto permitem repetir somente o envelope imutável. A API decide deduplicação ou conflito por expiração; replay não renova reserva. Falha auxiliar ao guardar recibo ou status não transforma um ACK recebido em falha da captura.
+
 Não existe main world, `unsafeWindow`, injeção de script nem dependência funcional do Violentmonkey — tudo roda no mundo isolado padrão dos content scripts.
 
 ## Limitações conhecidas
