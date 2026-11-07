@@ -2,9 +2,9 @@
 
 ## Escopo e estado
 
-Registro da homologação automatizada em 07/11/2026, sobre as bases #36 (`630acfa`) e #37 (`98f6e4d`). Esta entrega adiciona testes, sem alterar código de produto, migrations ou configuração persistente da aplicação. Os ensaios automatizados e restores usam dados sintéticos e bancos descartáveis. Nenhum envio real de candidatura foi autorizado ou executado.
+Registro das evidências automatizadas e do smoke real supervisionado em 07/11/2026, sobre as bases #36 (`630acfa`) e #37 (`98f6e4d`). Os ensaios automatizados e restores usam dados sintéticos e bancos descartáveis; essa restrição não descreve o smoke externo, que coletou páginas reais e está registrado separadamente abaixo. As correções motivadas pelo smoke estão em validação. Nenhum envio real de candidatura foi autorizado ou executado.
 
-Esta evidência **não significa homologação integral**. Suíte completa, fluxo integrado controlado, upgrade e restore foram validados conforme os limites abaixo. O smoke real Hermes nas três superfícies e a implantação dos backups continuam pendentes. O fechamento de #29 ocorreu por pedido humano, sem comprovação integral das três superfícies.
+Esta evidência **não significa homologação integral**. Suíte completa, fluxo integrado controlado, upgrade e restore possuem o baseline automatizado registrado abaixo, anterior às correções do smoke. O retorno real do Hermes foi recebido: LinkedIn publicações teve duas páginas com captura completa e ACK correlacionado; LinkedIn Jobs e Indeed Jobs permaneceram bloqueados nos limites descritos adiante. A revalidação dessas superfícies e a implantação dos backups continuam pendentes. O fechamento de #29 ocorreu por pedido humano, sem comprovação integral das três superfícies.
 
 ## Isolamento das execuções focadas
 
@@ -43,7 +43,7 @@ Na revisão STANDARDS38, o recorte foi reexecutado após restringir a guarda e u
 
 Após adicionar o opt-in PostgreSQL, o recorte SQLite do upgrade passou com **1 teste, 56 assertions, status de saída 0**. Após acrescentar o backup/restore SQLite, o mesmo recorte passou com **1 teste, 82 assertions, status de saída 0**. São execuções sobrepostas, não coberturas somáveis. Pint passou novamente nesse arquivo. Uma configuração temporária com `JOBORA_UPGRADE_PG_DATABASE=jobora_t24_wrong_testing` foi recusada com status `2` e a mensagem `Upgrade PostgreSQL exige driver pgsql e banco exclusivo jobora_t24_upgrade_20261107_testing; nenhuma conexão foi aberta.` Nenhuma execução PostgreSQL foi feita pela frente focada; os resultados PostgreSQL comunicados pela sessão principal estão descritos adiante.
 
-Não houve mudança funcional de produto nem demonstração de RED funcional. As execuções iniciais exigiram correções nos próprios testes, incluindo composição do trait, preparação do SQLite no container e expectativas compatíveis com os estados existentes. O resultado final caracteriza o comportamento atual.
+Nos testes de caracterização de preservação e readiness acima, não houve mudança funcional de produto nem demonstração de RED funcional. As execuções iniciais exigiram correções nos próprios testes, incluindo composição do trait, preparação do SQLite no container e expectativas compatíveis com os estados existentes. As regressões e correções posteriores da extensão motivadas pelo smoke têm evidências separadas abaixo.
 
 ## Preservação V1 durante o upgrade
 
@@ -91,11 +91,11 @@ A [política de retenção](JOBORA_V2_RETENTION.md#backups--requisito-operaciona
 
 O [baseline anterior](JOBORA_V2_BASELINE.md) permanece histórico, inclusive suas limitações e o incidente de isolamento registrado. Esta entrega não reclassifica evidências anteriores como se não existissem.
 
-## Fluxo integrado e validação final
+## Fluxo integrado e baseline automatizado anterior ao smoke real
 
 O [cenário integrado PHP](../tests/Feature/JoboraV2HomologationTest.php) percorre duas contas com dados positivos e três superfícies. Exercita descoberta, captura e replay, worker real, triagem explícita, perfil confirmado, matching, adequação, download com hash, confirmação humana Telegram, aprovação, reserva, consumo único, sucesso e desconhecido controlados, revogação e reconciliação pela sessão proprietária. O tracking permanece independente. A execução focada passou com **1 teste e 389 assertions**.
 
-O [cenário da extensão](../extension/tests/v2-homologation.test.ts) usa controllers e background reais com transporte controlado e [fixture compartilhada](../extension/tests/fixtures/v2-homologation.json). Verifica a execução recebida sem normalizar seu ID, confirmação durável e replay após recriação. São **4 testes**, incluídos nos 213 testes finais da extensão. A fixture compartilhada comprova compatibilidade do envelope; não representa transporte real entre a extensão instalada e o servidor durante o teste PHP.
+O [cenário da extensão](../extension/tests/v2-homologation.test.ts) usa controllers e background reais com transporte controlado e [fixture compartilhada](../extension/tests/fixtures/v2-homologation.json). Verifica a execução recebida sem normalizar seu ID, confirmação durável e replay após recriação. São **4 testes**, incluídos nos 213 testes do baseline da extensão. A fixture compartilhada comprova compatibilidade do envelope; não representa transporte real entre a extensão instalada e o servidor durante o teste PHP.
 
 HTTP MCP passa pelo Kernel autenticado da aplicação, não por conexão de rede externa. Providers e PDF são fronteiras simuladas. Storage, chaves Passport e conexões de fila ficam isolados. O worker mantém limite finito de memória, calculado sobre o consumo inicial do processo mais 64 MiB, e exige saída 0 e drenagem dos jobs. Isso corrigiu a falha inicial por limite de memória (`exit 12`), sem alterar limites do produto nem aceitar esse código como sucesso. Os testes antigos da extensão passaram a aguardar estado observável e crypto assíncrono, preservando assertions e cleanup.
 
@@ -119,8 +119,57 @@ bun run build
 - **Upgrade e restore:** resultados delimitados registrados acima. O banco PostgreSQL de origem contém dados; a guarda deve recusar nova execução, não limpar o banco. Restore SQLite nativo inclui integridade, FKs e preservação. Nenhum desses ensaios implanta backups ou autoriza restaurar HTML expirado.
 - **Navegador:** telas de execuções, operações e capturas responderam 200. Inspeções somente leitura foram exercitadas em desktop 1479×758 e mobile 390×844, sem JavaScript inesperado. Lentes do backend foram consultadas; repetições de eager loading entre resolução da ação, tabela e detalhe foram classificadas como limitadas, não como loop por registro. Essa verificação não comprova todos os caminhos da interface de candidatura nem o smoke externo.
 
+Os números desta seção descrevem o baseline anterior ao smoke após `ba8ec7f`. Os resultados das correções motivadas pelo smoke estão registrados em seção própria abaixo; não são somados ao baseline como coberturas independentes.
+
+## Smoke real Hermes de 07/11/2026 — resultado parcial
+
+As horas desta seção estão em **UTC**, salvo indicação contrária; BRT corresponde a UTC−3. Os registros abaixo combinam o relatório do Hermes com a correlação de banco feita em modo somente leitura pela sessão principal. O banco confirmou os identificadores e o proprietário `4`, sem que essa consulta executasse novas coletas ou alterasse agendas.
+
+### LinkedIn publicações: duas páginas completas
+
+- **Fonte 1, execução 2, captura 14:** `execution_id=901563b9-c9da-4dff-b0e3-d797d620a777`. Reserva em **17:13:04 UTC**, captura em **17:13:35 UTC** e ACK observado no relatório às **17:13:41 UTC**, antes da navegação. Cobertura `complete`, **36/36 blocos**.
+- **Fonte 3, execução 3, captura 15:** `execution_id=1f45200c-f1dd-4749-8aeb-95cad7784b19`. Reserva em **17:13:55 UTC**, captura em **17:14:07 UTC** e ACK observado no relatório às **17:14:26 UTC**. Cobertura `complete`, **2/2 blocos**.
+
+A consulta confirmou os vínculos de fonte, execução e captura, o proprietário, a conclusão completa, os blocos e o próximo agendamento diário. Isso registra sucesso delimitado em **uma superfície, com duas páginas**, não nas três superfícies do smoke. A sessão principal não inspecionou retrospectivamente console, JavaScript ou rede dessas páginas LinkedIn; não há alegação de ausência de erros nesses canais.
+
+### LinkedIn Jobs: upload confirmado, sem conteúdo capturado
+
+**Fonte 5, execução 4, captura 18:** `execution_id=1bc2db7c-c156-4567-9bc7-2e9e84ce1c4f`. O evento de acesso `1` registrou `failure` às **17:15:30 UTC**, antes do upload. A captura foi registrada às **17:15:54 UTC** com cobertura `partial`, motivo `no_content` e **zero blocos**. O banco confirmou execução `completed`, `completion_status=partial`, `last_success_at=NULL` e próximo vencimento em **08/11/2026 às 17:15:54 UTC**.
+
+Nesse caso, `completed` significa que houve confirmação do upload, **não sucesso da busca nem coleta de vagas**. O redirecionamento observado foi de `/jobs/search/` para `/jobs/search-results`, com parâmetros de interface `currentJobId`, `skipRedirect` e `infoNotice`, mas também com filtros semânticos adicionais `f_TPR` e `f_SAL`. Esses filtros não podem ser ignorados como se fossem decoração da URL para forçar equivalência com a fonte original. O usuário não aceitou as restrições adicionais; os filtros originalmente aprovados devem ser restaurados no próximo smoke.
+
+### Indeed Jobs: sem captura associada na observação
+
+**Fonte 6, execução 5:** `execution_id=69457432-cefc-4480-b0f8-3cf3d3a1baba`, sem captura associada. O evento `2` registrou `failure` às **17:22:30 UTC**. O Hermes observou respostas `200` para validação da credencial e resolução da execução no service worker, mas nenhum `POST` de captura durante a janela de **30 segundos** examinada. Essa janela é evidência limitada, não prova de ausência de tentativas fora dela.
+
+Com a abertura da página autorizada pelo usuário, a sessão principal inspecionou o DOM por CDP em modo somente leitura e confirmou o painel **Job Post Details** sem `#jobDescriptionText`. A inspeção não navegou nem enviou captura. O fragmento sanitizado ficou em `/tmp/opencode/indeed-job-details-20261107.html`; esse artefato de uma vaga real não é adicionado ao Git. A fixture usada nos testes conserva somente a estrutura necessária e substitui os dados por nomes e descrições fictícios. O diagnóstico DOM e a janela de rede não constituem aprovação do fluxo real da versão corrigida.
+
+### Alterações observadas, correções e limites
+
+Segundo o relatório Hermes, foram criadas as fontes **5 e 6**, com `frequency_minutes=1440`, e a fonte **4** foi adiada para **08/11/2026 às 17:15:00 UTC**, versão **2**. A sessão principal não reverteu nem alterou qualquer fonte ou agenda. Essas mudanças de estado são atribuídas ao smoke relatado, não às consultas posteriores somente leitura.
+
+O usuário aprovou uma mudança de **código para comportamento futuro**: permitir retentativa de captura parcial `no_content` com zero blocos somente depois do vencimento da reserva original. Essa política não autoriza reparo automático das agendas existentes. O backend implementa essa regra com confirmação durável separada de sucesso, preservando adiamentos explícitos, desativação, mudança de identidade e replay. Seu funcionamento está coberto automaticamente, mas ainda não foi comprovado por nova coleta real.
+
+As correções da extensão passaram nos recortes focados: **29 testes LinkedIn** e **28 testes Indeed**. No Indeed, o RED com a estrutura real reproduziu detalhe ausente e título incorreto; o GREEN usa descrição delimitada e mantém compatibilidade com o DOM antigo e a correlação de identidade. Outra regressão reproduziu título atualizado com descrição da vaga anterior: sem identidade explícita, a troca de vaga agora exige mudança no texto da descrição, não apenas no cabeçalho ou spinner. Sem evidência suficiente, a captura permanece parcial. Esses testes não equivalem a captura real usando a nova versão instalada.
+
+Para o próximo smoke, o usuário autorizou posteriormente uma antecipação pontual **somente de `next_due_at` da fonte 5**, após releitura da sua versão atual. Essa autorização ainda não foi executada pela sessão principal. Frequências, URLs, filtros e demais fontes permanecem fora dessa permissão; em particular, a fonte 4 não deve ser reordenada para facilitar o teste. Os filtros originalmente aprovados devem ser restaurados no navegador, sem adotar silenciosamente os filtros extras do LinkedIn.
+
+Não houve solicitação real de triagem, matching, preparação, aprovação ou envio de candidatura durante esse smoke; somente o Clef automático participou do processamento de IA observado. A ausência de inspeção retrospectiva de JavaScript e rede no LinkedIn permanece uma limitação. Os backups operacionais continuam não implantados.
+
+## Validação das correções motivadas pelo smoke
+
+- **LinkedIn Jobs:** aceita os caminhos exatos `/jobs/search-results` e `/jobs/search`, preservando origem, pesquisa e proveniência. O comparador reutiliza tracking conhecido, desconsidera somente as decorações de interface declaradas e mantém filtros reais, opções desconhecidas e valores duplicados relevantes. Hosts permitidos distintos não são unificados; os hashes persistidos não foram alterados. Divergência na URL final de uma captura reservada é rejeitada antes de persistir.
+- **Agenda e falhas:** `partial/no_content/0` mantém ACK e histórico sem registrar sucesso e usa o vencimento original da reserva para nova elegibilidade, sem antecipar adiamentos explícitos. Falha inesperada de metadados preserva objeto órfão reconciliável; cleanup do objeto perdedor fica restrito a conflito conhecido. Os testes verificam a exceção injetada, não apenas um HTTP 500 genérico.
+- **Fixture de ambiguidade:** a segunda reserva agora possui URL inicial e superfície coerentes com sua fonte. A expectativa de conflito entre duas reservas realmente correspondentes foi preservada.
+- **PostgreSQL ampliado:** **214 testes, 1.596 assertions, saída 0**, abrangendo `DiscoveryRuns`, `DiscoverySources`, `CaptureIngestion` e `DiscoveryDomain`. Configuração `/tmp/opencode/jobora38-smoke-pgsql.xml`, banco exclusivo `jobora_t22_20261107_testing`; log `/tmp/opencode/jobora38-smoke-fixes-pg-final.log`.
+- **Suíte PHP completa após as correções:** **1.482 casos, 1.469 aprovados, 13 ignorados e 11.517 assertions, saída 0**. Configuração `/tmp/opencode/jobora38-smoke-sqlite.xml`, SQLite exclusivo `/tmp/opencode/jobora38-final-testing.sqlite`; log `/tmp/opencode/jobora38-smoke-fixes-full-php.log`. As oito corridas históricas constam da execução PostgreSQL; as cinco corridas de envio possuem evidência PostgreSQL separada e código não alterado por esta correção.
+- **Extensão:** **229 testes em 30 arquivos**, typecheck e build aprovados. Os resultados anteriores de 227 testes precedem a proteção adicional contra descrição obsoleta. O build atualizado fica em `extension/.output/chrome-mv3`, sem adicionar artefatos ao Git.
+- **Revisão e estilo:** revisões independentes de spec e padrões concluídas. Achados de tracking, host e descrição obsoleta foram corrigidos e revalidados; comentários explicativos reescritos foram restaurados. Pint nos arquivos PHP alterados e whitespace checks passaram.
+
+As configurações temporárias foram recriadas após reinício do servidor com bootstrap/diretórios absolutos e variáveis de teste forçadas. Artefatos antigos em `/tmp/opencode` podem não sobreviver a reinícios; seus caminhos históricos não implicam disponibilidade permanente. Nenhuma agenda real foi alterada pelos testes ou por essa recuperação. A validação automatizada não converte o smoke anterior parcialmente falho em sucesso das três superfícies.
+
 ## Pendências para aceite integral
 
 - Implantar e verificar a política de backups, incluindo retenção das cópias e prevenção de restauração de bruto expirado.
-- Concluir smoke supervisionado com Hermes e extensão instalada em LinkedIn publicações, LinkedIn Jobs e Indeed Jobs, correlacionando confirmações duráveis e diagnósticos JS, rede e backend. O usuário autorizou esse smoke, mas o retorno ainda não foi recebido.
+- Retomar o smoke supervisionado com Hermes e a versão corrigida da extensão instalada, respeitando a autorização do usuário para a próxima interação. LinkedIn publicações já possui evidência parcial positiva em duas páginas; LinkedIn Jobs e Indeed Jobs exigem nova validação, com filtros originais restaurados e correlação de ACK, JavaScript, rede e backend. Não inventar diagnósticos retrospectivos das páginas anteriores.
 - Não confundir autorização do smoke ou destes tickets com aprovação de uma candidatura real. Nenhum envio real foi executado ou autorizado por esta entrega.
