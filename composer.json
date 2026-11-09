@@ -11,6 +11,7 @@
         "laravel/ai": "^0.10.3",
         "laravel/framework": "^13.17",
         "laravel/mcp": "^0.9",
+        "laravel/passport": "^13.10",
         "laravel/reverb": "^1.0",
         "laravel/tinker": "^3.0",
         "spatie/laravel-pdf": "^2.12"
