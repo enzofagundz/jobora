@@ -227,6 +227,20 @@ Não houve solicitação real de triagem, matching, preparação, aprovação ou
 
 O build atualizado está em `extension/.output/chrome-mv3`, fora do Git. Isso não comprova a extensão recarregada no navegador nem uma nova coleta real. Fontes, agendas e capturas 20–22 não foram modificadas ou apagadas pela correção.
 
+## Pré-checagem posterior da fonte 5 — sem reserva ou coleta
+
+O Hermes relatou uma nova pré-checagem pelo Browse sobre o Brave real, sem CDP nem reinício do navegador. Informou Browse `0.0.14`, extensão do Browse `0.0.10`, protocolo 3 compatível e navegador pareado `brave-fedora`. Esses dados descrevem o transporte usado pelo Hermes, não uma nova verificação independente feita pela sessão principal nem a versão da extensão Jobora. A configuração nativa do Hermes não foi alterada pela sessão principal.
+
+Segundo o relatório, a fonte 5 permanecia na versão 2, ativa, com `next_due_at=07/11/2026 16:54 BRT`. Não houve nova reserva. A execução 7 continuava registrada como `active`, mas com `expires_at` vencido; esse registro não foi tratado como autorização vigente.
+
+A navegação começou na URL original `/jobs/search/?keywords=Laravel&f_WT=2`. Em aproximadamente 1,5, 4 e 9 segundos, o LinkedIn alternou para `/jobs/search-results`, acrescentou `f_SAL` e `f_TPR=r86400` e retirou `f_WT=2` da URL. A interface mostrava os chips “Últimas 24 horas” e “Remota”, assuntos adicionais, um resultado e aviso de ausência de resultados exatos com apresentação de critérios semelhantes. O chip remoto, isoladamente, não comprova equivalência de todos os filtros nem uma pesquisa exata.
+
+As tentativas pela interface de abrir “Todos os filtros” e alterar a data não produziram opções utilizáveis ou restauraram a pesquisa original; a navegação limpa reaplicou as restrições. Não foi usado `history.replaceState`, manipulação de DOM ou URL cosmética. A conclusão delimitada é que **a fonte 5, com sua intenção atual, permaneceu bloqueada na pré-checagem**. Isso não demonstra impossibilidade geral de capturar LinkedIn Jobs com outras pesquisas autorizadas.
+
+“Ativar captura” permaneceu desativado e nenhum painel Jobora apareceu. O Hermes informou ausência de novas capturas, exclusões ou alterações de fontes, frequências, agendas e permissões. Foram observados DOM, chips, presença do painel e estado via MCP; console, rede e logs backend não foram inspecionados nessa rodada. Portanto, não há alegação de ausência de erros nesses canais.
+
+A interrupção antes de reservar ou coletar respeitou o roteiro e evitou novos registros manuais. **Essa rodada não exercitou o bloqueio `reservation_changed` após uma reserva reconhecida**, nem produziu ACK vinculado a uma nova execução; não substitui a validação supervisionada pendente dessa transição. Nenhum teste, build, coleta ou alteração de configuração foi executado pela sessão principal ao registrar o relatório.
+
 ## Pendências para aceite integral
 
 - Implantar e verificar a política de backups, incluindo retenção das cópias e prevenção de restauração de bruto expirado.
