@@ -224,13 +224,18 @@ class PublicationExtractionProcessor
 
     private function currentCaptureId(Publication $publication): ?int
     {
-        if ($publication->content_version === null) {
+        $observedAt = $publication->last_observed_at;
+
+        if ($publication->content_version === null || $observedAt === null) {
             return null;
         }
 
+        // Só a captura que estabeleceu a versão no instante corrente conta:
+        // recapturas antigas do mesmo conteúdo também carregam essa versão.
         $captureId = PublicationObservation::query()
             ->where('publication_id', $publication->id)
             ->where('content_version', $publication->content_version)
+            ->where('observed_at', $observedAt)
             ->max('page_capture_id');
 
         return $captureId === null ? null : (int) $captureId;

@@ -608,6 +608,37 @@ it('trava todas as publicações em ordem de id antes de aplicar conteúdo', fun
         ->and($operation->refresh()->status)->toBe(AiOperationStatus::Completed);
 });
 
+it('does not let an older same-content capture inflate the same-second tie-break', function () {
+    Queue::fake([ProcessAiOperation::class]);
+    $user = User::factory()->create();
+    $base = [[
+        'block_id' => 'post-1',
+        'platform_id' => 'urn:li:activity:15',
+        'permalink' => 'https://www.linkedin.com/feed/update/urn:li:activity:15',
+        'text' => 'Vaga PHP',
+    ]];
+    $changed = $base;
+    $changed[0]['text'] = 'Vaga PHP sênior';
+
+    [$first, $firstOperation] = publicationExtractionIngest($user, $base, '2026-08-18T10:00:00+00:00');
+    [$sameSecond, $sameSecondOperation] = publicationExtractionIngest($user, $changed, '2026-08-18T10:00:00+00:00');
+    [$staleRecapture, $staleOperation] = publicationExtractionIngest($user, $base, '2026-08-18T09:00:00+00:00');
+
+    // A recaptura antiga de mesmo conteúdo é processada depois, mas não é dona do instante.
+    foreach ([$firstOperation, $staleOperation, $sameSecondOperation] as $operation) {
+        (new ProcessAiOperation($operation->id, $operation->run_token, $operation->attempt_token))
+            ->handle(app(AiOperationService::class));
+    }
+
+    $publication = Publication::query()->sole();
+
+    expect($publication->content)->toBe('Vaga PHP sênior')
+        ->and($publication->content_version)->toBe(2)
+        ->and($publication->observations()->where('page_capture_id', $first->id)->sole()->content_version)->toBe(1)
+        ->and($publication->observations()->where('page_capture_id', $staleRecapture->id)->sole()->content_version)->toBe(1)
+        ->and($publication->observations()->where('page_capture_id', $sameSecond->id)->sole()->content_version)->toBe(2);
+});
+
 it('records an explicit identity conflict scoped to the capture and user', function () {
     $user = User::factory()->create();
     config(['jobora.mcp.user' => $user->email]);
