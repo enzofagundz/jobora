@@ -221,6 +221,40 @@ describe('linkedin-jobs controller — envelope consolidado', () => {
     deactivate();
   });
 
+  it('card hidratado só por atributos entra no mesmo envelope', async () => {
+    mountJobsList(1);
+    const { envelopes, deactivate } = await activateJobs();
+    const list = document.querySelector('.scaffold-layout__list-container') as HTMLElement;
+    list.insertAdjacentHTML(
+      'beforeend',
+      `<li class="scaffold-layout__list-item">
+        <div class="job-card-container">
+          <a class="job-card-container__link">Vaga tardia</a>
+          <div class="artdeco-entity-lockup__subtitle">Empresa 777</div>
+        </div>
+      </li>`,
+    );
+    await advance(OBSERVER_DEBOUNCE_MS + 100);
+
+    // Item já está no DOM: só os atributos chegam depois.
+    const shell = list.querySelector('li:last-child .job-card-container') as HTMLElement;
+    shell.setAttribute('data-job-id', '777');
+    shell.querySelector('a')!.setAttribute('href', '/jobs/view/777/');
+    await advance(OBSERVER_DEBOUNCE_MS + 100);
+    await advance(5000);
+
+    expect(envelopes).toHaveLength(1);
+    expect(
+      envelopes[0]!.blocks
+        .filter((block) => block.kind === 'card')
+        .map((block) => block.platform_id),
+    ).toEqual(['1', '777']);
+    expect(
+      envelopes[0]!.blocks.filter((block) => block.kind === 'detail'),
+    ).toHaveLength(2);
+    deactivate();
+  });
+
   it('detalhe antigo nunca é associado ao card novo, mesmo com título igual', async () => {
     document.removeEventListener('click', spaClickHandler, true);
     const delayedHandler = (event: Event) => {

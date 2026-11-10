@@ -113,6 +113,13 @@ export function createLinkedInJobsController(): LinkedInJobsController {
     collectCandidates(node);
   }
 
+  function enqueueAttributeTarget(node: Node): void {
+    if (!(node instanceof Element)) return;
+    if (!isCardCandidate(node) || pendingSet.has(node)) return;
+    pendingSet.add(node);
+    pendingElements.push(node);
+  }
+
   async function processCard(el: Element, current: JobAttempt, generation: number): Promise<void> {
     if (session.isInvalidElement(el) || current.cancelled) return;
 
@@ -214,6 +221,8 @@ export function createLinkedInJobsController(): LinkedInJobsController {
       for (const record of records) {
         for (const node of Array.from(record.addedNodes)) enqueueMutationNode(node);
         for (const node of Array.from(record.removedNodes)) enqueueMutationNode(node);
+        // Lista virtualizada hidrata data-job-id/href já com o card no DOM.
+        if (record.type === 'attributes') enqueueAttributeTarget(record.target);
       }
     }
     clearTimeout(debounceTimer);
