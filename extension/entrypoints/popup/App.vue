@@ -104,11 +104,21 @@ async function refreshQueue(): Promise<void> {
     if (request !== queueRequest) return;
     if (isQueueStatusResponse(response)) {
       queueStatus.value = response.status;
+      // Confirmação destrutiva não sobrevive a uma lista que não tem mais o item.
+      if (
+        pendingDiscardKey.value !== null &&
+        !response.status.items.some(
+          (item) => item.idempotency_key === pendingDiscardKey.value,
+        )
+      ) {
+        pendingDiscardKey.value = null;
+      }
       return;
     }
     if (isQueueErrorResponse(response) && response.error === 'auth') {
       queueStatus.value = null;
       queueAuthRequired.value = true;
+      pendingDiscardKey.value = null;
       return;
     }
     queueError.value = true;
@@ -392,6 +402,7 @@ async function disconnect(): Promise<void> {
   await apiToken.removeValue();
   await lastApiStatus.setValue(null);
   validatedToken.value = '';
+  pendingDiscardKey.value = null;
   message.value = 'Token removido.';
   void refreshQueue();
 }

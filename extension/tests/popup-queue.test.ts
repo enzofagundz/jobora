@@ -408,6 +408,46 @@ describe('popup — fila de capturas', () => {
     expect(blockedRow(container, '422')).toBeTruthy();
   });
 
+  it('confirmação de descarte não reaparece após desconectar e reconectar', async () => {
+    const blockedItem = item({
+      idempotency_key: 'cap-422',
+      state: 'blocked',
+      attempts: 1,
+      blocked_reason: 'invalid',
+      last_error: 'invalid',
+      last_status: 422,
+    });
+
+    await mountWithHandler(async () => {
+      const token = await apiToken.getValue();
+      if (!token) return queueFailure('auth');
+      return queueResponse(status([blockedItem]));
+    });
+
+    const row = blockedRow(container, '422');
+    expect(row).toBeTruthy();
+
+    buttonByText(row!, 'Descartar')!.click();
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('Confirmar descarte');
+    });
+
+    buttonByText(container, 'Desconectar')!.click();
+    await vi.waitFor(() => {
+      expect(container.textContent).not.toContain('422');
+    });
+
+    await apiToken.setValue(TOKEN);
+    await captureEnabled.setValue(true);
+    buttonByText(container, 'Atualizar')!.click();
+    await vi.waitFor(() => {
+      expect(blockedRow(container, '422')).toBeTruthy();
+    });
+
+    expect(container.textContent).not.toContain('Confirmar descarte');
+    expect(sentMessages().some((message) => message.type === 'capture:queue-discard')).toBe(false);
+  });
+
   it('resultado tardio em lastApiStatus recarrega a fila', async () => {
     await mountWith(
       status([
