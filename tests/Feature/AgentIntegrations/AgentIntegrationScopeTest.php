@@ -1,11 +1,42 @@
 <?php
 
 use App\Enums\AgentIntegrationScope;
+use App\Models\JobPosting;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Feature\AgentIntegrations\AgentIntegrationTestHelpers as Helpers;
+use Tests\Feature\Mcp\McpTestHelpers;
 
 uses(RefreshDatabase::class);
+
+it('separates resume and adaptation capabilities when reading resource uris', function (AgentIntegrationScope $scope, bool $adaptation, bool $allowed) {
+    $user = User::factory()->create();
+    $client = Helpers::client();
+    Helpers::integration($user, $client, [$scope]);
+    $token = Helpers::accessToken($user, $client);
+    $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
+    McpTestHelpers::adaptation($user, $posting);
+
+    $response = $this->withToken($token)->postJson('/mcp', [
+        'jsonrpc' => '2.0',
+        'id' => 1,
+        'method' => 'resources/read',
+        'params' => ['uri' => $adaptation ? 'jobora://resume-adaptations/'.$posting->id : 'jobora://resume'],
+    ])->assertOk();
+
+    $body = json_decode($response->json('result.contents.0.text'), true);
+
+    expect($body['ok'])->toBe($allowed);
+
+    if (! $allowed) {
+        expect($body['error']['code'])->toBe('forbidden');
+    }
+})->with([
+    'ats reads adaptations' => [AgentIntegrationScope::AtsRead, true, true],
+    'resume cannot read adaptations' => [AgentIntegrationScope::ResumeRead, true, false],
+    'resume reads resume' => [AgentIntegrationScope::ResumeRead, false, true],
+    'ats cannot read resume' => [AgentIntegrationScope::AtsRead, false, false],
+]);
 
 it('blocks a tool when the integration lacks its internal capability', function () {
     $user = User::factory()->create();

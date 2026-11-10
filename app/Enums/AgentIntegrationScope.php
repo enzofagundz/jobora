@@ -132,7 +132,8 @@ enum AgentIntegrationScope: string
     public static function forResource(string $resource): self
     {
         return match ($resource) {
-            ResumeResource::class, ResumeAdaptationResource::class => self::ResumeRead,
+            ResumeResource::class => self::ResumeRead,
+            ResumeAdaptationResource::class => self::AtsRead,
             JobPostingResource::class => self::JobPostingsRead,
             MarketSnapshotResource::class => self::MarketRead,
             ProfessionalCompetenciesResource::class => self::CompetenciesRead,
