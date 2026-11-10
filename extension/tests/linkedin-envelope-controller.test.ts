@@ -480,6 +480,48 @@ describe('LinkedIn publicações — envelope consolidado', () => {
     await advance(0);
   });
 
+  it('falha de correlação sem contexto não descarta os posts coletados', async () => {
+    mountFeed(2);
+    const envelopes: CaptureEnvelope[] = [];
+    let resolves = 0;
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockImplementation(async (raw: unknown) => {
+      const message = raw as CaptureMessage;
+      if (message.type === 'capture:resolve-run') {
+        resolves++;
+        if (resolves === 1) return { ok: false, error: 'credential_changed' };
+        return {
+          ok: true,
+          run: {
+            executionId: 'exec-1',
+            source: 'linkedin',
+            surface: 'linkedin_publications',
+            initialUrl: SEARCH_URL,
+            expiresAt: null,
+          },
+          context: 'ctx-test',
+        };
+      }
+      if (message.type === 'capture:submit-envelope') {
+        envelopes.push(message.envelope);
+        return { ok: true, duplicate: false, status: 201, coverage: 'complete' };
+      }
+      return { ok: true, duplicate: false };
+    });
+
+    const controller = createLinkedInController();
+    const active = controller.activate(new ContentScriptContext(`test-context-${Math.random()}`));
+    await advance(200);
+    await active;
+    await advance(1200 * 8);
+
+    expect(resolves).toBeGreaterThan(1);
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]!.blocks).toHaveLength(2);
+
+    controller.deactivate();
+    await advance(0);
+  });
+
   it('busca sem cards no primeiro scan não finaliza como vazia', async () => {
     document.body.innerHTML = '<div class="feed"></div>';
     const { envelopes } = setupMessaging();

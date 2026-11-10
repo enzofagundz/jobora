@@ -17,6 +17,8 @@ import { countPosts, runJumpToEnd } from './jump';
 import { createLinkedInPublicationsBuilder } from './envelope';
 
 const CAPTURE_SETTLE_MS = 1500;
+const CONTEXT_RETRY_MS = 2000;
+const CONTEXT_MAX_ATTEMPTS = 3;
 
 export interface LinkedInCaptureState {
   captured: boolean;
@@ -51,6 +53,8 @@ interface CaptureAttempt {
   identityFailure: boolean;
   occurrenceIdentities: WeakMap<Element, { signature: string; identity: string }>;
   nextOccurrenceId: number;
+  /** Tentativas de obter contexto de credencial sem descartar o builder. */
+  contextAttempts: number;
 }
 
 /** Uma instância por aba; activate/deactivate por rota SPA. */
@@ -61,6 +65,7 @@ export function createLinkedInController(
   let observer: MutationObserver | null = null;
   let debounceTimer: number | undefined;
   let finalizeTimer: number | undefined;
+  let contextTimer: number | undefined;
   let scanRunning = false;
   let rescanQueued = false;
   let panelVisible = true;
@@ -207,7 +212,10 @@ export function createLinkedInController(
       }
     }
     // Lote que ainda pode crescer nunca finaliza antes de ser processado.
-    if (pendingElements.length > pendingBefore) clearTimeout(finalizeTimer);
+    if (pendingElements.length > pendingBefore) {
+      clearTimeout(finalizeTimer);
+      if (attempt) attempt.contextAttempts = 0;
+    }
     clearTimeout(debounceTimer);
     debounceTimer = window.setTimeout(() => void processNewPosts(), OBSERVER_DEBOUNCE_MS);
   }
@@ -263,6 +271,14 @@ export function createLinkedInController(
     reason: CaptureCoverageReason | null,
   ): Promise<void> {
     if (!current || current.finalized || current.blocked) return;
+
+    if (!current.credentialContext) {
+      // Sem contexto o envio é impossível: preserva o builder e tenta de novo.
+      session.counters.phase = 'error';
+      scheduleContextRetry(current, reason);
+      return;
+    }
+
     current.finalized = true;
     clearTimeout(finalizeTimer);
 
@@ -271,10 +287,6 @@ export function createLinkedInController(
       reason ??
       (current.identityFailure ? 'timeout' : blocks.length === 0 ? 'no_content' : null);
     const finalUrl = isLinkedInRoute(location) ? location.href : current.initialUrl;
-    if (!current.credentialContext) {
-      session.counters.phase = 'error';
-      return;
-    }
 
     const envelope = current.builder.toEnvelope({
       executionId: current.executionId,
@@ -388,6 +400,26 @@ export function createLinkedInController(
     }
   }
 
+  function scheduleContextRetry(
+    current: CaptureAttempt,
+    reason: CaptureCoverageReason | null,
+  ): void {
+    if (current.contextAttempts >= CONTEXT_MAX_ATTEMPTS) return;
+
+    current.contextAttempts++;
+    clearTimeout(contextTimer);
+    contextTimer = window.setTimeout(() => {
+      void (async () => {
+        if (attempt !== current || current.finalized || current.blocked) return;
+        if (!current.credentialContext) {
+          await resolveAttempt(current, current.generation);
+        }
+        if (attempt !== current || current.finalized || current.blocked) return;
+        await finalizeAttempt(current, reason);
+      })();
+    }, CONTEXT_RETRY_MS);
+  }
+
   function newAttempt(generation: number): CaptureAttempt {
     const idempotencyKey = `linkedin-publications-${Date.now().toString(36)}-${Math.random()
       .toString(36)
@@ -407,6 +439,7 @@ export function createLinkedInController(
       identityFailure: false,
       occurrenceIdentities: new WeakMap(),
       nextOccurrenceId: 0,
+      contextAttempts: 0,
     };
   }
 
@@ -500,6 +533,7 @@ export function createLinkedInController(
     cancelJump();
     clearPreInteractionListeners();
     clearTimeout(finalizeTimer);
+    clearTimeout(contextTimer);
     if (escListener) {
       window.removeEventListener('keydown', escListener, { capture: true });
       escListener = null;
