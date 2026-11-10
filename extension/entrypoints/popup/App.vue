@@ -243,11 +243,14 @@ async function runQueueAction(
   message: { type: 'capture:queue-resume' | 'capture:queue-discard'; idempotency_key: string },
   successMessage: string,
 ): Promise<void> {
+  // A resposta da ação é o estado mais novo: refreshes em voo não podem sobrescrevê-la.
+  const request = ++queueRequest;
   actionKey.value = message.idempotency_key;
   actionError.value = '';
   actionInfo.value = '';
   try {
     const response: unknown = await browser.runtime.sendMessage(message);
+    if (request !== queueRequest) return;
     if (isQueueStatusResponse(response)) {
       queueStatus.value = response.status;
       queueAuthRequired.value = false;
@@ -265,6 +268,7 @@ async function runQueueAction(
     actionError.value = 'Não foi possível falar com o serviço. Tente de novo.';
   } finally {
     actionKey.value = null;
+    if (request === queueRequest) queueLoading.value = false;
   }
 }
 
