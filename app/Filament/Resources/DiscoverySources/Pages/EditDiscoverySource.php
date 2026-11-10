@@ -19,10 +19,6 @@ class EditDiscoverySource extends EditRecord
         $data['search_mode'] = filled($data['criteria'] ?? null) ? 'criteria' : 'url';
         $data['expected_version'] = $this->getRecord()->version;
 
-        if (isset($data['criteria']['operator'])) {
-            $data['criteria']['operator'] = $data['criteria']['operator'] === 'or' ? 'any' : 'all';
-        }
-
         return $data;
     }
 

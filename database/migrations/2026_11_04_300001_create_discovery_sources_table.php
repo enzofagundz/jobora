@@ -15,7 +15,7 @@ return new class extends Migration
             $table->string('source', 50);
             $table->string('surface', 50);
             $table->text('url');
-            $table->char('canonical_url_hash', 64);
+            $table->char('canonical_url_hash', 64)->nullable();
             $table->text('purpose')->nullable();
             $table->json('criteria')->nullable();
             $table->unsignedInteger('frequency_minutes');

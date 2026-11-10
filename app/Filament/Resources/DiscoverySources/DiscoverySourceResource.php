@@ -104,7 +104,7 @@ class DiscoverySourceResource extends Resource
         unset($data['search_mode'], $data['expected_version']);
 
         if ($mode === 'url') {
-            unset($data['criteria']);
+            $data['criteria'] = null;
         } else {
             unset($data['url']);
             $data['criteria'] = $data['criteria'] ?? [];
