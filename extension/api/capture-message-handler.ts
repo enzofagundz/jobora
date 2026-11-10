@@ -206,8 +206,17 @@ export function createCaptureMessageHandler(
   }
 
   async function flush(): Promise<void> {
+    const queued = await queue.status();
+    if (queued.items.length === 0) return;
+
+    const credential = await currentCredential();
+    if (!credential) return;
+
+    // Token/destino trocados deixariam a fila presa na credencial antiga.
+    await queue.retarget(targetOf(credential), () => ownerForStatus(credential));
+
     // Startup/retomada respeita backoff e Retry-After já persistidos.
-    await drainCurrent(false);
+    await drainCurrent(false, credential);
   }
 
   async function issueContext(
