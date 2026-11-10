@@ -876,6 +876,35 @@ it('skips recovery for expired raw, missing raw path or captures outside the win
     expect(AiOperation::query()->count())->toBe(0);
 });
 
+it('resolve a operação de extração mesmo com operação mais recente de outro alvo', function () {
+    $user = User::factory()->create();
+    [$capture, $operation] = publicationExtractionIngest($user, [[
+        'block_id' => 'post-1',
+        'platform_id' => 'urn:li:activity:46',
+        'permalink' => 'https://www.linkedin.com/feed/update/urn:li:activity:46',
+        'text' => 'Vaga com id compartilhado',
+    ]]);
+
+    AiOperation::query()->create([
+        'user_id' => $user->id,
+        'operation_key' => 'ats_score:job_posting:'.$capture->id,
+        'operation_type' => AiOperationType::AtsScore,
+        'target_type' => 'job_posting',
+        'target_id' => $capture->id,
+        'run_token' => (string) Str::uuid(),
+        'status' => AiOperationStatus::Completed,
+        'queued_at' => now(),
+        'expires_at' => now()->addDay(),
+        'input_snapshot' => [],
+        'input_fingerprint' => 'test',
+    ]);
+
+    expect($capture->refresh()->extractionOperation?->id)->toBe($operation->id);
+
+    // A recuperação não pode reenfileirar uma captura que já tem extração.
+    expect(PageCapture::query()->whereDoesntHave('extractionOperation')->count())->toBe(0);
+});
+
 it('keeps recovering stuck operations when the capture disk raises on exists', function () {
     Queue::fake([ProcessAiOperation::class]);
     $user = User::factory()->create();

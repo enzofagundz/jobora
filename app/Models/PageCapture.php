@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\AiOperationType;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -65,9 +66,11 @@ class PageCapture extends Model
 
     public function extractionOperation(): HasOne
     {
-        return $this->hasOne(AiOperation::class, 'target_id')
-            ->where('target_type', 'page_capture')
-            ->where('operation_type', AiOperationType::PublicationExtraction->value)
-            ->latestOfMany();
+        return $this->hasOne(AiOperation::class, 'target_id')->ofMany(
+            ['id' => 'max'],
+            fn (Builder $query) => $query
+                ->where('target_type', 'page_capture')
+                ->where('operation_type', AiOperationType::PublicationExtraction->value),
+        );
     }
 }
