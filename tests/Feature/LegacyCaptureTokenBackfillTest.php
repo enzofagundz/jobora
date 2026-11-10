@@ -5,6 +5,33 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 
 uses(RefreshDatabase::class);
 
+beforeEach(function (): void {
+    $this->legacyEnvironment = [];
+
+    foreach (['VAGAS_API_TOKEN', 'VAGAS_API_USER_ID'] as $key) {
+        $this->legacyEnvironment[$key] = [getenv($key), $_ENV[$key] ?? null, $_SERVER[$key] ?? null];
+        putenv($key.'=');
+        $_ENV[$key] = '';
+        $_SERVER[$key] = '';
+    }
+});
+
+afterEach(function (): void {
+    foreach ($this->legacyEnvironment as $key => [$process, $env, $server]) {
+        putenv($process === false ? $key : $key.'='.$process);
+
+        unset($_ENV[$key], $_SERVER[$key]);
+
+        if ($env !== null) {
+            $_ENV[$key] = $env;
+        }
+
+        if ($server !== null) {
+            $_SERVER[$key] = $server;
+        }
+    }
+});
+
 function legacyBackfillMigration(): object
 {
     return require database_path('migrations/2026_08_26_160001_backfill_legacy_capture_token.php');
