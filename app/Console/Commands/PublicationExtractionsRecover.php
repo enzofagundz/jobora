@@ -10,6 +10,7 @@ use App\Models\PageCapture;
 use App\Services\Discovery\PublicationExtractionService;
 use Carbon\CarbonInterface;
 use Illuminate\Console\Command;
+use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
@@ -40,7 +41,7 @@ class PublicationExtractionsRecover extends Command
             ->orderBy('id')
             ->chunkById(100, function ($captures) use ($extractions, $disk, &$scheduled): void {
                 foreach ($captures as $capture) {
-                    if (! $disk->exists((string) $capture->html_path)) {
+                    if (! $this->rawExists($disk, $capture)) {
                         continue;
                     }
 
@@ -93,6 +94,23 @@ class PublicationExtractionsRecover extends Command
         $this->info("Extração de publicações: {$scheduled} operação(ões) recuperada(s).");
 
         return self::SUCCESS;
+    }
+
+    /**
+     * Falha de storage não pode interromper a recuperação das operações travadas.
+     */
+    private function rawExists(Filesystem $disk, PageCapture $capture): bool
+    {
+        try {
+            return $disk->exists((string) $capture->html_path);
+        } catch (Throwable $exception) {
+            Log::channel('ai')->warning('Publication extraction recovery storage check failed.', [
+                'page_capture_id' => $capture->id,
+                'error' => $exception->getMessage(),
+            ]);
+
+            return false;
+        }
     }
 
     private function eligibleCapture(Builder $query, CarbonInterface $now): Builder

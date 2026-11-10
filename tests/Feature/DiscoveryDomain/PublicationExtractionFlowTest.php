@@ -876,6 +876,40 @@ it('skips recovery for expired raw, missing raw path or captures outside the win
     expect(AiOperation::query()->count())->toBe(0);
 });
 
+it('keeps recovering stuck operations when the capture disk raises on exists', function () {
+    Queue::fake([ProcessAiOperation::class]);
+    $user = User::factory()->create();
+    [, $operation] = publicationExtractionIngest($user, [[
+        'block_id' => 'post-1',
+        'platform_id' => 'urn:li:activity:45',
+        'permalink' => 'https://www.linkedin.com/feed/update/urn:li:activity:45',
+        'text' => 'Vaga com storage indisponível',
+    ]]);
+
+    $operation->forceFill([
+        'status' => AiOperationStatus::Running,
+        'attempt_token' => 'stale-attempt-token',
+        'attempts' => 1,
+        'last_attempt_started_at' => now()->subMinutes(10),
+    ])->save();
+
+    $local = Storage::disk('local');
+    $unreachable = new class($local->getDriver(), $local->getAdapter(), $local->getConfig()) extends FilesystemAdapter
+    {
+        public function exists($path)
+        {
+            throw new RuntimeException('Storage unreachable.');
+        }
+    };
+
+    Storage::set('unreachable', $unreachable);
+    config(['capture.ingestion.disk' => 'unreachable']);
+
+    $this->artisan('publication-extractions:recover')->assertSuccessful();
+
+    Queue::assertPushed(ProcessAiOperation::class, fn (ProcessAiOperation $job): bool => $job->operationId === $operation->id);
+});
+
 it('processes a queued extraction with a real database queue worker', function () {
     config([
         'queue.default' => 'database',
