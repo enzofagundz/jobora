@@ -77,9 +77,7 @@ class PublicationExtractionProcessor
         $observedAt = $capture->captured_at ?? $capture->created_at ?? now();
 
         $persist(function () use ($user, $capture, $items, $observedAt): void {
-            foreach ($items as $item) {
-                $this->observe($user, $capture, $item, $observedAt);
-            }
+            $this->observeAll($user, $capture, $items, $observedAt);
         });
     }
 
@@ -93,26 +91,76 @@ class PublicationExtractionProcessor
     }
 
     /**
-     * @param  array{external_id: ?string, url: ?string, content: string, content_hash: string, evidence_block_ids: list<string>}  $item
+     * Duas capturas com as mesmas publicações em ordens diferentes não podem
+     * travar uma a outra: todas são resolvidas antes e travadas em ordem de id.
+     *
+     * @param  list<array{external_id: ?string, url: ?string, content: string, content_hash: string, evidence_block_ids: list<string>}>  $items
      */
-    private function observe(User $user, PageCapture $capture, array $item, CarbonInterface $observedAt): void
+    private function observeAll(User $user, PageCapture $capture, array $items, CarbonInterface $observedAt): void
     {
-        $fingerprint = null;
+        $resolved = [];
 
-        if ($item['external_id'] === null && $item['url'] === null) {
-            $blockId = $item['evidence_block_ids'][0] ?? null;
-
-            if (! is_string($blockId) || $blockId === '') {
-                throw PublicationExtractionException::parseFailed('Publicação anônima sem bloco de evidência.');
-            }
-
-            $fingerprint = hash('sha256', 'capture-block:v1|'.$capture->id.'|'.$blockId);
+        foreach ($items as $item) {
+            $resolved[] = [
+                'item' => $item,
+                'publication' => $this->identities->resolve(
+                    $user,
+                    'linkedin',
+                    $item['external_id'],
+                    $item['url'],
+                    $this->anonymousFingerprint($capture, $item),
+                ),
+            ];
         }
 
-        $publication = $this->identities->resolve($user, 'linkedin', $item['external_id'], $item['url'], $fingerprint);
+        $ids = array_values(array_unique(array_map(
+            static fn (array $entry): int => $entry['publication']->id,
+            $resolved,
+        )));
 
-        $publication = Publication::query()->whereKey($publication->id)->lockForUpdate()->firstOrFail();
+        $locked = $ids === []
+            ? collect()
+            : Publication::query()
+                ->whereKey($ids)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
 
+        foreach ($resolved as $entry) {
+            $publication = $locked->get($entry['publication']->id);
+
+            if (! $publication instanceof Publication) {
+                throw PublicationExtractionException::processingFailed('Publicação desapareceu durante a extração.');
+            }
+
+            $this->observe($capture, $publication, $entry['item'], $observedAt);
+        }
+    }
+
+    /**
+     * @param  array{external_id: ?string, url: ?string, content: string, content_hash: string, evidence_block_ids: list<string>}  $item
+     */
+    private function anonymousFingerprint(PageCapture $capture, array $item): ?string
+    {
+        if ($item['external_id'] !== null || $item['url'] !== null) {
+            return null;
+        }
+
+        $blockId = $item['evidence_block_ids'][0] ?? null;
+
+        if (! is_string($blockId) || $blockId === '') {
+            throw PublicationExtractionException::parseFailed('Publicação anônima sem bloco de evidência.');
+        }
+
+        return hash('sha256', 'capture-block:v1|'.$capture->id.'|'.$blockId);
+    }
+
+    /**
+     * @param  array{external_id: ?string, url: ?string, content: string, content_hash: string, evidence_block_ids: list<string>}  $item
+     */
+    private function observe(PageCapture $capture, Publication $publication, array $item, CarbonInterface $observedAt): void
+    {
         $version = $this->applyContent($publication, $item, $observedAt, $capture->id);
 
         $observation = $this->observations->record($capture, $publication, $observedAt);

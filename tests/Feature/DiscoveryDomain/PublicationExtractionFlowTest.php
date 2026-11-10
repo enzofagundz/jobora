@@ -26,6 +26,7 @@ use App\Services\Discovery\PublicationExtractionException;
 use App\Services\Discovery\PublicationExtractionProcessor;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Testing\TestResponse;
@@ -563,6 +564,48 @@ it('does not let an older capture processed late replace the current content', f
         ->and($publication->content_version)->toBe(1)
         ->and($observation->content)->toBe('Vaga PHP antiga')
         ->and($observation->content_version)->toBeNull();
+});
+
+it('trava todas as publicações em ordem de id antes de aplicar conteúdo', function () {
+    $user = User::factory()->create();
+    $alpha = [
+        'block_id' => 'post-alpha',
+        'platform_id' => 'urn:li:activity:13',
+        'permalink' => 'https://www.linkedin.com/feed/update/urn:li:activity:13',
+        'text' => 'Vaga alpha',
+    ];
+    $beta = [
+        'block_id' => 'post-beta',
+        'platform_id' => 'urn:li:activity:14',
+        'permalink' => 'https://www.linkedin.com/feed/update/urn:li:activity:14',
+        'text' => 'Vaga beta',
+    ];
+
+    publicationExtractionIngest($user, [$alpha, $beta]);
+    $alphaId = Publication::query()->where('external_id', $alpha['platform_id'])->sole()->id;
+    $betaId = Publication::query()->where('external_id', $beta['platform_id'])->sole()->id;
+
+    $alpha['text'] = 'Vaga alpha atualizada';
+    $beta['text'] = 'Vaga beta atualizada';
+
+    $locks = [];
+    DB::listen(function ($query) use (&$locks): void {
+        if (str_contains($query->sql, 'from "publications"') && str_contains($query->sql, 'order by "id"')) {
+            $locks[] = $query->sql;
+        }
+    });
+
+    // Ordem invertida em relação aos ids: o lock não pode seguir o decodificador.
+    [$capture, $operation] = publicationExtractionIngest($user, [$beta, $alpha]);
+
+    expect($locks)->toHaveCount(1)
+        ->and($locks[0])->toContain('order by "id"')
+        ->and($locks[0])->toContain((string) $alphaId)
+        ->and($locks[0])->toContain((string) $betaId)
+        ->and(Publication::query()->whereKey($alphaId)->sole()->content)->toBe('Vaga alpha atualizada')
+        ->and(Publication::query()->whereKey($betaId)->sole()->content)->toBe('Vaga beta atualizada')
+        ->and($capture->observations()->count())->toBe(2)
+        ->and($operation->refresh()->status)->toBe(AiOperationStatus::Completed);
 });
 
 it('records an explicit identity conflict scoped to the capture and user', function () {
