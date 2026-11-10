@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jobora.test/contracts/capture-envelope/v1",
+  "title": "Jobora capture envelope v1",
+  "description": "Inert, sanitized envelope for a consolidated page capture. Each blocks[] entry MUST appear once in capture.html as an element carrying data-block-id, data-kind, data-platform-id and data-permalink. Card/detail relations use data-detail-block-id on the card and data-card-block-id on the detail. HTML MUST NOT contain executable content.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "capture", "blocks"],
+  "properties": {
+    "format": {
+      "const": "jobora.capture-envelope"
+    },
+    "version": {
+      "const": 1
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "idempotency_key",
+        "execution_id",
+        "source",
+        "surface",
+        "initial_url",
+        "final_url",
+        "captured_at",
+        "coverage",
+        "html"
+      ],
+      "properties": {
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "execution_id": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "source": {
+          "enum": ["linkedin", "indeed"]
+        },
+        "surface": {
+          "enum": ["linkedin_publications", "linkedin_jobs", "indeed_jobs"]
+        },
+        "initial_url": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 2000
+        },
+        "final_url": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 2000
+        },
+        "captured_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "coverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "reason", "blocks_expected", "blocks_captured"],
+          "properties": {
+            "status": {
+              "enum": ["complete", "partial"]
+            },
+            "reason": {
+              "enum": [null, "cancelled", "navigation_interrupted", "timeout", "no_content"]
+            },
+            "blocks_expected": {
+              "type": ["integer", "null"],
+              "minimum": 0
+            },
+            "blocks_captured": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "complete"
+                  }
+                },
+                "required": ["status"]
+              },
+              "then": {
+                "properties": {
+                  "reason": {
+                    "type": "null"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "const": "partial"
+                  }
+                },
+                "required": ["status"]
+              },
+              "then": {
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "enum": ["cancelled", "navigation_interrupted", "timeout", "no_content"]
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "html": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "blocks": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/block"
+      }
+    }
+  },
+  "$defs": {
+    "block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["block_id", "kind", "platform_id", "permalink", "card_block_id", "detail_block_id"],
+      "properties": {
+        "block_id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        },
+        "kind": {
+          "enum": ["post", "card", "detail"]
+        },
+        "platform_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "permalink": {
+          "type": "string",
+          "format": "uri",
+          "maxLength": 2000
+        },
+        "card_block_id": {
+          "type": ["string", "null"],
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        },
+        "detail_block_id": {
+          "type": ["string", "null"],
+          "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "post"
+              }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "card_block_id": {
+                "type": "null"
+              },
+              "detail_block_id": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "card"
+              }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "card_block_id": {
+                "type": "null"
+              },
+              "detail_block_id": {
+                "type": ["string", "null"]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "detail"
+              }
+            },
+            "required": ["kind"]
+          },
+          "then": {
+            "properties": {
+              "card_block_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "detail_block_id": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

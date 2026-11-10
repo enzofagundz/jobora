@@ -11,6 +11,7 @@ use App\Filament\Pages\MarketTrendsPage;
 use App\Filament\Pages\ProfessionalCompetenciesPage;
 use App\Filament\Pages\ResumePage;
 use App\Filament\Pages\ScreeningPreferencesPage;
+use App\Filament\Resources\AgentIntegrations\AgentIntegrationResource;
 use App\Filament\Resources\JobCaptures\JobCaptureResource;
 use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Filament\Resources\JobPostings\Pages\ApplicationPage;
@@ -614,6 +615,7 @@ it('ordena a navegação lateral conforme o fluxo do produto', function () {
         ResumePage::class,
         ScreeningPreferencesPage::class,
         ProfessionalCompetenciesPage::class,
+        AgentIntegrationResource::class,
         MarketComparisonPage::class,
         MarketTrendsPage::class,
     ]);

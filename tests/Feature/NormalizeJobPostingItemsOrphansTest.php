@@ -4,22 +4,46 @@ use App\Models\JobPosting;
 use App\Models\JobPostingItem;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 
 uses(RefreshDatabase::class);
 
 function createOrphanItem(): JobPostingItem
 {
-    // Inserção fora da transação do RefreshDatabase via PDO separado,
-    // pois PRAGMA foreign_keys não pode ser alterado dentro de transação.
-    $pdo = new PDO('sqlite:'.database_path('database.testing.sqlite'));
-    $pdo->exec('PRAGMA busy_timeout = 5000');
-    $pdo->exec('PRAGMA foreign_keys = OFF');
-    $pdo->exec('DELETE FROM job_posting_items WHERE job_posting_id = 999999');
-    $pdo->exec("INSERT INTO job_posting_items (job_posting_id, category, name, created_at, updated_at) VALUES (999999, 'skill', 'laravel', datetime('now'), datetime('now'))");
-    $id = $pdo->lastInsertId();
-    $pdo->exec('PRAGMA foreign_keys = ON');
+    $connection = DB::connection();
+    $driver = $connection->getDriverName();
 
-    // Recarregar via Eloquent na conexão de teste
+    if ($driver === 'pgsql') {
+        $previous = $connection->selectOne('SHOW session_replication_role')->session_replication_role;
+        $connection->unprepared('SET session_replication_role = replica');
+    } elseif ($driver === 'sqlite') {
+        $previous = (int) $connection->selectOne('PRAGMA defer_foreign_keys')->defer_foreign_keys;
+        $connection->unprepared('PRAGMA defer_foreign_keys = ON');
+    } elseif (in_array($driver, ['mysql', 'mariadb'], true)) {
+        $previous = (int) $connection->selectOne('SELECT @@SESSION.FOREIGN_KEY_CHECKS AS enabled')->enabled;
+        $connection->unprepared('SET SESSION FOREIGN_KEY_CHECKS = 0');
+    } else {
+        test()->markTestSkipped('Driver não suportado para criar itens órfãos: '.$driver);
+    }
+
+    try {
+        $id = $connection->table('job_posting_items')->insertGetId([
+            'job_posting_id' => 999999,
+            'category' => 'skill',
+            'name' => 'laravel',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    } finally {
+        if ($driver === 'pgsql') {
+            $connection->unprepared("SET session_replication_role = '{$previous}'");
+        } elseif ($driver === 'sqlite') {
+            $connection->unprepared('PRAGMA defer_foreign_keys = '.$previous);
+        } else {
+            $connection->unprepared('SET SESSION FOREIGN_KEY_CHECKS = '.$previous);
+        }
+    }
+
     return JobPostingItem::find((int) $id);
 }
 

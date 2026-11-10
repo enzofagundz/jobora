@@ -172,7 +172,7 @@ describe('linkedin controller — integridade observer/SPA', () => {
     const { deactivate } = await activateController();
     // Fingerprint composto é derivado e enviado uma vez.
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
-    const message = sendMessageMock.mock.calls[0][0] as CaptureMessage;
+    const message = sendMessageMock.mock.calls[0]?.[0] as CaptureMessage;
     expect(message.payload.external_id).toBeNull();
     expect(message.payload.url).toBeNull();
     deactivate();

@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\CaptureTokenService;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 
@@ -337,13 +338,13 @@ it('filtra capturas pela situação promovida/pendente', function () {
 it('impede no banco dois registros com mesmo source e external_id', function () {
     JobCapture::factory()->for(auth()->user(), 'user')->create(['source' => 'linkedin', 'external_id' => 'urn:li:activity:777', 'dedup_key' => 'ext:urn:li:activity:777']);
 
-    expect(fn () => auth()->user()->jobCaptures()->create([
+    expect(fn () => DB::transaction(fn () => auth()->user()->jobCaptures()->create([
         'source' => 'linkedin',
         'external_id' => 'urn:li:activity:777',
-        'dedup_key' => 'content:'.hash('sha256', 'outra chave'), // burla o service de propósito
+        'dedup_key' => 'content:'.hash('sha256', 'outra chave'),
         'description' => 'duplicata',
         'captured_at' => now(),
-    ]))->toThrow(QueryException::class);
+    ])))->toThrow(QueryException::class);
 
     expect(JobCapture::where('external_id', 'urn:li:activity:777')->count())->toBe(1);
 });
@@ -695,13 +696,13 @@ it('constraint UNIQUE (source, external_id) permanece ocupada após soft delete'
         ->and(JobCapture::withTrashed()->count())->toBe(1)
         ->and(JobCapture::onlyTrashed()->sole()->deleted_at)->not->toBeNull();
 
-    expect(fn () => auth()->user()->jobCaptures()->create([
+    expect(fn () => DB::transaction(fn () => auth()->user()->jobCaptures()->create([
         'source' => 'linkedin',
         'external_id' => 'urn:li:activity:constraint-soft',
         'dedup_key' => 'content:'.hash('sha256', 'outra chave'),
         'description' => 'duplicata após soft delete',
         'captured_at' => now(),
-    ]))->toThrow(QueryException::class);
+    ])))->toThrow(QueryException::class);
 
     expect(JobCapture::withTrashed()->count())->toBe(1)
         ->and(JobCapture::onlyTrashed()->count())->toBe(1)

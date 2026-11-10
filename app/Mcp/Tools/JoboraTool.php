@@ -2,7 +2,9 @@
 
 namespace App\Mcp\Tools;
 
+use App\Enums\AgentIntegrationScope;
 use App\Enums\ResumeLanguage;
+use App\Mcp\Support\AgentIntegrationContext;
 use App\Mcp\Support\McpUserResolver;
 use App\Mcp\Support\ToolException;
 use App\Models\User;
@@ -44,6 +46,16 @@ abstract class JoboraTool extends Tool
     final public function handle(Request $request): Response|ResponseFactory
     {
         try {
+            if (app()->bound(AgentIntegrationContext::class)) {
+                $context = app(AgentIntegrationContext::class);
+
+                if (! $context->can(AgentIntegrationScope::forTool(static::class))) {
+                    return $this->fail(ToolException::forbidden(
+                        'A integração não possui permissão para esta operação.',
+                    ));
+                }
+            }
+
             return $this->execute($request);
         } catch (ToolException $exception) {
             return $this->fail($exception);

@@ -238,12 +238,14 @@ class MarketAnalysisService
 
     public function months(User $user, ?string $from = null, ?string $to = null): array
     {
+        $monthExpression = $this->bucketExpression('collected_at', AnalysisPeriod::Month);
+
         return DB::table('job_postings')
             ->where('status', 'confirmed')
             ->where('user_id', $user->id)
             ->when($from, fn ($q) => $q->where('collected_at', '>=', $from))
             ->when($to, fn ($q) => $q->where('collected_at', '<', $to))
-            ->selectRaw("strftime('%Y-%m', collected_at) AS month")
+            ->selectRaw("{$monthExpression} AS month")
             ->distinct()
             ->orderBy('month')
             ->pluck('month')
@@ -410,19 +412,29 @@ class MarketAnalysisService
     {
         $driver = DB::connection()->getDriverName();
 
+        if (in_array($driver, ['mysql', 'mariadb'], true)) {
+            return match ($period) {
+                AnalysisPeriod::Week => "DATE(DATE_SUB({$column}, INTERVAL WEEKDAY({$column}) DAY))",
+                AnalysisPeriod::Month => "DATE_FORMAT({$column}, '%Y-%m')",
+                AnalysisPeriod::Quarter => "CONCAT(YEAR({$column}), '-Q', QUARTER({$column}))",
+                AnalysisPeriod::Year => "DATE_FORMAT({$column}, '%Y')",
+            };
+        }
+
+        if ($driver === 'pgsql') {
+            return match ($period) {
+                AnalysisPeriod::Week => "date_trunc('week', {$column})::date",
+                AnalysisPeriod::Month => "to_char({$column}, 'YYYY-MM')",
+                AnalysisPeriod::Quarter => "to_char({$column}, 'YYYY') || '-Q' || to_char({$column}, 'Q')",
+                AnalysisPeriod::Year => "to_char({$column}, 'YYYY')",
+            };
+        }
+
         return match ($period) {
-            AnalysisPeriod::Week => $driver === 'mysql'
-                ? "DATE(DATE_SUB({$column}, INTERVAL WEEKDAY({$column}) DAY))"
-                : "date({$column}, 'weekday 0', '-6 days')",
-            AnalysisPeriod::Month => $driver === 'mysql'
-                ? "DATE_FORMAT({$column}, '%Y-%m')"
-                : "strftime('%Y-%m', {$column})",
-            AnalysisPeriod::Quarter => $driver === 'mysql'
-                ? "CONCAT(YEAR({$column}), '-Q', QUARTER({$column}))"
-                : "strftime('%Y', {$column}) || '-Q' || case when cast(strftime('%m', {$column}) as integer) between 1 and 3 then '1' when cast(strftime('%m', {$column}) as integer) between 4 and 6 then '2' when cast(strftime('%m', {$column}) as integer) between 7 and 9 then '3' else '4' end",
-            AnalysisPeriod::Year => $driver === 'mysql'
-                ? "DATE_FORMAT({$column}, '%Y')"
-                : "strftime('%Y', {$column})",
+            AnalysisPeriod::Week => "date({$column}, 'weekday 0', '-6 days')",
+            AnalysisPeriod::Month => "strftime('%Y-%m', {$column})",
+            AnalysisPeriod::Quarter => "strftime('%Y', {$column}) || '-Q' || case when cast(strftime('%m', {$column}) as integer) between 1 and 3 then '1' when cast(strftime('%m', {$column}) as integer) between 4 and 6 then '2' when cast(strftime('%m', {$column}) as integer) between 7 and 9 then '3' else '4' end",
+            AnalysisPeriod::Year => "strftime('%Y', {$column})",
         };
     }
 
