@@ -480,6 +480,30 @@ describe('LinkedIn publicações — envelope consolidado', () => {
     await advance(0);
   });
 
+  it('busca sem cards no primeiro scan não finaliza como vazia', async () => {
+    document.body.innerHTML = '<div class="feed"></div>';
+    const { envelopes } = setupMessaging();
+    const controller = createLinkedInController();
+
+    const active = controller.activate(new ContentScriptContext(`test-empty-${Math.random()}`));
+    await advance(200);
+    await active;
+
+    // LinkedIn renderiza os resultados depois do document_start.
+    await advance(800);
+    const feed = document.querySelector('.feed') as HTMLElement;
+    feed.insertAdjacentHTML('beforeend', cardHtml(1));
+    await advance(OBSERVER_DEBOUNCE_MS + 100);
+    await advance(1200 * 4);
+
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]!.blocks).toHaveLength(1);
+    expect(envelopes[0]!.capture.coverage).toMatchObject({ status: 'complete', reason: null });
+
+    controller.deactivate();
+    await advance(0);
+  });
+
   it('card que chega na janela de settle ainda entra no envelope', async () => {
     mountFeed(1);
     const { envelopes } = setupMessaging();

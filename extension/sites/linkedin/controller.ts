@@ -344,10 +344,8 @@ export function createLinkedInController(
     if (!current || jumpAbort) return;
     if (!isGenerationActive(generation)) return;
     if (current.builder.size() === 0) {
-      void finalizeAttempt(
-        current,
-        current.identityFailure ? 'timeout' : 'no_content',
-      );
+      // O resultado da busca pode renderizar depois do primeiro scan.
+      scheduleFinalize(current.identityFailure ? 'timeout' : 'no_content');
       return;
     }
     clearTimeout(finalizeTimer);
