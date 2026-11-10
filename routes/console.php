@@ -20,4 +20,16 @@ Schedule::command('ai-operations:expire')
     ->everyMinute()
     ->withoutOverlapping();
 
+Schedule::command('discovery-runs:expire')
+    ->everyMinute()
+    ->withoutOverlapping();
+
+Schedule::command('captures:prune-raw')
+    ->daily()
+    ->withoutOverlapping();
+
+Schedule::command('captures:reconcile-orphans')
+    ->daily()
+    ->withoutOverlapping();
+
 Schedule::command('auth:clear-resets')->everyFifteenMinutes();

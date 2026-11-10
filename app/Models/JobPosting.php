@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
@@ -94,5 +95,12 @@ class JobPosting extends Model
     public function application(): HasOne
     {
         return $this->hasOne(Application::class);
+    }
+
+    public function publications(): BelongsToMany
+    {
+        return $this->belongsToMany(Publication::class, 'opportunity_sources')
+            ->withPivot('is_legacy')
+            ->withTimestamps();
     }
 }

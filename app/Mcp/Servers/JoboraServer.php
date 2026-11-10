@@ -20,6 +20,8 @@ use App\Mcp\Tools\Ats\SetAtsOptimizationTool;
 use App\Mcp\Tools\Captures\CaptureJobTool;
 use App\Mcp\Tools\Captures\DeleteJobCaptureTool;
 use App\Mcp\Tools\Captures\GetJobCaptureTool;
+use App\Mcp\Tools\Captures\GetPageCaptureTool;
+use App\Mcp\Tools\Captures\IngestPageCaptureTool;
 use App\Mcp\Tools\Captures\ListJobCapturesTool;
 use App\Mcp\Tools\Captures\PromoteEligibleJobCapturesTool;
 use App\Mcp\Tools\Captures\PromoteJobCaptureTool;
@@ -28,6 +30,16 @@ use App\Mcp\Tools\Competencies\ClassifyProfessionalCompetenciesTool;
 use App\Mcp\Tools\Competencies\ListProfessionalCompetenciesTool;
 use App\Mcp\Tools\Competencies\RemoveProfessionalCompetencyTool;
 use App\Mcp\Tools\Competencies\SetProfessionalCompetencyTool;
+use App\Mcp\Tools\Discovery\AcquireDiscoveryRunsTool;
+use App\Mcp\Tools\Discovery\CreateDiscoverySourceTool;
+use App\Mcp\Tools\Discovery\DeleteDiscoverySourceTool;
+use App\Mcp\Tools\Discovery\GetDiscoveryRunTool;
+use App\Mcp\Tools\Discovery\GetDiscoverySourceTool;
+use App\Mcp\Tools\Discovery\ListDiscoveryRunsTool;
+use App\Mcp\Tools\Discovery\ListDiscoverySourcesTool;
+use App\Mcp\Tools\Discovery\ListPendingDiscoverySourcesTool;
+use App\Mcp\Tools\Discovery\ReportDiscoveryAccessTool;
+use App\Mcp\Tools\Discovery\UpdateDiscoverySourceTool;
 use App\Mcp\Tools\JobPostings\AnalyzeJobPostingTool;
 use App\Mcp\Tools\JobPostings\ConfirmJobPostingTool;
 use App\Mcp\Tools\JobPostings\CreateJobPostingTool;
@@ -66,6 +78,8 @@ final class JoboraServer extends Server
     protected array $tools = [
         GetAiOperationTool::class,
         CaptureJobTool::class,
+        IngestPageCaptureTool::class,
+        GetPageCaptureTool::class,
         GetJobCaptureTool::class,
         ListJobCapturesTool::class,
         DeleteJobCaptureTool::class,
@@ -101,6 +115,16 @@ final class JoboraServer extends Server
         GetApplicationTool::class,
         ListApplicationsTool::class,
         RecordApplicationUpdateTool::class,
+        ListDiscoverySourcesTool::class,
+        GetDiscoverySourceTool::class,
+        CreateDiscoverySourceTool::class,
+        UpdateDiscoverySourceTool::class,
+        DeleteDiscoverySourceTool::class,
+        ListPendingDiscoverySourcesTool::class,
+        AcquireDiscoveryRunsTool::class,
+        ListDiscoveryRunsTool::class,
+        GetDiscoveryRunTool::class,
+        ReportDiscoveryAccessTool::class,
     ];
 
     protected array $resources = [
