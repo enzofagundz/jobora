@@ -11,7 +11,7 @@ return new class extends Migration
         Schema::create('discovery_run_events', function (Blueprint $table) {
             $table->id();
             $table->foreignId('discovery_run_id')->constrained()->cascadeOnDelete();
-            $table->string('event_key', 200)->unique();
+            $table->string('event_key', 200);
             $table->string('outcome', 20);
             $table->text('final_url')->nullable();
             $table->unsignedSmallInteger('http_status')->nullable();
@@ -21,7 +21,7 @@ return new class extends Migration
             $table->dateTime('occurred_at');
             $table->timestamps();
 
-            $table->index('discovery_run_id');
+            $table->unique(['discovery_run_id', 'event_key']);
         });
     }
 

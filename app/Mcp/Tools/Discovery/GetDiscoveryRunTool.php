@@ -17,10 +17,12 @@ class GetDiscoveryRunTool extends DiscoveryRunTool
     {
         $validated = $request->validate([
             'id' => ['nullable', 'integer'],
-            'execution_id' => ['nullable', 'string', 'max:64', 'required_without:id'],
+            'execution_id' => ['nullable', 'string', 'max:200', 'required_without:id'],
         ]);
 
-        $id = $validated['id'] ?? $validated['execution_id'];
+        $id = isset($validated['id'])
+            ? (int) $validated['id']
+            : (string) $validated['execution_id'];
 
         return $this->ok(['run' => $this->presentRun($this->runs->get($this->user(), $id))]);
     }

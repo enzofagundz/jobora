@@ -47,7 +47,7 @@ class DiscoveryRun extends Model
 
     public function source(): BelongsTo
     {
-        return $this->belongsTo(DiscoverySource::class, 'discovery_source_id');
+        return $this->belongsTo(DiscoverySource::class, 'discovery_source_id')->withTrashed();
     }
 
     public function integration(): BelongsTo

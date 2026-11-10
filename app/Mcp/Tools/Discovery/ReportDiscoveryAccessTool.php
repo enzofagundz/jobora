@@ -14,7 +14,7 @@ class ReportDiscoveryAccessTool extends DiscoveryRunTool
     protected function execute(Request $request): Response|ResponseFactory
     {
         $validated = $request->validate([
-            'execution_id' => ['required', 'string', 'max:64'],
+            'execution_id' => ['required', 'string', 'max:200'],
             'event_key' => ['required', 'string', 'max:200'],
             'outcome' => ['required', 'in:success,failure'],
             'final_url' => ['nullable', 'string', 'max:2000'],
