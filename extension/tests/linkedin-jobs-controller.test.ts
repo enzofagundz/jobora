@@ -255,6 +255,49 @@ describe('linkedin-jobs controller — envelope consolidado', () => {
     deactivate();
   });
 
+  it('falha de correlação sem contexto não descarta os cards coletados', async () => {
+    mountJobsList(2);
+    const envelopes: CaptureEnvelope[] = [];
+    let resolves = 0;
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockImplementation(async (raw: unknown) => {
+      const message = raw as CaptureMessage;
+      if (message.type === 'capture:resolve-run') {
+        resolves++;
+        if (resolves === 1) return { ok: false, error: 'credential_changed' };
+        return {
+          ok: true,
+          run: {
+            executionId: 'exec-jobs-1',
+            source: 'linkedin',
+            surface: 'linkedin_jobs',
+            initialUrl: SEARCH_URL,
+            expiresAt: null,
+          },
+          context: 'ctx-test',
+        };
+      }
+      if (message.type === 'capture:submit-envelope') {
+        envelopes.push(message.envelope);
+        return { ok: true, duplicate: false, status: 201, coverage: 'complete' };
+      }
+      return { ok: true, duplicate: false };
+    });
+
+    const controller = createLinkedInJobsController();
+    const active = controller.activate(new ContentScriptContext(`test-context-${Math.random()}`));
+    for (let i = 0; i < 300; i++) await advance(200);
+    await active;
+    await advance(10_000);
+
+    expect(resolves).toBeGreaterThan(1);
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]!.blocks.filter((block) => block.kind === 'card')).toHaveLength(2);
+    expect(
+      envelopes[0]!.blocks.filter((block) => block.kind === 'detail'),
+    ).toHaveLength(2);
+    controller.deactivate();
+  });
+
   it('detalhe que falha não é tentado duas vezes pelos dois candidatos do card', async () => {
     document.removeEventListener('click', spaClickHandler, true);
     let clicks = 0;

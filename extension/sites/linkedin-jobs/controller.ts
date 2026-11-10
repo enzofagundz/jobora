@@ -15,6 +15,8 @@ import {
 import { createLinkedInJobsBuilder, jobIdentity } from './envelope';
 
 const CAPTURE_SETTLE_MS = 1500;
+const CONTEXT_RETRY_MS = 2000;
+const CONTEXT_MAX_ATTEMPTS = 3;
 const PANE_SELECTOR = '.scaffold-layout__detail.jobs-search__job-details';
 
 export interface LinkedInJobsCaptureState {
@@ -48,6 +50,8 @@ interface JobAttempt {
   detailFailure: boolean;
   /** Vaga cujo detalhe já foi tentado nesta tentativa. */
   attempted: Set<string>;
+  /** Tentativas de obter contexto de credencial sem descartar o builder. */
+  contextAttempts: number;
 }
 
 export function createLinkedInJobsController(): LinkedInJobsController {
@@ -55,6 +59,7 @@ export function createLinkedInJobsController(): LinkedInJobsController {
   let observer: MutationObserver | null = null;
   let debounceTimer: number | undefined;
   let finalizeTimer: number | undefined;
+  let contextTimer: number | undefined;
   let scanRunning = false;
   let rescanQueued = false;
   let panelVisible = true;
@@ -226,6 +231,7 @@ export function createLinkedInJobsController(): LinkedInJobsController {
   function scheduleScan(records?: MutationRecord[]): void {
     // Nova mutação adia a finalização; o lote ainda pode crescer.
     clearTimeout(finalizeTimer);
+    if (attempt) attempt.contextAttempts = 0;
     if (records) {
       for (const record of records) {
         for (const node of Array.from(record.addedNodes)) enqueueMutationNode(node);
@@ -285,6 +291,14 @@ export function createLinkedInJobsController(): LinkedInJobsController {
     reason: CaptureCoverageReason | null,
   ): Promise<void> {
     if (!current || current.finalized || current.blocked) return;
+
+    if (!current.credentialContext) {
+      // Sem contexto o envio é impossível: preserva o builder e tenta de novo.
+      session.counters.phase = 'error';
+      scheduleContextRetry(current, reason);
+      return;
+    }
+
     current.finalized = true;
     clearTimeout(finalizeTimer);
 
@@ -300,10 +314,6 @@ export function createLinkedInJobsController(): LinkedInJobsController {
             ? 'no_content'
             : null);
     const finalUrl = isLinkedInJobsRoute(location) ? location.href : current.initialUrl;
-    if (!current.credentialContext) {
-      session.counters.phase = 'error';
-      return;
-    }
 
     const envelope = current.builder.toEnvelope({
       executionId: current.executionId,
@@ -346,6 +356,24 @@ export function createLinkedInJobsController(): LinkedInJobsController {
     }
   }
 
+  function scheduleContextRetry(
+    current: JobAttempt,
+    reason: CaptureCoverageReason | null,
+  ): void {
+    if (current.cancelled || current.contextAttempts >= CONTEXT_MAX_ATTEMPTS) return;
+
+    current.contextAttempts++;
+    clearTimeout(contextTimer);
+    contextTimer = window.setTimeout(() => {
+      void (async () => {
+        if (attempt !== current || current.finalized || current.blocked) return;
+        if (!current.credentialContext) await resolveAttempt(current, current.generation);
+        if (attempt !== current || current.finalized || current.blocked) return;
+        await finalizeAttempt(current, reason);
+      })();
+    }, CONTEXT_RETRY_MS);
+  }
+
   function newAttempt(generation: number): JobAttempt {
     const idempotencyKey = `linkedin-jobs-${Date.now().toString(36)}-${Math.random()
       .toString(36)
@@ -365,6 +393,7 @@ export function createLinkedInJobsController(): LinkedInJobsController {
       cancelled: false,
       detailFailure: false,
       attempted: new Set<string>(),
+      contextAttempts: 0,
     };
   }
 
@@ -446,6 +475,7 @@ export function createLinkedInJobsController(): LinkedInJobsController {
     clearPreEscListener();
     clearTimeout(debounceTimer);
     clearTimeout(finalizeTimer);
+    clearTimeout(contextTimer);
     observer?.disconnect();
     observer = null;
     rescanQueued = false;
