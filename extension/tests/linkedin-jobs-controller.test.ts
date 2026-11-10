@@ -255,6 +255,57 @@ describe('linkedin-jobs controller — envelope consolidado', () => {
     deactivate();
   });
 
+  it('detalhe que falha não é tentado duas vezes pelos dois candidatos do card', async () => {
+    document.removeEventListener('click', spaClickHandler, true);
+    let clicks = 0;
+    const counter = (event: Event): void => {
+      if (event.target instanceof Element && event.target.closest('div[data-job-id]')) {
+        clicks++;
+      }
+    };
+    document.addEventListener('click', counter, true);
+    mountJobsList(1);
+
+    const { controller, envelopes, deactivate } = await activateJobs();
+    await advance(30_000);
+
+    // Sem falhar o detalhe, o card é clicado exatamente uma vez.
+    expect(clicks).toBe(1);
+    expect(envelopes).toHaveLength(1);
+    expect(controller.getCaptureState()).toMatchObject({ cards: 1, details: 0 });
+
+    document.removeEventListener('click', counter, true);
+    deactivate();
+  });
+
+  it('vaga já resolvida na aba não é reenviada depois de reativar a captura', async () => {
+    mountJobsList(1);
+    const controller = createLinkedInJobsController();
+    const first = setupMessaging();
+    const firstCtx = new ContentScriptContext(`test-react-1-${Math.random()}`);
+    const initial = controller.activate(firstCtx);
+    for (let i = 0; i < 300; i++) await advance(200);
+    await initial;
+    await advance(5000);
+    expect(first.envelopes).toHaveLength(1);
+    controller.deactivate();
+
+    const second = setupMessaging();
+    const reactivated = controller.activate(new ContentScriptContext(`test-react-2-${Math.random()}`));
+    for (let i = 0; i < 300; i++) await advance(200);
+    await reactivated;
+    await advance(5000);
+
+    expect(second.envelopes).toHaveLength(1);
+    expect(second.envelopes[0]!.blocks.filter((block) => block.kind === 'card')).toHaveLength(0);
+    expect(second.envelopes[0]!.capture.coverage).toMatchObject({
+      status: 'partial',
+      reason: 'no_content',
+      blocks_captured: 0,
+    });
+    controller.deactivate();
+  });
+
   it('detalhe antigo nunca é associado ao card novo, mesmo com título igual', async () => {
     document.removeEventListener('click', spaClickHandler, true);
     const delayedHandler = (event: Event) => {

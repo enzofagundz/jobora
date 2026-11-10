@@ -46,6 +46,8 @@ interface JobAttempt {
   coverage: 'complete' | 'partial' | null;
   cancelled: boolean;
   detailFailure: boolean;
+  /** Vaga cujo detalhe já foi tentado nesta tentativa. */
+  attempted: Set<string>;
 }
 
 export function createLinkedInJobsController(): LinkedInJobsController {
@@ -135,15 +137,22 @@ export function createLinkedInJobsController(): LinkedInJobsController {
     }
 
     if (!current.builder.hasCard(jobId)) {
+      // Identidade já resolvida nesta aba não pode reabrir bloco nem reenviar.
+      if (!session.claim(jobIdentity(jobId))) return;
+
       if (!current.builder.addCard(jobId, cardEl)) {
         current.detailFailure = true;
         session.applyResult(jobIdentity(jobId), { ok: false, error: 'invalid' });
         return;
       }
-      session.claim(jobIdentity(jobId));
     }
 
     if (current.builder.hasDetail(jobId)) return;
+
+    // O card tem dois candidatos (li + div): o detalhe paga um timeout só.
+    if (current.attempted.has(jobId)) return;
+    current.attempted.add(jobId);
+
     if (!cardEl.isConnected) {
       // Card removido pelo DOM virtualizado: preserva o bloco sem inventar detalhe.
       current.detailFailure = true;
@@ -355,6 +364,7 @@ export function createLinkedInJobsController(): LinkedInJobsController {
       coverage: null,
       cancelled: false,
       detailFailure: false,
+      attempted: new Set<string>(),
     };
   }
 
