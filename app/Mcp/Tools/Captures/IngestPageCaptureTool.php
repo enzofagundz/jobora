@@ -15,9 +15,9 @@ use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
 use Laravel\Mcp\Server\Attributes\Description;
-use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
+use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 
-#[IsDestructive]
+#[IsIdempotent]
 #[Description('Ingere um envelope de captura consolidada v1 no mesmo serviço da API, após sanitizar e persistir HTML privado.')]
 class IngestPageCaptureTool extends JoboraTool
 {

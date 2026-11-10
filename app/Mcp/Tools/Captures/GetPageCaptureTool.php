@@ -26,7 +26,7 @@ class GetPageCaptureTool extends JoboraTool
     {
         $validated = $request->validate([
             'id' => ['nullable', 'integer'],
-            'execution_id' => ['nullable', 'string', 'max:64', 'required_without:id'],
+            'execution_id' => ['nullable', 'string', 'max:200', 'required_without:id'],
         ]);
 
         $query = PageCapture::query()->where('user_id', $this->user()->id);
