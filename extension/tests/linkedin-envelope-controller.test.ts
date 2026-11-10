@@ -480,6 +480,32 @@ describe('LinkedIn publicações — envelope consolidado', () => {
     await advance(0);
   });
 
+  it('card que chega na janela de settle ainda entra no envelope', async () => {
+    mountFeed(1);
+    const { envelopes } = setupMessaging();
+    const controller = createLinkedInController();
+    const ctx = new ContentScriptContext(`test-settle-${Math.random()}`);
+
+    const active = controller.activate(ctx);
+    // Interação do usuário dispensa o auto-scroll: resta só a janela de settle.
+    window.dispatchEvent(new Event('wheel', { bubbles: true }));
+    await advance(200);
+    await active;
+
+    await advance(1200);
+    const feed = document.querySelector('.feed') as HTMLElement;
+    feed.insertAdjacentHTML('beforeend', cardHtml(9));
+    await advance(OBSERVER_DEBOUNCE_MS + 100);
+    await advance(1200 * 4);
+
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]!.blocks).toHaveLength(2);
+    expect(envelopes[0]!.capture.html).toContain('Vaga 9 para desenvolvedor PHP.');
+
+    controller.deactivate();
+    await advance(0);
+  });
+
   it('captura novo conteúdo quando DOM virtualizado reutiliza mesmo elemento', async () => {
     document.body.innerHTML = `
       <div class="feed">

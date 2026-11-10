@@ -198,6 +198,7 @@ export function createLinkedInController(
   }
 
   function scheduleScan(records?: MutationRecord[]): void {
+    const pendingBefore = pendingElements.length;
     if (records) {
       for (const record of records) {
         for (const node of Array.from(record.addedNodes)) enqueueMutationNode(node);
@@ -205,6 +206,8 @@ export function createLinkedInController(
         for (const node of Array.from(record.removedNodes)) enqueueMutationNode(node);
       }
     }
+    // Lote que ainda pode crescer nunca finaliza antes de ser processado.
+    if (pendingElements.length > pendingBefore) clearTimeout(finalizeTimer);
     clearTimeout(debounceTimer);
     debounceTimer = window.setTimeout(() => void processNewPosts(), OBSERVER_DEBOUNCE_MS);
   }
