@@ -52,6 +52,10 @@ interface CaptureAttempt {
   coverage: 'complete' | 'partial' | null;
   identityFailure: boolean;
   occurrenceIdentities: WeakMap<Element, { signature: string; identity: string }>;
+  /** Assinatura → identidades de ocorrência na ordem de criação. */
+  occurrencePool: Map<string, string[]>;
+  /** Identidade de ocorrência → elemento vivo que a representa. */
+  occurrenceBindings: Map<string, Element>;
   nextOccurrenceId: number;
   /** Tentativas de obter contexto de credencial sem descartar o builder. */
   contextAttempts: number;
@@ -152,13 +156,7 @@ export function createLinkedInController(
         payload.author?.name ?? null,
         payload.author?.profile_url ?? null,
       ]);
-      const occurrence = current.occurrenceIdentities.get(el);
-      if (occurrence?.signature === signature) {
-        identity = occurrence.identity;
-      } else {
-        identity = `${current.idempotencyKey}:occurrence:${++current.nextOccurrenceId}`;
-        current.occurrenceIdentities.set(el, { signature, identity });
-      }
+      identity = occurrenceIdentity(current, signature, el);
     }
     if (!isGenerationActive(generation) || attempt !== current) return;
 
@@ -168,6 +166,35 @@ export function createLinkedInController(
     current.builder.add(raw, identity, el);
 
     if (!jumpState.active) scheduleFinalize();
+  }
+
+  /**
+   * Post sem identidade forte não pode virar duas publicações quando o DOM
+   * virtualizado o re-renderiza em outro elemento: a ocorrência é reancorada.
+   */
+  function occurrenceIdentity(
+    current: CaptureAttempt,
+    signature: string,
+    el: Element,
+  ): string {
+    const known = current.occurrenceIdentities.get(el);
+    if (known?.signature === signature) return known.identity;
+
+    const pool = current.occurrencePool.get(signature) ?? [];
+    const reusable = pool.find((identity) => {
+      const bound = current.occurrenceBindings.get(identity);
+      return bound === undefined || !bound.isConnected;
+    });
+
+    const identity =
+      reusable ?? `${current.idempotencyKey}:occurrence:${++current.nextOccurrenceId}`;
+
+    if (reusable === undefined) current.occurrencePool.set(signature, [...pool, identity]);
+
+    current.occurrenceBindings.set(identity, el);
+    current.occurrenceIdentities.set(el, { signature, identity });
+
+    return identity;
   }
 
   /** Lote sequencial; callback concorrente apenas enfileira um rescan. */
@@ -438,6 +465,8 @@ export function createLinkedInController(
       coverage: null,
       identityFailure: false,
       occurrenceIdentities: new WeakMap(),
+      occurrencePool: new Map(),
+      occurrenceBindings: new Map(),
       nextOccurrenceId: 0,
       contextAttempts: 0,
     };

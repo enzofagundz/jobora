@@ -572,6 +572,42 @@ describe('LinkedIn publicações — envelope consolidado', () => {
     await advance(0);
   });
 
+  it('post sem identidade não duplica quando o virtualizado recria o elemento', async () => {
+    document.body.innerHTML = `
+      <div class="feed">
+        <article role="listitem">
+          <a href="https://www.linkedin.com/in/autor-a">Autor A</a>
+          <div data-testid="expandable-text-box"><p>ANONYMOUS_RERENDERED</p></div>
+        </article>
+      </div>`;
+    const { envelopes } = setupMessaging();
+    const controller = createLinkedInController();
+    await activate(controller);
+
+    const feed = document.querySelector('.feed') as HTMLElement;
+    const original = feed.querySelector('[role="listitem"]') as HTMLElement;
+    await advance(1000);
+
+    // Virtualização descarta o card e o re-renderiza em outro elemento.
+    feed.removeChild(original);
+    feed.insertAdjacentHTML(
+      'beforeend',
+      `<article role="listitem">
+        <a href="https://www.linkedin.com/in/autor-a">Autor A</a>
+        <div data-testid="expandable-text-box"><p>ANONYMOUS_RERENDERED</p></div>
+      </article>`,
+    );
+    await advance(OBSERVER_DEBOUNCE_MS + 100);
+    await advance(1200 * 8);
+
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]!.blocks).toHaveLength(1);
+    expect(envelopes[0]!.capture.html.split('ANONYMOUS_RERENDERED')).toHaveLength(2);
+
+    controller.deactivate();
+    await advance(0);
+  });
+
   it('captura novo conteúdo quando DOM virtualizado reutiliza mesmo elemento', async () => {
     document.body.innerHTML = `
       <div class="feed">
