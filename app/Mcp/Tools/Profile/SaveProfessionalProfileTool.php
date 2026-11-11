@@ -10,17 +10,22 @@ use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
 use Laravel\Mcp\Server\Attributes\Description;
+use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 
-#[Description('Substitui o documento inteiro do rascunho profissional, sem confirmar. Exige a versão lida anteriormente.')]
+#[IsDestructive]
+#[Description('Substitui o documento inteiro do rascunho profissional, sem publicar a versão confirmada. Exige a versão lida anteriormente e confirm=true para autorizar a sobrescrita.')]
 class SaveProfessionalProfileTool extends JoboraTool
 {
     protected function execute(Request $request): Response|ResponseFactory
     {
         $validated = Validator::validate(['arguments' => $request->all()], [
-            'arguments' => ['required', 'array:profile,expected_version'],
+            'arguments' => ['required', 'array:profile,expected_version,confirm'],
+            'arguments.confirm' => ['sometimes', 'boolean:strict'],
             'arguments.profile' => ['required', 'array'],
             'arguments.expected_version' => ['required', 'integer:strict', 'min:0', 'max:2147483646'],
         ])['arguments'];
+
+        $this->requireConfirm($request);
 
         return $this->ok(app(ProfessionalProfileService::class)->saveDraft($this->user(), $validated['profile'], $validated['expected_version']));
     }
@@ -28,6 +33,7 @@ class SaveProfessionalProfileTool extends JoboraTool
     public function schema(JsonSchema $schema): array
     {
         return [
+            'confirm' => $schema->boolean()->required()->description('Envie true para autorizar a substituição do rascunho.'),
             'profile' => $schema->object([
                 'experiences' => $schema->array()->max(100)->items($schema->object([
                     'company' => $schema->string()->max(255)->nullable()->required(),
