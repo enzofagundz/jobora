@@ -49,6 +49,26 @@ function profileToken(User $user, array $scopes = ['profile:read', 'profile:writ
     return Helpers::accessToken($user, $client);
 }
 
+it('saves and confirms large valid profiles and preserves ciphertext through the upgrade', function () {
+    $user = User::factory()->create();
+    $document = profileDocument(['experiences' => array_fill(0, 20, [
+        'company' => 'Empresa', 'role' => 'Developer', 'period' => null, 'description' => str_repeat('PHP ', 1250),
+    ])]);
+    $service = app(ProfessionalProfileService::class);
+    $service->saveDraft($user, $document, 0);
+    $service->confirm($user, 1);
+    $before = $service->get($user);
+
+    (require database_path('migrations/2026_11_11_190130_widen_professional_profile_payloads.php'))->up();
+    expect($service->get($user))->toEqual($before)
+        ->and($before['draft'])->toEqual($document)
+        ->and($before['confirmed_snapshot'])->toEqual($document);
+    $profile = $user->professionalProfile()->sole();
+    foreach (['draft', 'confirmed_snapshot'] as $column) {
+        expect(strlen($profile->getRawOriginal($column)))->toBeGreaterThan(65535);
+    }
+});
+
 it('reads only the authenticated profile without inventing a confirmation', function () {
     $user = User::factory()->create();
     ScreeningPreference::factory()->for($user)->create(['preferences' => ['Remoto'], 'rejections' => ['Presencial']]);
