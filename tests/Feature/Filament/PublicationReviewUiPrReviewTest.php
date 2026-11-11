@@ -1,16 +1,21 @@
 <?php
 
+use App\Enums\AiOperationStatus;
+use App\Enums\AiOperationType;
 use App\Enums\JobPostingStatus;
 use App\Filament\Resources\JobPostings\Pages\ViewJobPosting;
+use App\Jobs\ProcessAiOperation;
 use App\Models\AiOperation;
 use App\Models\JobPosting;
 use App\Models\OpportunitySource;
 use App\Models\Publication;
 use App\Models\PublicationTriageResult;
 use App\Models\User;
+use App\Services\AiOperationService;
 use App\Services\OpportunityReviewConflict;
 use App\Services\OpportunityReviewService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
 
@@ -125,4 +130,58 @@ it('refreshes correction data after a version conflict so the user can resubmit'
         ->assertNotified();
 
     expect($posting->refresh()->opportunity_version)->toBe(3);
+});
+
+it('reports completed triage without claiming a new request', function () {
+    $user = User::factory()->create();
+    $this->actingAs($user);
+    [$posting, $publication] = publicationReviewPosting($user);
+    Queue::fake();
+    $content = 'Backend Engineer at Example Ltd.';
+    $publication->forceFill([
+        'content' => $content,
+        'content_hash' => hash('sha256', $content),
+    ])->save();
+    AiOperation::query()->create([
+        'user_id' => $user->id,
+        'operation_key' => "user:{$user->id}:publication_triage:publication:{$publication->id}:version:1",
+        'operation_type' => AiOperationType::PublicationTriage,
+        'target_type' => 'publication',
+        'target_id' => $publication->id,
+        'run_token' => (string) Str::uuid(),
+        'status' => AiOperationStatus::Completed,
+        'queued_at' => now(),
+        'completed_at' => now(),
+        'expires_at' => now()->addDay(),
+        'input_fingerprint' => hash('sha256', 'triage'),
+    ]);
+
+    Livewire::test(ViewJobPosting::class, ['record' => $posting->id])
+        ->callAction('reevaluatePublication')
+        ->assertNotified('Triagem já concluída')
+        ->assertNotNotified('Reavaliação solicitada');
+
+    Queue::assertNothingPushed();
+});
+
+it('reports queued triage without requesting it again', function () {
+    config(['triage.prefilter.enabled' => false]);
+    Queue::fake();
+    $user = User::factory()->create();
+    $this->actingAs($user);
+    [$posting, $publication] = publicationReviewPosting($user);
+    $content = 'Backend Engineer at Example Ltd.';
+    $publication->forceFill([
+        'content' => $content,
+        'content_hash' => hash('sha256', $content),
+    ])->save();
+
+    app(AiOperationService::class)->enqueuePublicationTriage($user, $publication->id, 1);
+
+    Livewire::test(ViewJobPosting::class, ['record' => $posting->id])
+        ->callAction('reevaluatePublication')
+        ->assertNotified('Triagem na fila')
+        ->assertNotNotified('Reavaliação solicitada');
+
+    Queue::assertPushed(ProcessAiOperation::class, 1);
 });
