@@ -127,7 +127,7 @@ final class PublicationTriageProcessor
                         'review_reasons' => $opportunity['review_reasons'],
                     ]);
 
-                    foreach ($opportunity['requirements'] as $requirement) {
+                    foreach (array_unique($opportunity['requirements']) as $requirement) {
                         JobPostingItem::query()->create([
                             'job_posting_id' => $posting->id,
                             'category' => ConceptCategory::Requirement,
@@ -136,7 +136,7 @@ final class PublicationTriageProcessor
                         ]);
                     }
 
-                    foreach ($opportunity['technologies'] as $technology) {
+                    foreach (array_unique($opportunity['technologies']) as $technology) {
                         JobPostingItem::query()->create([
                             'job_posting_id' => $posting->id,
                             'category' => ConceptCategory::Skill,
@@ -145,6 +145,8 @@ final class PublicationTriageProcessor
                         ]);
                     }
 
+                    $seenMethods = [];
+
                     foreach ($opportunity['application_methods'] as $method) {
                         $methodData = ApplicationMethodData::fromArray($method);
 
@@ -152,11 +154,19 @@ final class PublicationTriageProcessor
                             continue;
                         }
 
+                        $dedupKey = $methodData->dedupKey();
+
+                        if (isset($seenMethods[$dedupKey])) {
+                            continue;
+                        }
+
+                        $seenMethods[$dedupKey] = true;
+
                         ApplicationMethod::query()->create([
                             'job_posting_id' => $posting->id,
                             ...$methodData->toArray(),
                             'source' => ItemSource::Ai,
-                            'dedup_key' => $methodData->dedupKey(),
+                            'dedup_key' => $dedupKey,
                         ]);
                     }
 

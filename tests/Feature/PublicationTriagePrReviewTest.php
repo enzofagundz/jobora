@@ -101,6 +101,28 @@ it('recognizes grouped salary evidence without accepting a different amount', fu
     ['1,500.50', 1500.5],
 ]);
 
+it('deduplicates triage items and normalized application methods before insertion', function (bool $duplicateItems) {
+    $content = 'Developer PHP php SQL apply jobs@example.com JOBS@example.com https://example.com/apply/ https://example.com/apply';
+    $operation = prReviewTriage([[
+        'role' => 'Developer',
+        'requirements' => $duplicateItems ? ['PHP', 'PHP', 'php'] : ['PHP', 'php'],
+        'technologies' => $duplicateItems ? ['SQL', 'SQL'] : ['SQL'],
+        'application_methods' => [
+            ['type' => 'email', 'email' => 'jobs@example.com'],
+            ['type' => 'email', 'email' => 'JOBS@example.com'],
+            ['type' => 'external_url', 'url' => 'https://example.com/apply/'],
+            ['type' => 'external_url', 'url' => 'https://example.com/apply'],
+        ],
+        'evidence' => [['quote' => $content, 'block_ids' => ['block-1'], 'fields' => ['role', 'requirements', 'technologies', 'application_methods']]],
+    ]], $content);
+    $posting = $operation->user->jobPostings()->sole();
+    expect($operation->status->value)->toBe('completed')
+        ->and($posting->items()->count())->toBe(3)
+        ->and($posting->applicationMethods()->count())->toBe(2)
+        ->and($posting->readiness)->toBe('ready')
+        ->and(PublicationTriageResult::query()->count())->toBe(1);
+})->with([true, false]);
+
 it('retains valid opportunities and skips unsafe application methods', function (array $method, string $reason) {
     $content = 'Developer apply www.example.com/apply javascript:alert(1) https:// jobs@invalid jobs@example.com';
     $opportunity = [
