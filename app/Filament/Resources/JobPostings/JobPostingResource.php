@@ -279,6 +279,7 @@ class JobPostingResource extends Resource
         return match ($status) {
             null => null,
             'completed' => 'Concluída',
+            'needs_review' => 'Aguardando revisão',
             'failed' => 'Falhou',
             'running' => 'Em andamento',
             'pending' => 'Pendente',
