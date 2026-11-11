@@ -15,7 +15,7 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[IsReadOnly]
-#[Description('Devolve o detalhe de uma vaga do usuário configurado: descrição, itens, métodos de candidatura, sugestão pendente, adaptação, candidatura e última tentativa de IA.')]
+#[Description('Devolve vaga estruturada com readiness, versão, evidências, origens, histórico de revisão, itens e métodos de candidatura.')]
 class GetJobPostingTool extends JoboraTool
 {
     protected function execute(Request $request): Response|ResponseFactory
@@ -23,7 +23,7 @@ class GetJobPostingTool extends JoboraTool
         $validated = $request->validate(['id' => ['required', 'integer']]);
 
         $posting = JobPosting::query()
-            ->with(['items', 'applicationMethods', 'application'])
+            ->with(['items', 'applicationMethods', 'application', 'sources.publication', 'reviewRevisions.actor'])
             ->where('user_id', $this->user()->id)
             ->whereKey((int) $validated['id'])
             ->first();

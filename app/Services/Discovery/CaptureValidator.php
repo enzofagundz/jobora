@@ -167,10 +167,11 @@ class CaptureValidator
             }
 
             $nullablePostIdentity = $surface === 'linkedin_publications' && $block['kind'] === 'post';
+            $nullableIndeedPlatformId = $surface === 'indeed_jobs' && in_array($block['kind'], ['card', 'detail'], true);
             $platformId = $block['platform_id'];
             $permalink = $block['permalink'];
 
-            if (! ($nullablePostIdentity && $platformId === null)
+            if (! (($nullablePostIdentity || $nullableIndeedPlatformId) && $platformId === null)
                 && (! is_string($platformId) || trim($platformId) === '' || mb_strlen($platformId) > 255)) {
                 throw new CaptureValidationException('platform_id inválido.');
             }

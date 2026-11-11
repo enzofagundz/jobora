@@ -2,10 +2,14 @@
 
 namespace App\Services\Discovery;
 
+use App\Jobs\ClassifyPublicationWithClef;
+use App\Models\DiscoveryRun;
 use App\Models\PageCapture;
 use App\Models\Publication;
+use App\Models\PublicationClefResult;
 use App\Models\PublicationObservation;
 use App\Models\User;
+use App\Services\Triage\JobPrefilter;
 use Carbon\CarbonInterface;
 use Closure;
 use Illuminate\Support\Facades\Storage;
@@ -16,8 +20,10 @@ class PublicationExtractionProcessor
         private readonly CaptureBlockReader $reader,
         private readonly LinkedInPublicationsDecoder $publications,
         private readonly LinkedInJobsDecoder $jobs,
+        private readonly IndeedJobsDecoder $indeedJobs,
         private readonly PublicationIdentityResolver $identities,
         private readonly ObservationRecorder $observations,
+        private readonly JobPrefilter $prefilter,
     ) {}
 
     /**
@@ -75,17 +81,27 @@ class PublicationExtractionProcessor
         );
         $items = $decoder->decode($blocks);
         $observedAt = $capture->captured_at ?? $capture->created_at ?? now();
+        $anonymousContentCounts = [];
 
-        $persist(function () use ($user, $capture, $items, $observedAt): void {
-            $this->observeAll($user, $capture, $items, $observedAt);
+        foreach ($items as $item) {
+            if ($item['external_id'] === null && $item['url'] === null) {
+                $anonymousContentCounts[$item['content_hash']] = ($anonymousContentCounts[$item['content_hash']] ?? 0) + 1;
+            }
+        }
+
+        $sourceScope = $anonymousContentCounts === [] ? null : $this->sourceScope($user, $capture);
+
+        $persist(function () use ($user, $capture, $items, $observedAt, $anonymousContentCounts, $sourceScope): void {
+            $this->observeAll($user, $capture, $items, $observedAt, $sourceScope, $anonymousContentCounts);
         });
     }
 
-    private function decoderFor(string $surface): LinkedInPublicationsDecoder|LinkedInJobsDecoder
+    private function decoderFor(string $surface): LinkedInPublicationsDecoder|LinkedInJobsDecoder|IndeedJobsDecoder
     {
         return match ($surface) {
             $this->publications->surface() => $this->publications,
             $this->jobs->surface() => $this->jobs,
+            $this->indeedJobs->surface() => $this->indeedJobs,
             default => throw PublicationExtractionException::parseFailed('Superfície sem decodificador de publicações.'),
         };
     }
@@ -96,19 +112,36 @@ class PublicationExtractionProcessor
      *
      * @param  list<array{external_id: ?string, url: ?string, content: string, content_hash: string, evidence_block_ids: list<string>}>  $items
      */
-    private function observeAll(User $user, PageCapture $capture, array $items, CarbonInterface $observedAt): void
-    {
+    private function observeAll(
+        User $user,
+        PageCapture $capture,
+        array $items,
+        CarbonInterface $observedAt,
+        ?string $sourceScope,
+        array $anonymousContentCounts,
+    ): void {
         $resolved = [];
 
         foreach ($items as $item) {
+            $fingerprint = null;
+
+            if ($item['external_id'] === null && $item['url'] === null) {
+                $fingerprint = $this->fingerprintForAnonymousPublication(
+                    $capture,
+                    $item,
+                    $sourceScope,
+                    $anonymousContentCounts[$item['content_hash']] ?? 0,
+                );
+            }
+
             $resolved[] = [
                 'item' => $item,
                 'publication' => $this->identities->resolve(
                     $user,
-                    'linkedin',
+                    $capture->source,
                     $item['external_id'],
                     $item['url'],
-                    $this->anonymousFingerprint($capture, $item),
+                    $fingerprint,
                 ),
             ];
         }
@@ -141,26 +174,9 @@ class PublicationExtractionProcessor
     /**
      * @param  array{external_id: ?string, url: ?string, content: string, content_hash: string, evidence_block_ids: list<string>}  $item
      */
-    private function anonymousFingerprint(PageCapture $capture, array $item): ?string
-    {
-        if ($item['external_id'] !== null || $item['url'] !== null) {
-            return null;
-        }
-
-        $blockId = $item['evidence_block_ids'][0] ?? null;
-
-        if (! is_string($blockId) || $blockId === '') {
-            throw PublicationExtractionException::parseFailed('Publicação anônima sem bloco de evidência.');
-        }
-
-        return hash('sha256', 'capture-block:v1|'.$capture->id.'|'.$blockId);
-    }
-
-    /**
-     * @param  array{external_id: ?string, url: ?string, content: string, content_hash: string, evidence_block_ids: list<string>}  $item
-     */
     private function observe(PageCapture $capture, Publication $publication, array $item, CarbonInterface $observedAt): void
     {
+        $previousContentHash = $publication->content_hash;
         $version = $this->applyContent($publication, $item, $observedAt, $capture->id);
 
         $observation = $this->observations->record($capture, $publication, $observedAt);
@@ -171,6 +187,77 @@ class PublicationExtractionProcessor
             'content_version' => $version,
             'evidence_block_ids' => $item['evidence_block_ids'],
         ])->save();
+
+        if ($version !== null && $previousContentHash !== $item['content_hash']) {
+            $this->queueClef($publication, $version);
+        }
+    }
+
+    private function queueClef(Publication $publication, int $contentVersion): void
+    {
+        if (! config('triage.prefilter.enabled')) {
+            return;
+        }
+
+        $result = PublicationClefResult::query()->firstOrCreate(
+            [
+                'publication_id' => $publication->id,
+                'content_version' => $contentVersion,
+                'attempt' => 1,
+            ],
+            [
+                'status' => 'pending',
+                'model' => $this->prefilter->configuredModel(),
+                'classifier_identifier' => $this->prefilter->classifierIdentifier(),
+            ],
+        );
+
+        if ($result->wasRecentlyCreated) {
+            ClassifyPublicationWithClef::dispatch($result->id);
+        }
+    }
+
+    private function sourceScope(User $user, PageCapture $capture): ?string
+    {
+        if (is_string($capture->execution_id) && $capture->execution_id !== '') {
+            $run = DiscoveryRun::query()
+                ->where('user_id', $user->id)
+                ->where('execution_id', $capture->execution_id)
+                ->first(['discovery_source_id', 'canonical_url_hash']);
+
+            if ($run !== null && $run->discovery_source_id !== null) {
+                return 'discovery_source:'.$run->discovery_source_id.'|'.$run->canonical_url_hash;
+            }
+        }
+
+        $canonicalUrl = $this->identities->canonicalUrl((string) $capture->url);
+
+        return $canonicalUrl === null ? null : 'source_url:'.$canonicalUrl;
+    }
+
+    private function fingerprintForAnonymousPublication(
+        PageCapture $capture,
+        array $item,
+        ?string $sourceScope,
+        int $sameContentCount,
+    ): string {
+        if ($sourceScope !== null && $sameContentCount === 1) {
+            return hash('sha256', implode('|', [
+                'anonymous-publication:v2',
+                $capture->source,
+                (string) $capture->surface,
+                $sourceScope,
+                $item['content_hash'],
+            ]));
+        }
+
+        $blockId = $item['evidence_block_ids'][0] ?? null;
+
+        if (! is_string($blockId) || $blockId === '') {
+            throw PublicationExtractionException::parseFailed('Publicação anônima sem bloco de evidência.');
+        }
+
+        return hash('sha256', 'capture-block:v1|'.$capture->id.'|'.$blockId);
     }
 
     /**

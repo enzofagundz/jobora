@@ -31,6 +31,17 @@ it('isola a mesma identidade entre usuários distintos', function () {
         ->and(Publication::count())->toBe(2);
 });
 
+it('isola a mesma identidade entre fontes distintas', function () {
+    $user = User::factory()->create();
+    $resolver = app(PublicationIdentityResolver::class);
+
+    $linkedin = $resolver->resolve($user, 'linkedin', 'shared-post-id', null);
+    $indeed = $resolver->resolve($user, 'indeed', 'shared-post-id', null);
+
+    expect($indeed->isNot($linkedin))->toBeTrue()
+        ->and(Publication::count())->toBe(2);
+});
+
 it('identifica por URL canônica removendo apenas tracking conhecido', function () {
     $user = User::factory()->create();
     $resolver = app(PublicationIdentityResolver::class);

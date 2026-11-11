@@ -46,6 +46,16 @@ class Publication extends Model
         return $this->hasMany(PublicationObservation::class);
     }
 
+    public function clefResults(): HasMany
+    {
+        return $this->hasMany(PublicationClefResult::class);
+    }
+
+    public function triageResults(): HasMany
+    {
+        return $this->hasMany(PublicationTriageResult::class);
+    }
+
     public function opportunitySources(): HasMany
     {
         return $this->hasMany(OpportunitySource::class);

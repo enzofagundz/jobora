@@ -23,6 +23,8 @@ final class JobPostingPresenter
             'role' => $posting->role,
             'company' => $posting->company,
             'status' => $posting->status?->value,
+            'readiness' => $posting->readiness,
+            'opportunity_version' => $posting->opportunity_version,
             'collected_at' => $posting->collected_at?->toIso8601String(),
             'source_url' => $posting->source_url,
             'items_count' => $posting->items_count ?? $posting->items()->count(),
@@ -52,6 +54,43 @@ final class JobPostingPresenter
             'description' => $posting->description,
             'suggested_data' => $posting->suggested_data,
             'error_message' => $posting->error_message,
+            'location' => $posting->location,
+            'work_mode' => $posting->work_mode,
+            'employment_type' => $posting->employment_type,
+            'salary_min' => $posting->salary_min,
+            'salary_max' => $posting->salary_max,
+            'salary_currency' => $posting->salary_currency,
+            'salary_period' => $posting->salary_period,
+            'seniority' => $posting->seniority,
+            'requirements' => $posting->requirements,
+            'technologies' => $posting->technologies,
+            'evidence' => $posting->evidence,
+            'review_reasons' => $posting->review_reasons,
+            'review_history' => $posting->reviewRevisions
+                ->map(fn ($revision): array => [
+                    'id' => $revision->id,
+                    'actor_id' => $revision->actor_id,
+                    'from_version' => $revision->from_version,
+                    'to_version' => $revision->to_version,
+                    'changes' => $revision->changes,
+                    'before_snapshot' => $revision->before_snapshot,
+                    'after_snapshot' => $revision->after_snapshot,
+                    'created_at' => $revision->created_at?->toIso8601String(),
+                ])
+                ->values()
+                ->all(),
+            'sources' => $posting->sources
+                ->map(fn ($source): array => [
+                    'publication_id' => $source->publication_id,
+                    'publication_url' => $source->publication?->url,
+                    'publication_content_version' => $source->publication_content_version,
+                    'publication_triage_result_id' => $source->publication_triage_result_id,
+                    'evidence_block_ids' => $source->evidence_block_ids,
+                    'evidence' => $source->evidence,
+                    'is_legacy' => $source->is_legacy,
+                ])
+                ->values()
+                ->all(),
             'items' => $posting->items
                 ->map(fn ($item): array => [
                     'category' => $item->category?->value,

@@ -1,8 +1,4 @@
 import { toText } from '@/utils/to-text';
-import type { CapturePayload } from '@/types/capture';
-
-/** Casa qualquer subdomínio do Indeed na rota /jobs (filtro fino é o pathname). */
-export const INDEED_ROUTE = new MatchPattern('https://*.indeed.com/jobs*');
 
 export const OBSERVER_DEBOUNCE_MS = 400;
 const PANE_WAIT_TIMEOUT_MS = 12_000;
@@ -12,7 +8,9 @@ const EXPAND_WAIT_MS = 150;
 const PANE_SELECTOR = '#jobsearch-ViewjobPaneWrapper';
 
 export function isIndeedRoute(url: URL | Location): boolean {
-  return url.pathname.startsWith('/jobs');
+  return url.protocol === 'https:'
+    && ['br.indeed.com', 'www.indeed.com', 'indeed.com'].includes(url.hostname)
+    && url.pathname.startsWith('/jobs');
 }
 
 /** Card visível: âncora com data-jk e caixas de layout não vazias. */
@@ -21,16 +19,18 @@ export function isCard(el: Element): boolean {
 }
 
 /**
- * Espera o painel lateral carregar a vaga clicada. `vjk` da URL é a chave
- * primária; fallback compara título do cabeçalho com o do card. Polling de
- * 150 ms até 12 s. Resolve false quando a geração morre (rota trocou,
+ * Espera o painel lateral carregar a vaga clicada. Correlaciona pelo `jk`
+ * explícito do painel ou pelo `vjk` selecionado na URL. Polling de 150 ms até
+ * 12 s. Resolve false quando a geração morre (rota trocou,
  * controller desativado) ou no timeout — nenhum scan antigo espera em vão.
  */
 export function waitForPane(
   generation: number,
   isGenerationActive: (generation: number) => boolean,
   jk: string,
-  cardTitle: string | null,
+  previousVjk: string | null,
+  previousPane: Element | null,
+  previousPaneHtml: string | null,
 ): Promise<boolean> {
   const { promise, resolve } = Promise.withResolvers<boolean>();
   const started = Date.now();
@@ -43,19 +43,14 @@ export function waitForPane(
     }
 
     const pane = document.querySelector(PANE_SELECTOR);
-    const vjk = new URLSearchParams(location.search).get('vjk');
-
-    const vjkMatch = vjk === jk;
-    const title = pane
-      ? pane.querySelector('[data-testid="jobsearch-JobInfoHeader-title"]')
-      : null;
-    const titleText = title ? title.textContent.trim() : '';
-    const titleMatch = !!cardTitle && titleText.length > 0 && titleText === cardTitle;
-
-    const desc = document.querySelector('#jobDescriptionText');
+    const desc = pane?.querySelector('#jobDescriptionText') ?? null;
     const hasDescription = desc !== null && desc.textContent.trim().length > 0;
 
-    if (hasDescription && (vjkMatch || titleMatch)) {
+    if (
+      pane &&
+      hasDescription &&
+      indeedPaneMatches(pane, jk, previousVjk, previousPane, previousPaneHtml)
+    ) {
       clearInterval(timer);
       resolve(true);
       return;
@@ -68,6 +63,42 @@ export function waitForPane(
   }, PANE_POLL_MS);
 
   return promise;
+}
+
+/** Use Indeed's explicit jk marker when present; otherwise require selected vjk. */
+export function indeedPaneMatches(
+  pane: Element,
+  jk: string,
+  previousVjk: string | null = null,
+  previousPane: Element | null = null,
+  previousPaneHtml: string | null = null,
+): boolean {
+  const ownJk = pane.getAttribute('data-jk')?.trim();
+  if (ownJk) return ownJk === jk;
+
+  let hasExplicitIdentity = false;
+  for (const candidate of pane.querySelectorAll('[data-jk]')) {
+    const paneJk = candidate.getAttribute('data-jk')?.trim();
+    if (paneJk === jk) return true;
+    if (paneJk) hasExplicitIdentity = true;
+  }
+
+  for (const link of pane.querySelectorAll<HTMLAnchorElement>('a[href*="jk="]')) {
+    try {
+      const paneJk = new URL(link.href, location.href).searchParams.get('jk');
+      if (paneJk === jk && (previousVjk === jk || pane !== previousPane || pane.innerHTML !== previousPaneHtml)) return true;
+      if (paneJk) hasExplicitIdentity = true;
+    } catch {
+      // Ignore malformed platform links and use selected-card identity below.
+    }
+  }
+
+  if (hasExplicitIdentity) return false;
+
+  return (
+    new URLSearchParams(location.search).get('vjk') === jk &&
+    (previousVjk === jk || pane !== previousPane || pane.innerHTML !== previousPaneHtml)
+  );
 }
 
 /** Expande "...ver mais" no painel: até 2 tentativas, 150 ms entre elas. */
@@ -123,11 +154,11 @@ export async function extractJob(
     q('[data-testid="inlineHeader-companyLocation"]') ||
     cardEl.querySelector('[data-testid="text-location"]')?.textContent.trim() ||
     null;
-  const description = toText(document.querySelector('#jobDescriptionText'));
+  const description = toText(pane.querySelector('#jobDescriptionText'));
 
   return {
     jk,
-    url: window.location.origin + '/viewjob?jk=' + jk,
+    url: `${window.location.origin}/viewjob?jk=${encodeURIComponent(jk)}`,
     title,
     description,
     company,
@@ -135,25 +166,9 @@ export async function extractJob(
   };
 }
 
-/**
- * URL da busca congelada por entrada na rota — o clique na vaga acrescenta
- * `?vjk=<jk>`, então `location.href` no envio estaria errado (userscript usa
- * regex idêntica na inicialização).
- */
+/** Return search URL without the selected-job `vjk` parameter. */
 export function frozenSearchUrl(): string {
-  return window.location.href.replace(/[?&]vjk=[^&]*/, '');
-}
-
-export function buildPayload(raw: IndeedRawJob, searchUrl: string): CapturePayload {
-  return {
-    source: 'indeed',
-    external_id: raw.jk,
-    url: raw.url,
-    search_url: searchUrl,
-    title: raw.title,
-    description: raw.description,
-    company: raw.company,
-    location: raw.location,
-    captured_at: new Date().toISOString(),
-  };
+  const url = new URL(window.location.href);
+  url.searchParams.delete('vjk');
+  return url.toString();
 }

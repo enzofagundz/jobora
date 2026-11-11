@@ -2,13 +2,26 @@
 
 namespace App\Filament\Resources\JobPostings\Pages;
 
+use App\Enums\AiOperationStatus;
 use App\Enums\JobPostingStatus;
 use App\Filament\Resources\JobPostings\JobPostingResource;
+use App\Filament\Resources\JobPostings\Schemas\OpportunityReviewForm;
 use App\Jobs\AnalyzeJobPosting;
+use App\Models\Publication;
+use App\Services\AiOperationService;
+use App\Services\OpportunityReviewConflict;
+use App\Services\OpportunityReviewService;
 use Filament\Actions\Action;
+use Filament\Forms\Components\Hidden;
+use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Filament\Schemas\Components\Utilities\Get;
+use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
+use Illuminate\Validation\ValidationException;
+use LogicException;
 
 class ViewJobPosting extends ViewRecord
 {
@@ -35,12 +48,174 @@ class ViewJobPosting extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('correctOpportunity')
+                ->label('Corrigir oportunidade')
+                ->icon(Heroicon::OutlinedPencilSquare)
+                ->color('warning')
+                ->authorize('update')
+                ->visible(fn (): bool => $this->record->isStructuredOpportunity() && $this->record->readiness === 'needs_review')
+                ->modalHeading('Corrigir oportunidade')
+                ->modalDescription('A correção preserva publicação, evidências, origem e histórico. A oportunidade fica pronta quando não restar pendência.')
+                ->modalWidth(Width::SevenExtraLarge)
+                ->modalSubmitActionLabel('Salvar correção')
+                ->schema([
+                    Hidden::make('expected_version'),
+                    ...OpportunityReviewForm::schema(),
+                ])
+                ->fillForm(fn (): array => [
+                    'expected_version' => $this->record->opportunity_version,
+                    ...OpportunityReviewForm::data($this->record),
+                ])
+                ->action(function (array $data): void {
+                    $expectedVersion = (int) ($data['expected_version'] ?? 0);
+                    unset($data['expected_version']);
+                    $data = OpportunityReviewForm::withoutUnchangedProvenance($data, $this->record);
+
+                    try {
+                        $revision = app(OpportunityReviewService::class)->review(
+                            auth()->user(),
+                            $this->record,
+                            $expectedVersion,
+                            $data,
+                        );
+                    } catch (OpportunityReviewConflict $exception) {
+                        $this->record->refresh()->load(['sources.publication', 'reviewRevisions']);
+
+                        Notification::make()
+                            ->danger()
+                            ->title('A oportunidade mudou')
+                            ->body($exception->getMessage())
+                            ->send();
+
+                        return;
+                    } catch (ValidationException $exception) {
+                        Notification::make()
+                            ->danger()
+                            ->title('Correção não aceita')
+                            ->body(collect($exception->errors())->flatten()->first() ?? 'Revise os dados informados.')
+                            ->send();
+
+                        return;
+                    } catch (LogicException $exception) {
+                        Notification::make()
+                            ->warning()
+                            ->title($exception->getMessage())
+                            ->send();
+
+                        return;
+                    }
+
+                    $posting = $revision->jobPosting;
+                    $this->record->refresh();
+
+                    if ($posting->readiness === 'ready') {
+                        Notification::make()
+                            ->success()
+                            ->title('Oportunidade pronta')
+                            ->body('As pendências de revisão foram resolvidas.')
+                            ->send();
+
+                        return;
+                    }
+
+                    Notification::make()
+                        ->warning()
+                        ->title('Correção salva')
+                        ->body('A oportunidade continua aguardando revisão: '.implode(', ', array_map(
+                            JobPostingResource::reviewReasonLabel(...),
+                            $posting->review_reasons ?? [],
+                        )).'.')
+                        ->send();
+                }),
+            Action::make('reevaluatePublication')
+                ->label('Reavaliar publicação')
+                ->icon(Heroicon::OutlinedArrowPath)
+                ->color('info')
+                ->authorize('update')
+                ->visible(fn (): bool => $this->record->isStructuredOpportunity() && $this->publication() !== null)
+                ->modalHeading('Reavaliar publicação')
+                ->modalDescription('Reexecuta a triagem com o material já persistido, sem nova navegação. Custo de uma chamada de IA por solicitação.')
+                ->modalSubmitActionLabel('Solicitar reavaliação')
+                ->schema([
+                    Toggle::make('retry')
+                        ->label('Repetir somente a etapa com falha')
+                        ->helperText('Reutiliza a decisão e o motivo registrados na operação original.')
+                        ->live(),
+                    Toggle::make('bypass_clef')
+                        ->label('Reavaliar mesmo com a publicação barrada pelo Clef')
+                        ->helperText('O motivo fica registrado junto da decisão original.')
+                        ->visible(fn (Get $get): bool => ! $get('retry'))
+                        ->live(),
+                    Textarea::make('reason')
+                        ->label('Motivo do bypass')
+                        ->required(fn (Get $get): bool => (bool) $get('bypass_clef'))
+                        ->visible(fn (Get $get): bool => ! $get('retry'))
+                        ->maxLength(500)
+                        ->rows(3)
+                        ->columnSpanFull(),
+                ])
+                ->action(function (array $data): void {
+                    $publication = $this->publication();
+
+                    if ($publication === null) {
+                        Notification::make()
+                            ->warning()
+                            ->title('Publicação de origem não encontrada')
+                            ->send();
+
+                        return;
+                    }
+
+                    $retry = (bool) ($data['retry'] ?? false);
+                    $bypassClef = ! $retry && (bool) ($data['bypass_clef'] ?? false);
+
+                    try {
+                        $operation = app(AiOperationService::class)->enqueuePublicationTriage(
+                            auth()->user(),
+                            $publication->id,
+                            $publication->content_version,
+                            $retry,
+                            $bypassClef,
+                            $bypassClef ? ($data['reason'] ?? null) : null,
+                        );
+                    } catch (LogicException $exception) {
+                        Notification::make()
+                            ->warning()
+                            ->title($exception->getMessage())
+                            ->send();
+
+                        return;
+                    }
+
+                    match ($operation->status) {
+                        AiOperationStatus::Completed => Notification::make()
+                            ->success()
+                            ->title('Triagem já concluída')
+                            ->body('A triagem desta versão já foi concluída. Consulte o diagnóstico da oportunidade.')
+                            ->send(),
+                        AiOperationStatus::Queued => Notification::make()
+                            ->info()
+                            ->title('Triagem na fila')
+                            ->body('A triagem desta versão está na fila.')
+                            ->send(),
+                        AiOperationStatus::Running => Notification::make()
+                            ->info()
+                            ->title('Triagem em andamento')
+                            ->body('A triagem desta versão está em andamento.')
+                            ->send(),
+                        AiOperationStatus::Failed => Notification::make()
+                            ->warning()
+                            ->title('Última triagem falhou')
+                            ->body('Consulte o diagnóstico da oportunidade para ver o que aconteceu.')
+                            ->send(),
+                    };
+                }),
             Action::make('retry')
                 ->label('Tentar novamente')
                 ->icon(Heroicon::OutlinedSparkles)
                 ->color('primary')
                 ->authorize('update')
-                ->visible(fn (): bool => $this->record->status === JobPostingStatus::Failed)
+                ->visible(fn (): bool => ! $this->record->isStructuredOpportunity() && $this->record->status === JobPostingStatus::Failed)
                 ->requiresConfirmation()
                 ->modalHeading('Analisar com IA')
                 ->modalDescription('A descrição da vaga será enviada ao modelo de linguagem para (re)estruturação. Custo de uma chamada de IA por execução.')
@@ -54,5 +229,12 @@ class ViewJobPosting extends ViewRecord
                         ->send();
                 }),
         ];
+    }
+
+    private function publication(): ?Publication
+    {
+        return Publication::query()
+            ->whereKey($this->record->sources()->value('publication_id'))
+            ->first();
     }
 }

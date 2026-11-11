@@ -147,23 +147,44 @@ export function createLinkedInController(
     const payload = buildPayload(raw);
     const normalizedUrl = raw.url ? safeHref(raw.url) : null;
     const hasStrongIdentity = Boolean(raw.externalId?.trim() || normalizedUrl);
+    const signature = JSON.stringify([
+      payload.description,
+      payload.author?.name ?? null,
+      payload.author?.profile_url ?? null,
+    ]);
+    const occurrence = current.occurrenceIdentities.get(el);
+    let occurrenceIdentityToEnrich: string | null = null;
     let identity: string;
     if (hasStrongIdentity) {
       identity = await deriveCaptureIdentity({ ...payload, url: normalizedUrl });
+      if (
+        occurrence?.signature === signature &&
+        current.builder.has(occurrence.identity)
+      ) {
+        occurrenceIdentityToEnrich = occurrence.identity;
+      }
     } else {
-      const signature = JSON.stringify([
-        payload.description,
-        payload.author?.name ?? null,
-        payload.author?.profile_url ?? null,
-      ]);
       identity = occurrenceIdentity(current, signature, el);
     }
     if (!isGenerationActive(generation) || attempt !== current) return;
+
+    if (occurrenceIdentityToEnrich !== null && occurrenceIdentityToEnrich !== identity) {
+      if (current.builder.isSamePost(occurrenceIdentityToEnrich, identity)) return;
+      if (session.transferClaim(occurrenceIdentityToEnrich, identity)) {
+        current.builder.enrich(occurrenceIdentityToEnrich, identity, raw, el);
+      } else {
+        current.builder.remove(occurrenceIdentityToEnrich);
+      }
+      current.occurrenceIdentities.set(el, { signature, identity });
+      if (!jumpState.active) scheduleFinalize();
+      return;
+    }
 
     if (current.builder.has(identity)) return;
     if (!session.claim(identity)) return;
 
     current.builder.add(raw, identity, el);
+    current.occurrenceIdentities.set(el, { signature, identity });
 
     if (!jumpState.active) scheduleFinalize();
   }

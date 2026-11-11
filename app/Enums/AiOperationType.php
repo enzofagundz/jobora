@@ -10,4 +10,5 @@ enum AiOperationType: string
     case AtsOptimization = 'ats_optimization';
     case AtsScore = 'ats_score';
     case PublicationExtraction = 'publication_extraction';
+    case PublicationTriage = 'publication_triage';
 }

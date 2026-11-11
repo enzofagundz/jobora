@@ -23,6 +23,7 @@ export interface CaptureSession {
    * scroll ou reentrada SPA já vista — nesses casos nada é enviado nem contado.
    */
   claim(identity: string): boolean;
+  transferClaim(previousIdentity: string, identity: string): boolean;
   /** Só aceita identidade reivindicada; `processed` incrementa exatamente uma vez. */
   applyResult(identity: string, result: CaptureResult): void;
   /** Falha de captura sem payload/identidade útil (elemento inválido). */
@@ -74,10 +75,23 @@ export function createCaptureSession(): CaptureSession {
     }
   }
 
+  function transferClaim(previousIdentity: string, identity: string): boolean {
+    if (previousIdentity === identity) return claimed.has(identity);
+    if (!claimed.delete(previousIdentity)) return false;
+    settled.add(previousIdentity);
+    if (claimed.has(identity) || settled.has(identity)) {
+      counters.found--;
+      return false;
+    }
+    claimed.add(identity);
+    return true;
+  }
+
   return {
     counters,
     claimedIds: claimed,
     claim,
+    transferClaim,
     applyResult,
     markInvalidElement: (el: Element) => invalidElements.add(el),
     isInvalidElement: (el: Element) => invalidElements.has(el),

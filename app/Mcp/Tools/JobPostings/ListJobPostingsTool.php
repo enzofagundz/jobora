@@ -16,13 +16,14 @@ use Laravel\Mcp\Server\Attributes\Description;
 use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
 #[IsReadOnly]
-#[Description('Lista as vagas do usuário configurado, com filtros de status, categoria, cargo, empresa e período. Paginado (limit 20, máx 100).')]
+#[Description('Lista oportunidades do usuário configurado com filtros de readiness, status, categoria, cargo, empresa e período. Paginado (limit 20, máx 100).')]
 class ListJobPostingsTool extends JoboraTool
 {
     protected function execute(Request $request): Response|ResponseFactory
     {
         $validated = $request->validate([
             'status' => ['nullable', 'string'],
+            'readiness' => ['nullable', 'in:ready,needs_review'],
             'category' => ['nullable', 'string'],
             'role' => ['nullable', 'string', 'max:255'],
             'company' => ['nullable', 'string', 'max:255'],
@@ -48,6 +49,10 @@ class ListJobPostingsTool extends JoboraTool
             }
 
             $query->where('status', $status);
+        }
+
+        if (! empty($validated['readiness'])) {
+            $query->where('readiness', $validated['readiness']);
         }
 
         if (! empty($validated['category'])) {
@@ -97,6 +102,7 @@ class ListJobPostingsTool extends JoboraTool
     {
         return [
             'status' => $schema->string()->description('pending, needs_review, confirmed ou failed.'),
+            'readiness' => $schema->string()->enum(['ready', 'needs_review'])->description('Readiness estruturada da oportunidade; null para dados V1.'),
             'category' => $schema->string()->description('skill, tool, methodology, requirement ou experience.'),
             'role' => $schema->string()->description('Filtro parcial por cargo.'),
             'company' => $schema->string()->description('Filtro parcial por empresa.'),

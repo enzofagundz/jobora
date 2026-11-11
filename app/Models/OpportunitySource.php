@@ -14,12 +14,19 @@ class OpportunitySource extends Model
         'job_posting_id',
         'publication_id',
         'is_legacy',
+        'publication_content_version',
+        'publication_triage_result_id',
+        'evidence_block_ids',
+        'evidence',
     ];
 
     protected function casts(): array
     {
         return [
             'is_legacy' => 'boolean',
+            'publication_content_version' => 'integer',
+            'evidence_block_ids' => 'array',
+            'evidence' => 'array',
         ];
     }
 
@@ -51,5 +58,10 @@ class OpportunitySource extends Model
     public function publication(): BelongsTo
     {
         return $this->belongsTo(Publication::class);
+    }
+
+    public function triageResult(): BelongsTo
+    {
+        return $this->belongsTo(PublicationTriageResult::class, 'publication_triage_result_id');
     }
 }

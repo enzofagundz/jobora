@@ -149,11 +149,14 @@ class DiscoveryRunService
         ])->validate();
 
         $outcome = DiscoveryAccessOutcome::from($validated['outcome']);
+        $occurredAt = isset($validated['occurred_at'])
+            ? Carbon::parse($validated['occurred_at'])
+            : $now;
         $this->assertCoherentPayload($outcome, $validated);
 
         $expiredConflict = false;
 
-        $event = DB::transaction(function () use ($user, $executionId, $validated, $outcome, $now, &$expiredConflict): ?DiscoveryRunEvent {
+        $event = DB::transaction(function () use ($user, $executionId, $validated, $outcome, $occurredAt, $now, &$expiredConflict): ?DiscoveryRunEvent {
             $run = DiscoveryRun::query()
                 ->where('user_id', $user->id)
                 ->where('execution_id', $executionId)
@@ -164,8 +167,12 @@ class DiscoveryRunService
                 throw (new ModelNotFoundException)->setModel(DiscoveryRun::class, [$executionId]);
             }
 
-            if ($run->status !== DiscoveryRunStatus::Active || $run->expires_at->lessThanOrEqualTo($now)) {
-                if ($run->status === DiscoveryRunStatus::Active) {
+            $completedWithCapture = $run->status === DiscoveryRunStatus::Completed
+                && $run->page_capture_id !== null;
+
+            if (($run->status !== DiscoveryRunStatus::Active && ! $completedWithCapture)
+                || $run->expires_at->lessThanOrEqualTo($now)) {
+                if ($run->status === DiscoveryRunStatus::Active && $run->expires_at->lessThanOrEqualTo($now)) {
                     $run->forceFill([
                         'status' => DiscoveryRunStatus::Expired,
                         'active_key' => null,
@@ -177,13 +184,22 @@ class DiscoveryRunService
                 return null;
             }
 
+            if ($occurredAt->lessThan($run->reserved_at)
+                || $occurredAt->greaterThanOrEqualTo($run->expires_at)
+                || $occurredAt->greaterThan($now)) {
+                throw ValidationException::withMessages([
+                    'occurred_at' => 'O instante observado deve estar dentro da reserva e não pode ser futuro.',
+                ]);
+            }
+
+            $occurredAt = $occurredAt->copy()->startOfSecond();
             $existing = DiscoveryRunEvent::query()
                 ->where('discovery_run_id', $run->id)
                 ->where('event_key', $validated['event_key'])
                 ->first();
 
             if ($existing !== null) {
-                if (! $this->samePayload($existing, $validated, $outcome)) {
+                if (! $this->samePayload($existing, $validated, $outcome, $occurredAt)) {
                     throw new DiscoveryRunConflictException('A chave do evento já foi usada com outro conteúdo.');
                 }
 
@@ -200,7 +216,7 @@ class DiscoveryRunService
                     'redirects' => $validated['redirects'] ?? [],
                     'details' => $validated['details'] ?? null,
                     'error' => $validated['error'] ?? null,
-                    'occurred_at' => $validated['occurred_at'] ?? $now,
+                    'occurred_at' => $occurredAt,
                 ]));
             } catch (UniqueConstraintViolationException) {
                 $existing = DiscoveryRunEvent::query()
@@ -208,14 +224,16 @@ class DiscoveryRunService
                     ->where('event_key', $validated['event_key'])
                     ->first();
 
-                if ($existing !== null && $this->samePayload($existing, $validated, $outcome)) {
+                if ($existing !== null && $this->samePayload($existing, $validated, $outcome, $occurredAt)) {
                     return $existing;
                 }
 
                 throw new DiscoveryRunConflictException('A chave do evento já foi usada.');
             }
 
-            $run->forceFill(['last_access_at' => $event->occurred_at])->save();
+            if ($run->last_access_at === null || $run->last_access_at->lessThan($event->occurred_at)) {
+                $run->forceFill(['last_access_at' => $event->occurred_at])->save();
+            }
 
             return $event;
         });
@@ -358,20 +376,19 @@ class DiscoveryRunService
         }
     }
 
-    private function samePayload(DiscoveryRunEvent $event, array $validated, DiscoveryAccessOutcome $outcome): bool
-    {
-        $matches = $event->outcome === $outcome
+    private function samePayload(
+        DiscoveryRunEvent $event,
+        array $validated,
+        DiscoveryAccessOutcome $outcome,
+        CarbonInterface $occurredAt,
+    ): bool {
+        return $event->outcome === $outcome
             && $event->final_url === ($validated['final_url'] ?? null)
             && $event->http_status === ($validated['http_status'] ?? null)
             && ($event->redirects ?? []) === ($validated['redirects'] ?? [])
             && $event->details == ($validated['details'] ?? null)
-            && $event->error === ($validated['error'] ?? null);
-
-        if (! array_key_exists('occurred_at', $validated)) {
-            return $matches;
-        }
-
-        return $matches && $event->occurred_at->equalTo(Carbon::parse((string) $validated['occurred_at']));
+            && $event->error === ($validated['error'] ?? null)
+            && (! isset($validated['occurred_at']) || $event->occurred_at?->equalTo($occurredAt));
     }
 
     /**

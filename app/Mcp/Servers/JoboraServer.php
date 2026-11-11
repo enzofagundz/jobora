@@ -26,6 +26,7 @@ use App\Mcp\Tools\Captures\ListJobCapturesTool;
 use App\Mcp\Tools\Captures\ListPublicationsTool;
 use App\Mcp\Tools\Captures\PromoteEligibleJobCapturesTool;
 use App\Mcp\Tools\Captures\PromoteJobCaptureTool;
+use App\Mcp\Tools\Captures\RequestPublicationTriageTool;
 use App\Mcp\Tools\Captures\TriageJobCapturesTool;
 use App\Mcp\Tools\Competencies\ClassifyProfessionalCompetenciesTool;
 use App\Mcp\Tools\Competencies\ListProfessionalCompetenciesTool;
@@ -48,6 +49,7 @@ use App\Mcp\Tools\JobPostings\DeleteJobPostingTool;
 use App\Mcp\Tools\JobPostings\DiscardJobPostingSuggestionTool;
 use App\Mcp\Tools\JobPostings\GetJobPostingTool;
 use App\Mcp\Tools\JobPostings\ListJobPostingsTool;
+use App\Mcp\Tools\JobPostings\ReviewJobPostingTool;
 use App\Mcp\Tools\Market\GetMarketComparisonTool;
 use App\Mcp\Tools\Market\GetMarketFrequenciesTool;
 use App\Mcp\Tools\Market\GetMarketPairsTool;
@@ -82,6 +84,7 @@ final class JoboraServer extends Server
         IngestPageCaptureTool::class,
         GetPageCaptureTool::class,
         ListPublicationsTool::class,
+        RequestPublicationTriageTool::class,
         GetJobCaptureTool::class,
         ListJobCapturesTool::class,
         DeleteJobCaptureTool::class,
@@ -90,6 +93,7 @@ final class JoboraServer extends Server
         PromoteEligibleJobCapturesTool::class,
         CreateJobPostingTool::class,
         GetJobPostingTool::class,
+        ReviewJobPostingTool::class,
         ListJobPostingsTool::class,
         DeleteJobPostingTool::class,
         AnalyzeJobPostingTool::class,

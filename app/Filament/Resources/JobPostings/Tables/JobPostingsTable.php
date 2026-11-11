@@ -5,6 +5,7 @@ namespace App\Filament\Resources\JobPostings\Tables;
 use App\Enums\ConceptCategory;
 use App\Enums\ItemSource;
 use App\Enums\JobPostingStatus;
+use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Filament\Resources\JobPostings\Pages\ApplicationPage;
 use App\Filament\Resources\JobPostings\Schemas\ApplicationMethodForm;
 use App\Jobs\AnalyzeJobPosting;
@@ -98,7 +99,7 @@ class JobPostingsTable
                     ->icon(Heroicon::OutlinedSparkles)
                     ->color('primary')
                     ->authorize('update')
-                    ->visible(fn (JobPosting $record): bool => $record->status === JobPostingStatus::Failed)
+                    ->visible(fn (JobPosting $record): bool => ! $record->isStructuredOpportunity() && $record->status === JobPostingStatus::Failed)
                     ->requiresConfirmation()
                     ->modalHeading('Analisar com IA')
                     ->modalDescription('A descrição da vaga será enviada ao modelo de linguagem para (re)estruturação. Custo de uma chamada de IA por execução.')
@@ -114,12 +115,19 @@ class JobPostingsTable
                 ViewAction::make()
                     ->label('Ver')
                     ->visible(fn (JobPosting $record): bool => $record->status === JobPostingStatus::Pending),
+                Action::make('reviewOpportunity')
+                    ->label('Corrigir oportunidade')
+                    ->icon(Heroicon::OutlinedPencilSquare)
+                    ->color('warning')
+                    ->authorize('update')
+                    ->visible(fn (JobPosting $record): bool => $record->isStructuredOpportunity() && $record->readiness === 'needs_review')
+                    ->url(fn (JobPosting $record): string => JobPostingResource::getUrl('view', ['record' => $record])),
                 Action::make('review')
                     ->label('Revisar')
                     ->icon(Heroicon::OutlinedClipboardDocumentCheck)
                     ->color('warning')
                     ->authorize('update')
-                    ->visible(fn (JobPosting $record): bool => $record->status === JobPostingStatus::NeedsReview)
+                    ->visible(fn (JobPosting $record): bool => ! $record->isStructuredOpportunity() && $record->status === JobPostingStatus::NeedsReview)
                     ->modalHeading('Revisar vaga')
                     ->modalWidth(Width::SevenExtraLarge)
                     ->schema([

@@ -35,6 +35,7 @@ export function createLinkedInPublicationsBuilder(
 ) {
   const posts: StoredPost[] = [];
   const byIdentity = new Map<string, StoredPost>();
+  let nextPostId = 0;
 
   function add(raw: LinkedInRawPost, identity: string, postEl: Element): CollectedPost {
     const existing = byIdentity.get(identity);
@@ -43,7 +44,7 @@ export function createLinkedInPublicationsBuilder(
     const permalink = normalizePermalink(raw.url) ?? permalinkFromExternalId(raw.externalId);
     const platformId = raw.externalId?.trim() || null;
 
-    const blockId = `post-${posts.length + 1}`;
+    const blockId = `post-${++nextPostId}`;
     const block: CapturePostBlock = {
       block_id: blockId,
       kind: 'post',
@@ -64,6 +65,39 @@ export function createLinkedInPublicationsBuilder(
 
   function has(identity: string): boolean {
     return byIdentity.has(identity);
+  }
+
+  function isSamePost(identity: string, otherIdentity: string): boolean {
+    const stored = byIdentity.get(identity);
+    return stored !== undefined && stored === byIdentity.get(otherIdentity);
+  }
+
+  function remove(identity: string): void {
+    const stored = byIdentity.get(identity);
+    if (!stored) return;
+    posts.splice(posts.indexOf(stored), 1);
+    for (const [key, post] of byIdentity) {
+      if (post === stored) byIdentity.delete(key);
+    }
+  }
+
+  function enrich(
+    occurrenceIdentity: string,
+    identity: string,
+    raw: LinkedInRawPost,
+    postEl: Element,
+  ): boolean {
+    const stored = byIdentity.get(occurrenceIdentity);
+    if (!stored || byIdentity.has(identity)) return false;
+
+    const permalink = normalizePermalink(raw.url) ?? permalinkFromExternalId(raw.externalId);
+    stored.block.platform_id = raw.externalId?.trim().slice(0, 255) ?? null;
+    stored.block.permalink = permalink?.slice(0, 2000) ?? null;
+    stored.html = snapshotCaptureBlock(postEl, stored.block);
+    stored.identity = identity;
+    byIdentity.set(identity, stored);
+
+    return true;
   }
 
   function list(): CollectedPost[] {
@@ -104,7 +138,7 @@ export function createLinkedInPublicationsBuilder(
     };
   }
 
-  return { add, has, list, size: () => posts.length, toEnvelope };
+  return { add, enrich, has, isSamePost, remove, list, size: () => posts.length, toEnvelope };
 }
 
 function normalizePermalink(raw: string | null): string | null {
