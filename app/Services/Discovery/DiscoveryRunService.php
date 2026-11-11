@@ -185,6 +185,7 @@ class DiscoveryRunService
                 ]);
             }
 
+            $occurredAt = $occurredAt->copy()->startOfSecond();
             $existing = DiscoveryRunEvent::query()->where('event_key', $validated['event_key'])->first();
 
             if ($existing !== null) {
