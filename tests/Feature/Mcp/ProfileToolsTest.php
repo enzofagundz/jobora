@@ -2,6 +2,7 @@
 
 use App\Enums\ResumeLanguage;
 use App\Mcp\Servers\JoboraServer;
+use App\Mcp\Tools\Profile\RequestProfileImportTool;
 use App\Mcp\Tools\Resume\GetResumeTool;
 use App\Mcp\Tools\Resume\SaveResumeTool;
 use App\Mcp\Tools\Screening\GetScreeningPreferencesTool;
@@ -9,9 +10,15 @@ use App\Mcp\Tools\Screening\SaveScreeningPreferencesTool;
 use App\Mcp\Tools\Search\GenerateSearchUrlTool;
 use App\Services\ResumeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Laravel\Mcp\Server\Tools\Annotations\IsOpenWorld;
 use Tests\Feature\Mcp\McpTestHelpers;
 
 uses(RefreshDatabase::class);
+
+it('declara importação de perfil como operação de mundo aberto', function () {
+    expect((new ReflectionClass(RequestProfileImportTool::class))
+        ->getAttributes(IsOpenWorld::class))->toHaveCount(1);
+});
 
 it('devolve vazio quando não há currículo cadastrado', function () {
     McpTestHelpers::user();
