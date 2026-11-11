@@ -58,6 +58,10 @@ class ClassifyPublicationWithClef implements ShouldBeUnique, ShouldQueueAfterCom
 
     public function handle(JobPrefilter $prefilter, PrefilterPolicy $policy): void
     {
+        if (! config('triage.prefilter.enabled')) {
+            return;
+        }
+
         $this->leaseToken = (string) Str::uuid();
         $result = DB::transaction(function () use ($prefilter): ?PublicationClefResult {
             $result = PublicationClefResult::query()->whereKey($this->resultId)->lockForUpdate()->first();
