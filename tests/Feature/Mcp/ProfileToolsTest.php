@@ -3,6 +3,7 @@
 use App\Enums\ResumeLanguage;
 use App\Mcp\Servers\JoboraServer;
 use App\Mcp\Tools\Profile\GetProfessionalProfileTool;
+use App\Mcp\Tools\Profile\GetProfileImportTool;
 use App\Mcp\Tools\Profile\RequestProfileImportTool;
 use App\Mcp\Tools\Resume\GetResumeTool;
 use App\Mcp\Tools\Resume\SaveResumeTool;
@@ -16,6 +17,11 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 use Tests\Feature\Mcp\McpTestHelpers;
 
 uses(RefreshDatabase::class);
+
+it('declara consulta de importação como somente leitura', function () {
+    expect((new ReflectionClass(GetProfileImportTool::class))
+        ->getAttributes(IsReadOnly::class))->toHaveCount(1);
+});
 
 it('declara consulta de perfil como somente leitura', function () {
     expect((new ReflectionClass(GetProfessionalProfileTool::class))
