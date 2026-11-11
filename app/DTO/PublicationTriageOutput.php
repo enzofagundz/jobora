@@ -232,12 +232,20 @@ final class PublicationTriageOutput
             $reviewReasons[] = 'salary_range_inconsistent';
         }
 
-        foreach ($opportunity['application_methods'] as $method) {
+        foreach ($opportunity['application_methods'] as $index => $method) {
             if ($method['url'] !== null && (filter_var($method['url'], FILTER_VALIDATE_URL) === false
                 || ! in_array(strtolower((string) parse_url($method['url'], PHP_URL_SCHEME)), ['http', 'https'], true))) {
                 $reviewReasons[] = 'application_url_inconsistent';
+                unset($opportunity['application_methods'][$index]);
+            }
+
+            if ($method['email'] !== null && filter_var($method['email'], FILTER_VALIDATE_EMAIL) === false) {
+                $reviewReasons[] = 'unsupported_field_evidence';
+                unset($opportunity['application_methods'][$index]);
             }
         }
+
+        $opportunity['application_methods'] = array_values($opportunity['application_methods']);
 
         $opportunity['readiness'] = $reviewReasons === [] ? 'ready' : 'needs_review';
         $opportunity['review_reasons'] = array_values(array_unique($reviewReasons));
