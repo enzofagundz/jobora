@@ -92,16 +92,7 @@ class PublicationExtractionProcessor
         $sourceScope = $anonymousContentCounts === [] ? null : $this->sourceScope($user, $capture);
 
         $persist(function () use ($user, $capture, $items, $observedAt, $anonymousContentCounts, $sourceScope): void {
-            foreach ($items as $item) {
-                $this->observe(
-                    $user,
-                    $capture,
-                    $item,
-                    $observedAt,
-                    $sourceScope,
-                    $anonymousContentCounts[$item['content_hash']] ?? 0,
-                );
-            }
+            $this->observeAll($user, $capture, $items, $observedAt, $sourceScope, $anonymousContentCounts);
         });
     }
 
@@ -116,27 +107,76 @@ class PublicationExtractionProcessor
     }
 
     /**
-     * @param  array{external_id: ?string, url: ?string, content: string, content_hash: string, evidence_block_ids: list<string>}  $item
+     * Duas capturas com as mesmas publicações em ordens diferentes não podem
+     * travar uma a outra: todas são resolvidas antes e travadas em ordem de id.
+     *
+     * @param  list<array{external_id: ?string, url: ?string, content: string, content_hash: string, evidence_block_ids: list<string>}>  $items
      */
-    private function observe(
+    private function observeAll(
         User $user,
         PageCapture $capture,
-        array $item,
+        array $items,
         CarbonInterface $observedAt,
         ?string $sourceScope,
-        int $sameContentCount,
+        array $anonymousContentCounts,
     ): void {
-        $fingerprint = null;
+        $resolved = [];
 
-        if ($item['external_id'] === null && $item['url'] === null) {
-            $fingerprint = $this->fingerprintForAnonymousPublication($capture, $item, $sourceScope, $sameContentCount);
+        foreach ($items as $item) {
+            $fingerprint = null;
+
+            if ($item['external_id'] === null && $item['url'] === null) {
+                $fingerprint = $this->fingerprintForAnonymousPublication(
+                    $capture,
+                    $item,
+                    $sourceScope,
+                    $anonymousContentCounts[$item['content_hash']] ?? 0,
+                );
+            }
+
+            $resolved[] = [
+                'item' => $item,
+                'publication' => $this->identities->resolve(
+                    $user,
+                    $capture->source,
+                    $item['external_id'],
+                    $item['url'],
+                    $fingerprint,
+                ),
+            ];
         }
 
-        $publication = $this->identities->resolve($user, $capture->source, $item['external_id'], $item['url'], $fingerprint);
+        $ids = array_values(array_unique(array_map(
+            static fn (array $entry): int => $entry['publication']->id,
+            $resolved,
+        )));
 
-        $publication = Publication::query()->whereKey($publication->id)->lockForUpdate()->firstOrFail();
+        $locked = $ids === []
+            ? collect()
+            : Publication::query()
+                ->whereKey($ids)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('id');
+
+        foreach ($resolved as $entry) {
+            $publication = $locked->get($entry['publication']->id);
+
+            if (! $publication instanceof Publication) {
+                throw PublicationExtractionException::processingFailed('Publicação desapareceu durante a extração.');
+            }
+
+            $this->observe($capture, $publication, $entry['item'], $observedAt);
+        }
+    }
+
+    /**
+     * @param  array{external_id: ?string, url: ?string, content: string, content_hash: string, evidence_block_ids: list<string>}  $item
+     */
+    private function observe(PageCapture $capture, Publication $publication, array $item, CarbonInterface $observedAt): void
+    {
         $previousContentHash = $publication->content_hash;
-
         $version = $this->applyContent($publication, $item, $observedAt, $capture->id);
 
         $observation = $this->observations->record($capture, $publication, $observedAt);
@@ -271,13 +311,18 @@ class PublicationExtractionProcessor
 
     private function currentCaptureId(Publication $publication): ?int
     {
-        if ($publication->content_version === null) {
+        $observedAt = $publication->last_observed_at;
+
+        if ($publication->content_version === null || $observedAt === null) {
             return null;
         }
 
+        // Só a captura que estabeleceu a versão no instante corrente conta:
+        // recapturas antigas do mesmo conteúdo também carregam essa versão.
         $captureId = PublicationObservation::query()
             ->where('publication_id', $publication->id)
             ->where('content_version', $publication->content_version)
+            ->where('observed_at', $observedAt)
             ->max('page_capture_id');
 
         return $captureId === null ? null : (int) $captureId;

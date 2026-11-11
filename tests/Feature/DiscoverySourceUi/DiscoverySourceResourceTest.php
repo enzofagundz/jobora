@@ -8,6 +8,7 @@ use App\Filament\Resources\DiscoverySources\Pages\ListDiscoverySources;
 use App\Models\DiscoverySource;
 use App\Models\User;
 use App\Services\Discovery\DiscoverySourceService;
+use App\Services\Discovery\DiscoverySourceUrl;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -206,4 +207,79 @@ it('does not expose another user source in the list or edit route', function () 
 
     expect(fn () => app(DiscoverySourceService::class)->update($this->user, $foreign->id, $foreign->version, ['name' => 'Hack']))
         ->toThrow(ModelNotFoundException::class);
+});
+
+it('persists the OR operator chosen in the form instead of falling back to AND', function () {
+    Livewire::test(CreateDiscoverySource::class)
+        ->fillForm([
+            'name' => 'LinkedIn OR',
+            'source' => 'linkedin',
+            'surface' => DiscoverySourceSurface::LinkedInJobs->value,
+            'frequency_minutes' => 60,
+            'search_mode' => 'criteria',
+            'criteria' => [
+                'keywords' => ['Laravel', 'PHP'],
+                'operator' => 'or',
+            ],
+        ])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    $source = DiscoverySource::query()->sole();
+
+    expect($source->criteria['operator'])->toBe('or')
+        ->and(urldecode($source->url))->toContain('"Laravel" OR "PHP"');
+});
+
+it('keeps the OR operator when an existing source is saved without touching it', function () {
+    $source = DiscoverySource::factory()->for($this->user, 'user')->create([
+        'criteria' => [
+            'keywords' => ['Laravel', 'PHP'],
+            'excluded_terms' => [],
+            'operator' => 'or',
+            'seniority' => null,
+            'location' => null,
+            'work_mode' => 'any',
+            'published_within_days' => null,
+            'easy_apply' => false,
+        ],
+    ]);
+
+    Livewire::test(EditDiscoverySource::class, ['record' => $source->id])
+        ->fillForm(['name' => 'OR preservado'])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($source->refresh()->criteria['operator'])->toBe('or');
+});
+
+it('switches a criteria source to a raw url and clears the old criteria', function () {
+    $source = DiscoverySource::factory()->for($this->user, 'user')->create([
+        'criteria' => [
+            'keywords' => ['Laravel'],
+            'excluded_terms' => [],
+            'operator' => 'and',
+            'seniority' => null,
+            'location' => null,
+            'work_mode' => 'any',
+            'published_within_days' => null,
+            'easy_apply' => false,
+        ],
+        'url' => 'https://www.linkedin.com/jobs/search/?keywords=%22Laravel%22',
+        'canonical_url_hash' => app(DiscoverySourceUrl::class)->hash('https://www.linkedin.com/jobs/search/?keywords=%22Laravel%22'),
+    ]);
+
+    Livewire::test(EditDiscoverySource::class, ['record' => $source->id])
+        ->fillForm([
+            'search_mode' => 'url',
+            'url' => 'https://www.linkedin.com/jobs/search/?keywords=PHP&f_TPR=r604800',
+        ])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    $source->refresh();
+
+    expect($source->criteria)->toBeNull()
+        ->and($source->url)->toBe('https://www.linkedin.com/jobs/search/?keywords=PHP&f_TPR=r604800')
+        ->and($source->version)->toBe(2);
 });

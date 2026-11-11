@@ -104,11 +104,21 @@ async function refreshQueue(): Promise<void> {
     if (request !== queueRequest) return;
     if (isQueueStatusResponse(response)) {
       queueStatus.value = response.status;
+      // Confirmação destrutiva não sobrevive a uma lista que não tem mais o item.
+      if (
+        pendingDiscardKey.value !== null &&
+        !response.status.items.some(
+          (item) => item.idempotency_key === pendingDiscardKey.value,
+        )
+      ) {
+        pendingDiscardKey.value = null;
+      }
       return;
     }
     if (isQueueErrorResponse(response) && response.error === 'auth') {
       queueStatus.value = null;
       queueAuthRequired.value = true;
+      pendingDiscardKey.value = null;
       return;
     }
     queueError.value = true;
@@ -233,11 +243,14 @@ async function runQueueAction(
   message: { type: 'capture:queue-resume' | 'capture:queue-discard'; idempotency_key: string },
   successMessage: string,
 ): Promise<void> {
+  // A resposta da ação é o estado mais novo: refreshes em voo não podem sobrescrevê-la.
+  const request = ++queueRequest;
   actionKey.value = message.idempotency_key;
   actionError.value = '';
   actionInfo.value = '';
   try {
     const response: unknown = await browser.runtime.sendMessage(message);
+    if (request !== queueRequest) return;
     if (isQueueStatusResponse(response)) {
       queueStatus.value = response.status;
       queueAuthRequired.value = false;
@@ -255,6 +268,7 @@ async function runQueueAction(
     actionError.value = 'Não foi possível falar com o serviço. Tente de novo.';
   } finally {
     actionKey.value = null;
+    if (request === queueRequest) queueLoading.value = false;
   }
 }
 
@@ -392,6 +406,7 @@ async function disconnect(): Promise<void> {
   await apiToken.removeValue();
   await lastApiStatus.setValue(null);
   validatedToken.value = '';
+  pendingDiscardKey.value = null;
   message.value = 'Token removido.';
   void refreshQueue();
 }

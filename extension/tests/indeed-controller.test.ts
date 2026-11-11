@@ -417,11 +417,22 @@ describe('indeed controller — integridade observer/SPA', () => {
     });
     const handler = createCaptureMessageHandler(createCaptureQueue(store), contexts);
     const bodies: CaptureEnvelope[] = [];
-    let fetchCalls = 0;
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
-      fetchCalls++;
+    let captureCalls = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const pathname = new URL(String(url)).pathname;
+      if (pathname === '/api/extension/auth/validate') {
+        const token = new Headers(init?.headers).get('Authorization');
+        return new Response(JSON.stringify({ owner_user_id: token === 'Bearer token-indeed-a' ? 1 : 2 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      expect(pathname).toBe('/api/page-captures');
+      expect(init?.method).toBe('POST');
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer token-indeed-a');
+      captureCalls++;
       bodies.push(JSON.parse((init?.body as string) ?? '{}') as CaptureEnvelope);
-      if (fetchCalls === 1) throw new TypeError('offline depois do persist');
+      if (captureCalls === 1) throw new TypeError('offline depois do persist');
       return new Response(JSON.stringify({ id: 31, replay: true, coverage: 'complete' }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -447,9 +458,11 @@ describe('indeed controller — integridade observer/SPA', () => {
 
     const { controller, deactivate } = await activateUntilDone();
     await advance(3_000);
-    for (let index = 0; index < 100 && (controller.getCaptureState().pending || store.records.size === 0); index++) {
-      await advance(50);
-    }
+    const submissionIndex = sendMessageMock.mock.calls.findIndex(
+      ([message]) => (message as CaptureMessage).type === 'capture:submit-envelope',
+    );
+    expect(submissionIndex).toBeGreaterThanOrEqual(0);
+    await sendMessageMock.mock.results[submissionIndex]!.value;
     expect(controller.getCaptureState()).toMatchObject({ captured: false, pending: false });
     expect(store.records.size).toBe(1);
     const queued = [...store.records.values()][0]!;
@@ -461,14 +474,14 @@ describe('indeed controller — integridade observer/SPA', () => {
 
     await apiToken.setValue('token-indeed-b');
     await handler({ type: 'capture:queue-drain' });
-    expect(fetchCalls).toBe(1);
+    expect(captureCalls).toBe(1);
     expect(store.records.size).toBe(1);
 
     await apiToken.setValue('token-indeed-a');
     const restarted = createCaptureMessageHandler(createCaptureQueue(store), contexts);
     const drain = await restarted({ type: 'capture:queue-drain' });
     expect(drain).toMatchObject({ ok: true, drain: { captured: 1 } });
-    expect(fetchCalls).toBe(2);
+    expect(captureCalls).toBe(2);
     expect(store.records.size).toBe(0);
     expect(bodies[0]!.capture.idempotency_key).toBe(bodies[1]!.capture.idempotency_key);
     expect(bodies[1]!.capture.execution_id).toBe('exec-indeed-test');

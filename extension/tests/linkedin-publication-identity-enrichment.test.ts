@@ -61,7 +61,7 @@ describe('LinkedIn publicação anônima hidratada', () => {
     }
     const queue = createCaptureQueue(store);
     const identities = createHydrationIdentityCollector();
-    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockImplementation(async (raw: unknown) => {
+    const sendMessage = vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockImplementation(async (raw: unknown) => {
       const message = raw as CaptureMessage;
       if (message.type === 'capture:resolve-run') {
         return {
@@ -106,6 +106,12 @@ describe('LinkedIn publicação anônima hidratada', () => {
     await vi.advanceTimersByTimeAsync(OBSERVER_DEBOUNCE_MS + 100);
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await vi.advanceTimersByTimeAsync(2000);
+
+    const submissionIndex = sendMessage.mock.calls.findIndex(
+      ([message]) => (message as unknown as CaptureMessage).type === 'capture:submit-envelope',
+    );
+    expect(submissionIndex).toBeGreaterThanOrEqual(0);
+    await sendMessage.mock.results[submissionIndex]!.value;
 
     const records = [...store.records.values()];
     expect(records).toHaveLength(1);
@@ -268,6 +274,39 @@ describe('LinkedIn publicação anônima hidratada', () => {
     expect(envelopes.flatMap((envelope) => envelope.blocks)).toHaveLength(1);
     expect(envelopes[0]!.blocks[0]).toMatchObject({ platform_id: `urn:li:activity:${ACTIVITY_ID}` });
     expect(controller.getCaptureState().blocks).toBe(1);
+    const session = vi.mocked(createCaptureSession).mock.results.at(-1)!.value;
+    expect(session.counters).toMatchObject({ found: 1, processed: 1, sent: 1, duplicates: 0 });
+    expect(session.claimedIds.size).toBe(0);
+    controller.deactivate();
+  });
+
+  it('promotes the reanchored anonymous occurrence after virtualization', async () => {
+    const envelopes: CaptureEnvelope[] = [];
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockImplementation(async (raw: unknown) => {
+      const message = raw as CaptureMessage;
+      if (message.type === 'capture:resolve-run') {
+        return { ok: true, run: null, context: 'ctx-hydration' };
+      }
+      if (message.type === 'capture:submit-envelope') envelopes.push(message.envelope);
+      return { ok: true, duplicate: false };
+    });
+    const controller = createLinkedInController();
+    const activation = controller.activate(new ContentScriptContext('linkedin-reanchored-promotion'));
+    await vi.advanceTimersByTimeAsync(200);
+    await activation;
+    const original = document.querySelector('[role="listitem"]')!;
+    const replacement = original.cloneNode(true) as Element;
+    original.replaceWith(replacement);
+    await vi.advanceTimersByTimeAsync(OBSERVER_DEBOUNCE_MS + 100);
+    expect(controller.getCaptureState().blocks).toBe(1);
+    replacement.setAttribute('data-urn', `urn:li:activity:${ACTIVITY_ID}`);
+    replacement.remove();
+    document.querySelector('.feed')!.appendChild(replacement);
+    await vi.advanceTimersByTimeAsync(OBSERVER_DEBOUNCE_MS + 100);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(envelopes.flatMap((envelope) => envelope.blocks)).toHaveLength(1);
+    expect(envelopes[0]!.blocks[0]).toMatchObject({ platform_id: `urn:li:activity:${ACTIVITY_ID}` });
     const session = vi.mocked(createCaptureSession).mock.results.at(-1)!.value;
     expect(session.counters).toMatchObject({ found: 1, processed: 1, sent: 1, duplicates: 0 });
     expect(session.claimedIds.size).toBe(0);

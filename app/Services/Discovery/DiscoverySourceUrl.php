@@ -134,11 +134,11 @@ class DiscoverySourceUrl
 
         $canonical = mb_strtolower($parts['scheme']).'://'.mb_strtolower($parts['host']);
 
-        if (isset($parts['port'])) {
+        if (isset($parts['port']) && ! $this->isDefaultPort(mb_strtolower($parts['scheme']), (int) $parts['port'])) {
             $canonical .= ':'.$parts['port'];
         }
 
-        $canonical .= $parts['path'] ?? '/';
+        $canonical .= $this->normalizePath($parts['path'] ?? '/');
 
         if ($query !== []) {
             $canonical .= '?'.http_build_query($query, '', '&', PHP_QUERY_RFC3986);
@@ -150,5 +150,17 @@ class DiscoverySourceUrl
     public function hash(string $url): string
     {
         return hash('sha256', $this->canonical($url));
+    }
+
+    private function normalizePath(string $path): string
+    {
+        $path = rtrim($path, '/');
+
+        return $path === '' ? '/' : $path;
+    }
+
+    private function isDefaultPort(string $scheme, int $port): bool
+    {
+        return ($scheme === 'https' && $port === 443) || ($scheme === 'http' && $port === 80);
     }
 }

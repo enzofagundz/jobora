@@ -116,12 +116,15 @@ class CaptureIngestionService
             ->where('execution_id', $capture['execution_id'])
             ->first();
 
+        $source = $run?->source;
+
         if ($run === null
+            || $source === null
             || $run->status !== DiscoveryRunStatus::Active
             || $run->expires_at->lessThanOrEqualTo($now)
             || $run->page_capture_id !== null
             || $run->surface !== $capture['surface']
-            || $run->source->source !== $capture['source']
+            || $source->source !== $capture['source']
             || $run->canonical_url_hash !== app(DiscoverySourceUrl::class)->hash((string) $capture['initial_url'])) {
             throw new CaptureConflictException('Execução inexistente, expirada, ambígua ou de outro usuário.');
         }
@@ -149,6 +152,11 @@ class CaptureIngestionService
         ])->save();
 
         $source = $locked->source;
+
+        if ($source === null) {
+            throw new CaptureConflictException('A fonte da execução não está mais disponível.');
+        }
+
         $source->forceFill([
             'next_due_at' => $now->copy()->addMinutes($source->frequency_minutes),
         ]);

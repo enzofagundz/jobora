@@ -22,16 +22,29 @@ const SESSION_CONTEXTS = storage.defineItem<Record<string, CredentialContext>>(
   { fallback: {} },
 );
 
+// Storage de sessão é um único objeto: leitura-modificação-escrita concorrente
+// (duas abas resolvendo execução ao mesmo tempo) perderia um contexto.
+let writes: Promise<unknown> = Promise.resolve();
+
+function serializeWrite<T>(operation: () => Promise<T>): Promise<T> {
+  const result = writes.then(operation, operation);
+  writes = result.catch(() => undefined);
+
+  return result;
+}
+
 /** Contexto opaco por execução/credencial; nunca contém token. */
 export function createSessionCredentialContextStore(): CredentialContextStore {
   return {
-    async put(id, context) {
-      const all = await SESSION_CONTEXTS.getValue();
-      const entries = Object.entries(all)
-        .sort(([, a], [, b]) => a.createdAt - b.createdAt)
-        .slice(-(MAX_CONTEXTS - 1));
-      entries.push([id, context]);
-      await SESSION_CONTEXTS.setValue(Object.fromEntries(entries));
+    put(id, context) {
+      return serializeWrite(async () => {
+        const all = await SESSION_CONTEXTS.getValue();
+        const entries = Object.entries(all)
+          .sort(([, a], [, b]) => a.createdAt - b.createdAt)
+          .slice(-(MAX_CONTEXTS - 1));
+        entries.push([id, context]);
+        await SESSION_CONTEXTS.setValue(Object.fromEntries(entries));
+      });
     },
 
     async get(id) {

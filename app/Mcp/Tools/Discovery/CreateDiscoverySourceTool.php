@@ -28,7 +28,7 @@ class CreateDiscoverySourceTool extends DiscoverySourceTool
             'keywords.*' => ['string', 'max:100'],
             'excluded_terms' => ['nullable', 'array', 'max:20'],
             'excluded_terms.*' => ['string', 'max:100'],
-            'operator' => ['nullable', 'in:all,any'],
+            'operator' => ['nullable', 'in:all,any,and,or'],
             'seniority' => ['nullable', 'in:internship,junior,mid_level,senior'],
             'location' => ['nullable', 'string', 'max:255'],
             'work_mode' => ['nullable', 'in:any,remote,hybrid,onsite'],

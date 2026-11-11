@@ -214,3 +214,152 @@ it('keeps legitimate raw urls with supported period filters', function (string $
     'linkedin f_TPR válido' => ['linkedin', 'linkedin_jobs', 'https://www.linkedin.com/jobs/search/?keywords=PHP&f_TPR=r604800'],
     'linkedin publications datePosted válido' => ['linkedin', 'linkedin_publications', 'https://www.linkedin.com/search/results/content/?keywords=PHP&datePosted=%5B%22past-week%22%5D'],
 ]);
+
+it('maps legacy operator aliases to the canonical enum value', function () {
+    $user = User::factory()->create();
+
+    $source = discoveryService()->create($user, [
+        'name' => 'OR legado',
+        'source' => 'linkedin',
+        'surface' => 'linkedin_jobs',
+        'frequency_minutes' => 60,
+        'criteria' => [
+            'keywords' => ['Laravel', 'PHP'],
+            'operator' => 'any',
+        ],
+    ]);
+
+    expect($source->criteria['operator'])->toBe('or')
+        ->and(urldecode($source->url))->toContain('"Laravel" OR "PHP"');
+});
+
+it('merges partial criteria updates into the persisted criteria', function () {
+    $user = User::factory()->create();
+
+    $source = DiscoverySource::factory()->for($user, 'user')->create([
+        'criteria' => [
+            'keywords' => ['Laravel'],
+            'excluded_terms' => ['Estágio'],
+            'operator' => 'or',
+            'seniority' => 'senior',
+            'location' => 'São Paulo',
+            'work_mode' => 'remote',
+            'published_within_days' => 7,
+            'easy_apply' => true,
+        ],
+    ]);
+
+    $updated = discoveryService()->update($user, $source->id, 1, [
+        'criteria' => ['keywords' => ['PHP']],
+    ]);
+
+    expect($updated->criteria['keywords'])->toBe(['PHP'])
+        ->and($updated->criteria['excluded_terms'])->toBe(['Estágio'])
+        ->and($updated->criteria['operator'])->toBe('or')
+        ->and($updated->criteria['seniority'])->toBe('senior')
+        ->and($updated->criteria['location'])->toBe('São Paulo')
+        ->and($updated->criteria['work_mode'])->toBe('remote')
+        ->and($updated->criteria['published_within_days'])->toBe(7)
+        ->and($updated->criteria['easy_apply'])->toBeTrue();
+});
+
+it('schedules a reactivated source as due immediately', function () {
+    $user = User::factory()->create();
+    $source = DiscoverySource::factory()->for($user, 'user')->create(['active' => true]);
+
+    $deactivated = discoveryService()->deactivate($user, $source->id, 1);
+
+    expect($deactivated->active)->toBeFalse()
+        ->and($deactivated->next_due_at)->toBeNull();
+
+    $reactivated = discoveryService()->update($user, $source->id, $deactivated->version, ['active' => true]);
+
+    expect($reactivated->active)->toBeTrue()
+        ->and($reactivated->next_due_at)->not->toBeNull()
+        ->and($reactivated->next_due_at->lessThanOrEqualTo(now()))->toBeTrue();
+});
+
+it('treats trailing slashes and default ports as the same canonical source', function () {
+    $urls = app(DiscoverySourceUrl::class);
+
+    expect($urls->canonical('https://www.linkedin.com:443/jobs/search/?keywords=PHP'))
+        ->toBe($urls->canonical('https://www.linkedin.com/jobs/search?keywords=PHP'));
+
+    $user = User::factory()->create();
+
+    discoveryService()->create($user, [
+        'name' => 'Sem barra',
+        'source' => 'linkedin',
+        'surface' => 'linkedin_jobs',
+        'frequency_minutes' => 60,
+        'url' => 'https://www.linkedin.com/jobs/search?keywords=PHP',
+    ]);
+
+    expect(fn () => discoveryService()->create($user, [
+        'name' => 'Com barra',
+        'source' => 'linkedin',
+        'surface' => 'linkedin_jobs',
+        'frequency_minutes' => 60,
+        'url' => 'https://www.linkedin.com:443/jobs/search/?keywords=PHP',
+    ]))->toThrow(ValidationException::class);
+});
+
+it('allows recreating the same canonical url after a soft delete', function () {
+    $user = User::factory()->create();
+
+    $created = discoveryService()->create($user, [
+        'name' => 'Primeira',
+        'source' => 'linkedin',
+        'surface' => 'linkedin_jobs',
+        'frequency_minutes' => 60,
+        'url' => 'https://www.linkedin.com/jobs/search/?keywords=PHP',
+    ]);
+
+    $deleted = discoveryService()->delete($user, $created->id, $created->version);
+
+    expect($deleted->canonical_url_hash)->toBeNull();
+
+    $recreated = discoveryService()->create($user, [
+        'name' => 'Recriada',
+        'source' => 'linkedin',
+        'surface' => 'linkedin_jobs',
+        'frequency_minutes' => 60,
+        'url' => 'https://www.linkedin.com/jobs/search/?keywords=PHP',
+    ]);
+
+    expect($recreated->name)->toBe('Recriada')
+        ->and($recreated->id)->not->toBe($created->id)
+        ->and(DiscoverySource::query()->count())->toBe(1);
+});
+
+it('reports unsupported platform combinations as criteria validation errors', function (string $sourceName, string $surface, array $criteria) {
+    $user = User::factory()->create();
+
+    expect(fn () => discoveryService()->create($user, [
+        'name' => 'Combinação inválida',
+        'source' => $sourceName,
+        'surface' => $surface,
+        'frequency_minutes' => 60,
+        'criteria' => $criteria,
+    ]))->toThrow(ValidationException::class);
+})->with([
+    'indeed híbrido' => ['indeed', 'indeed_jobs', ['keywords' => ['PHP'], 'work_mode' => 'hybrid']],
+    'indeed easy apply' => ['indeed', 'indeed_jobs', ['keywords' => ['PHP'], 'easy_apply' => true]],
+    'publicações 3 dias' => ['linkedin', 'linkedin_publications', ['keywords' => ['PHP'], 'published_within_days' => 3]],
+]);
+
+it('returns the requested slice for offsets that are not page aligned', function () {
+    $user = User::factory()->create();
+
+    foreach (range(1, 5) as $index) {
+        DiscoverySource::factory()->for($user, 'user')->create(['name' => 'Fonte '.$index]);
+    }
+
+    $page = discoveryService()->paginate($user, [], 2, 1);
+
+    expect($page->total())->toBe(5)
+        ->and($page->perPage())->toBe(2)
+        ->and($page->items())->toHaveCount(2)
+        ->and($page->items()[0]->name)->toBe('Fonte 4')
+        ->and($page->items()[1]->name)->toBe('Fonte 3');
+});

@@ -480,6 +480,134 @@ describe('LinkedIn publicações — envelope consolidado', () => {
     await advance(0);
   });
 
+  it('falha de correlação sem contexto não descarta os posts coletados', async () => {
+    mountFeed(2);
+    const envelopes: CaptureEnvelope[] = [];
+    let resolves = 0;
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockImplementation(async (raw: unknown) => {
+      const message = raw as CaptureMessage;
+      if (message.type === 'capture:resolve-run') {
+        resolves++;
+        if (resolves === 1) return { ok: false, error: 'credential_changed' };
+        return {
+          ok: true,
+          run: {
+            executionId: 'exec-1',
+            source: 'linkedin',
+            surface: 'linkedin_publications',
+            initialUrl: SEARCH_URL,
+            expiresAt: null,
+          },
+          context: 'ctx-test',
+        };
+      }
+      if (message.type === 'capture:submit-envelope') {
+        envelopes.push(message.envelope);
+        return { ok: true, duplicate: false, status: 201, coverage: 'complete' };
+      }
+      return { ok: true, duplicate: false };
+    });
+
+    const controller = createLinkedInController();
+    const active = controller.activate(new ContentScriptContext(`test-context-${Math.random()}`));
+    await advance(200);
+    await active;
+    await advance(1200 * 8);
+
+    expect(resolves).toBeGreaterThan(1);
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]!.blocks).toHaveLength(2);
+
+    controller.deactivate();
+    await advance(0);
+  });
+
+  it('busca sem cards no primeiro scan não finaliza como vazia', async () => {
+    document.body.innerHTML = '<div class="feed"></div>';
+    const { envelopes } = setupMessaging();
+    const controller = createLinkedInController();
+
+    const active = controller.activate(new ContentScriptContext(`test-empty-${Math.random()}`));
+    await advance(200);
+    await active;
+
+    // LinkedIn renderiza os resultados depois do document_start.
+    await advance(800);
+    const feed = document.querySelector('.feed') as HTMLElement;
+    feed.insertAdjacentHTML('beforeend', cardHtml(1));
+    await advance(OBSERVER_DEBOUNCE_MS + 100);
+    await advance(1200 * 4);
+
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]!.blocks).toHaveLength(1);
+    expect(envelopes[0]!.capture.coverage).toMatchObject({ status: 'complete', reason: null });
+
+    controller.deactivate();
+    await advance(0);
+  });
+
+  it('card que chega na janela de settle ainda entra no envelope', async () => {
+    mountFeed(1);
+    const { envelopes } = setupMessaging();
+    const controller = createLinkedInController();
+    const ctx = new ContentScriptContext(`test-settle-${Math.random()}`);
+
+    const active = controller.activate(ctx);
+    // Interação do usuário dispensa o auto-scroll: resta só a janela de settle.
+    window.dispatchEvent(new Event('wheel', { bubbles: true }));
+    await advance(200);
+    await active;
+
+    await advance(1200);
+    const feed = document.querySelector('.feed') as HTMLElement;
+    feed.insertAdjacentHTML('beforeend', cardHtml(9));
+    await advance(OBSERVER_DEBOUNCE_MS + 100);
+    await advance(1200 * 4);
+
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]!.blocks).toHaveLength(2);
+    expect(envelopes[0]!.capture.html).toContain('Vaga 9 para desenvolvedor PHP.');
+
+    controller.deactivate();
+    await advance(0);
+  });
+
+  it('post sem identidade não duplica quando o virtualizado recria o elemento', async () => {
+    document.body.innerHTML = `
+      <div class="feed">
+        <article role="listitem">
+          <a href="https://www.linkedin.com/in/autor-a">Autor A</a>
+          <div data-testid="expandable-text-box"><p>ANONYMOUS_RERENDERED</p></div>
+        </article>
+      </div>`;
+    const { envelopes } = setupMessaging();
+    const controller = createLinkedInController();
+    await activate(controller);
+
+    const feed = document.querySelector('.feed') as HTMLElement;
+    const original = feed.querySelector('[role="listitem"]') as HTMLElement;
+    await advance(1000);
+
+    // Virtualização descarta o card e o re-renderiza em outro elemento.
+    feed.removeChild(original);
+    feed.insertAdjacentHTML(
+      'beforeend',
+      `<article role="listitem">
+        <a href="https://www.linkedin.com/in/autor-a">Autor A</a>
+        <div data-testid="expandable-text-box"><p>ANONYMOUS_RERENDERED</p></div>
+      </article>`,
+    );
+    await advance(OBSERVER_DEBOUNCE_MS + 100);
+    await advance(1200 * 8);
+
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]!.blocks).toHaveLength(1);
+    expect(envelopes[0]!.capture.html.split('ANONYMOUS_RERENDERED')).toHaveLength(2);
+
+    controller.deactivate();
+    await advance(0);
+  });
+
   it('captura novo conteúdo quando DOM virtualizado reutiliza mesmo elemento', async () => {
     document.body.innerHTML = `
       <div class="feed">

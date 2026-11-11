@@ -221,6 +221,134 @@ describe('linkedin-jobs controller — envelope consolidado', () => {
     deactivate();
   });
 
+  it('card hidratado só por atributos entra no mesmo envelope', async () => {
+    mountJobsList(1);
+    const { envelopes, deactivate } = await activateJobs();
+    const list = document.querySelector('.scaffold-layout__list-container') as HTMLElement;
+    list.insertAdjacentHTML(
+      'beforeend',
+      `<li class="scaffold-layout__list-item">
+        <div class="job-card-container">
+          <a class="job-card-container__link">Vaga tardia</a>
+          <div class="artdeco-entity-lockup__subtitle">Empresa 777</div>
+        </div>
+      </li>`,
+    );
+    await advance(OBSERVER_DEBOUNCE_MS + 100);
+
+    // Item já está no DOM: só os atributos chegam depois.
+    const shell = list.querySelector('li:last-child .job-card-container') as HTMLElement;
+    shell.setAttribute('data-job-id', '777');
+    shell.querySelector('a')!.setAttribute('href', '/jobs/view/777/');
+    await advance(OBSERVER_DEBOUNCE_MS + 100);
+    await advance(5000);
+
+    expect(envelopes).toHaveLength(1);
+    expect(
+      envelopes[0]!.blocks
+        .filter((block) => block.kind === 'card')
+        .map((block) => block.platform_id),
+    ).toEqual(['1', '777']);
+    expect(
+      envelopes[0]!.blocks.filter((block) => block.kind === 'detail'),
+    ).toHaveLength(2);
+    deactivate();
+  });
+
+  it('falha de correlação sem contexto não descarta os cards coletados', async () => {
+    mountJobsList(2);
+    const envelopes: CaptureEnvelope[] = [];
+    let resolves = 0;
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockImplementation(async (raw: unknown) => {
+      const message = raw as CaptureMessage;
+      if (message.type === 'capture:resolve-run') {
+        resolves++;
+        if (resolves === 1) return { ok: false, error: 'credential_changed' };
+        return {
+          ok: true,
+          run: {
+            executionId: 'exec-jobs-1',
+            source: 'linkedin',
+            surface: 'linkedin_jobs',
+            initialUrl: SEARCH_URL,
+            expiresAt: null,
+          },
+          context: 'ctx-test',
+        };
+      }
+      if (message.type === 'capture:submit-envelope') {
+        envelopes.push(message.envelope);
+        return { ok: true, duplicate: false, status: 201, coverage: 'complete' };
+      }
+      return { ok: true, duplicate: false };
+    });
+
+    const controller = createLinkedInJobsController();
+    const active = controller.activate(new ContentScriptContext(`test-context-${Math.random()}`));
+    for (let i = 0; i < 300; i++) await advance(200);
+    await active;
+    await advance(10_000);
+
+    expect(resolves).toBeGreaterThan(1);
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]!.blocks.filter((block) => block.kind === 'card')).toHaveLength(2);
+    expect(
+      envelopes[0]!.blocks.filter((block) => block.kind === 'detail'),
+    ).toHaveLength(2);
+    controller.deactivate();
+  });
+
+  it('detalhe que falha não é tentado duas vezes pelos dois candidatos do card', async () => {
+    document.removeEventListener('click', spaClickHandler, true);
+    let clicks = 0;
+    const counter = (event: Event): void => {
+      if (event.target instanceof Element && event.target.closest('div[data-job-id]')) {
+        clicks++;
+      }
+    };
+    document.addEventListener('click', counter, true);
+    mountJobsList(1);
+
+    const { controller, envelopes, deactivate } = await activateJobs();
+    await advance(30_000);
+
+    // Sem falhar o detalhe, o card é clicado exatamente uma vez.
+    expect(clicks).toBe(1);
+    expect(envelopes).toHaveLength(1);
+    expect(controller.getCaptureState()).toMatchObject({ cards: 1, details: 0 });
+
+    document.removeEventListener('click', counter, true);
+    deactivate();
+  });
+
+  it('vaga já resolvida na aba não é reenviada depois de reativar a captura', async () => {
+    mountJobsList(1);
+    const controller = createLinkedInJobsController();
+    const first = setupMessaging();
+    const firstCtx = new ContentScriptContext(`test-react-1-${Math.random()}`);
+    const initial = controller.activate(firstCtx);
+    for (let i = 0; i < 300; i++) await advance(200);
+    await initial;
+    await advance(5000);
+    expect(first.envelopes).toHaveLength(1);
+    controller.deactivate();
+
+    const second = setupMessaging();
+    const reactivated = controller.activate(new ContentScriptContext(`test-react-2-${Math.random()}`));
+    for (let i = 0; i < 300; i++) await advance(200);
+    await reactivated;
+    await advance(5000);
+
+    expect(second.envelopes).toHaveLength(1);
+    expect(second.envelopes[0]!.blocks.filter((block) => block.kind === 'card')).toHaveLength(0);
+    expect(second.envelopes[0]!.capture.coverage).toMatchObject({
+      status: 'partial',
+      reason: 'no_content',
+      blocks_captured: 0,
+    });
+    controller.deactivate();
+  });
+
   it('detalhe antigo nunca é associado ao card novo, mesmo com título igual', async () => {
     document.removeEventListener('click', spaClickHandler, true);
     const delayedHandler = (event: Event) => {
@@ -471,7 +599,15 @@ describe('linkedin-jobs controller — envelope consolidado', () => {
     let fetchCalls = 0;
     const bodies: CaptureEnvelope[] = [];
     vi.spyOn(globalThis, 'fetch').mockImplementation(
-      async (_url: string | URL | Request, init?: RequestInit) => {
+      async (url: string | URL | Request, init?: RequestInit) => {
+        if (String(url).includes('/extension/auth/validate')) {
+          const token = ((init?.headers as Record<string, string> | undefined)?.Authorization ?? '')
+            .replace(/^Bearer\s+/, '');
+          return new Response(
+            JSON.stringify({ valid: true, owner_user_id: token === 'token-b' ? 2 : 1 }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
         fetchCalls++;
         bodies.push(JSON.parse((init?.body as string) ?? '{}') as CaptureEnvelope);
         if (fetchCalls === 1) throw new TypeError('offline depois do persist');

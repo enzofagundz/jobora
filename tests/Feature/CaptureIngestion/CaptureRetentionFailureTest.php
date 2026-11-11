@@ -84,3 +84,41 @@ it('limpa metadados expirados quando o objeto já está ausente', function () {
         ->and($capture->refresh()->html_path)->toBeNull()
         ->and($capture->raw_deleted_at)->not->toBeNull();
 });
+
+it('does not count an orphan object whose delete fails', function () {
+    $disk = Mockery::mock(Filesystem::class);
+    $disk->shouldReceive('allFiles')->once()->andReturn(['capture-envelopes/orphan.html']);
+    $disk->shouldReceive('lastModified')->once()->andReturn(now()->subDays(2)->getTimestamp());
+    $disk->shouldReceive('delete')->once()->with('capture-envelopes/orphan.html')->andReturn(false);
+    Storage::shouldReceive('disk')->with('local')->andReturn($disk);
+
+    Log::spy();
+
+    $result = app(CaptureRetentionService::class)->reconcileOrphans();
+
+    expect($result['objects'])->toBe(0);
+
+    Log::shouldHaveReceived('warning')->withArgs(
+        fn (string $message, array $context): bool => $context['file'] === 'capture-envelopes/orphan.html'
+            && $context['code'] === 'delete_failed',
+    )->once();
+});
+
+it('keeps reconciling when the disk throws for an orphan object', function () {
+    $disk = Mockery::mock(Filesystem::class);
+    $disk->shouldReceive('allFiles')->once()->andReturn(['capture-envelopes/orphan.html']);
+    $disk->shouldReceive('lastModified')->once()->andReturn(now()->subDays(2)->getTimestamp());
+    $disk->shouldReceive('delete')->once()->andThrow(new RuntimeException('disco indisponível'));
+    Storage::shouldReceive('disk')->with('local')->andReturn($disk);
+
+    Log::spy();
+
+    $result = app(CaptureRetentionService::class)->reconcileOrphans();
+
+    expect($result['objects'])->toBe(0);
+
+    Log::shouldHaveReceived('warning')->withArgs(
+        fn (string $message, array $context): bool => $context['code'] === 'delete_exception'
+            && $context['exception'] === RuntimeException::class,
+    )->once();
+});

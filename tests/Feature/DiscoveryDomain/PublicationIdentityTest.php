@@ -181,3 +181,17 @@ it('não duplica conflito idêntico em resoluções repetidas', function () {
 
     expect(PublicationIdentityConflict::count())->toBe(1);
 });
+
+it('remove originalSubdomain da URL canônica do LinkedIn', function () {
+    $user = User::factory()->create();
+    $resolver = app(PublicationIdentityResolver::class);
+
+    $first = $resolver->resolve($user, 'linkedin', null, 'https://www.linkedin.com/jobs/view/321?originalSubdomain=br');
+    $second = $resolver->resolve($user, 'linkedin', null, 'https://www.linkedin.com/jobs/view/321?originalSubdomain=pt');
+    $third = $resolver->resolve($user, 'linkedin', null, 'https://www.linkedin.com/jobs/view/321');
+
+    expect($second->is($first))->toBeTrue()
+        ->and($third->is($first))->toBeTrue()
+        ->and($first->canonical_url)->toBe('https://www.linkedin.com/jobs/view/321')
+        ->and(Publication::count())->toBe(1);
+});

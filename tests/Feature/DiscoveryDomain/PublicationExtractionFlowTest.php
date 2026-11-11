@@ -21,12 +21,14 @@ use App\Services\Discovery\CaptureBlockReader;
 use App\Services\Discovery\CaptureValidationException;
 use App\Services\Discovery\CaptureValidator;
 use App\Services\Discovery\DiscoveryRunService;
+use App\Services\Discovery\DiscoverySourceUrl;
 use App\Services\Discovery\LinkedInPublicationsDecoder;
 use App\Services\Discovery\PublicationExtractionException;
 use App\Services\Discovery\PublicationExtractionProcessor;
 use Illuminate\Filesystem\FilesystemAdapter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Testing\TestResponse;
@@ -93,7 +95,7 @@ function publicationExtractionRun(User $user, ?DiscoverySource $source = null): 
             'source' => 'linkedin',
             'surface' => 'linkedin_publications',
             'url' => $url,
-            'canonical_url_hash' => hash('sha256', $url),
+            'canonical_url_hash' => app(DiscoverySourceUrl::class)->hash($url),
             'active' => true,
             'next_due_at' => now()->subMinute(),
         ]);
@@ -654,6 +656,79 @@ it('does not let an older capture processed late replace the current content', f
         ->and($observation->content_version)->toBeNull();
 });
 
+it('trava todas as publicações em ordem de id antes de aplicar conteúdo', function () {
+    $user = User::factory()->create();
+    $alpha = [
+        'block_id' => 'post-alpha',
+        'platform_id' => 'urn:li:activity:13',
+        'permalink' => 'https://www.linkedin.com/feed/update/urn:li:activity:13',
+        'text' => 'Vaga alpha',
+    ];
+    $beta = [
+        'block_id' => 'post-beta',
+        'platform_id' => 'urn:li:activity:14',
+        'permalink' => 'https://www.linkedin.com/feed/update/urn:li:activity:14',
+        'text' => 'Vaga beta',
+    ];
+
+    publicationExtractionIngest($user, [$alpha, $beta]);
+    $alphaId = Publication::query()->where('external_id', $alpha['platform_id'])->sole()->id;
+    $betaId = Publication::query()->where('external_id', $beta['platform_id'])->sole()->id;
+
+    $alpha['text'] = 'Vaga alpha atualizada';
+    $beta['text'] = 'Vaga beta atualizada';
+
+    $locks = [];
+    DB::listen(function ($query) use (&$locks): void {
+        if (str_contains($query->sql, 'from "publications"') && str_contains($query->sql, 'order by "id"')) {
+            $locks[] = $query->sql;
+        }
+    });
+
+    // Ordem invertida em relação aos ids: o lock não pode seguir o decodificador.
+    [$capture, $operation] = publicationExtractionIngest($user, [$beta, $alpha]);
+
+    expect($locks)->toHaveCount(1)
+        ->and($locks[0])->toContain('order by "id"')
+        ->and($locks[0])->toContain((string) $alphaId)
+        ->and($locks[0])->toContain((string) $betaId)
+        ->and(Publication::query()->whereKey($alphaId)->sole()->content)->toBe('Vaga alpha atualizada')
+        ->and(Publication::query()->whereKey($betaId)->sole()->content)->toBe('Vaga beta atualizada')
+        ->and($capture->observations()->count())->toBe(2)
+        ->and($operation->refresh()->status)->toBe(AiOperationStatus::Completed);
+});
+
+it('does not let an older same-content capture inflate the same-second tie-break', function () {
+    Queue::fake([ProcessAiOperation::class]);
+    $user = User::factory()->create();
+    $base = [[
+        'block_id' => 'post-1',
+        'platform_id' => 'urn:li:activity:15',
+        'permalink' => 'https://www.linkedin.com/feed/update/urn:li:activity:15',
+        'text' => 'Vaga PHP',
+    ]];
+    $changed = $base;
+    $changed[0]['text'] = 'Vaga PHP sênior';
+
+    [$first, $firstOperation] = publicationExtractionIngest($user, $base, '2026-08-18T10:00:00+00:00');
+    [$sameSecond, $sameSecondOperation] = publicationExtractionIngest($user, $changed, '2026-08-18T10:00:00+00:00');
+    [$staleRecapture, $staleOperation] = publicationExtractionIngest($user, $base, '2026-08-18T09:00:00+00:00');
+
+    // A recaptura antiga de mesmo conteúdo é processada depois, mas não é dona do instante.
+    foreach ([$firstOperation, $staleOperation, $sameSecondOperation] as $operation) {
+        (new ProcessAiOperation($operation->id, $operation->run_token, $operation->attempt_token))
+            ->handle(app(AiOperationService::class));
+    }
+
+    $publication = Publication::query()->sole();
+
+    expect($publication->content)->toBe('Vaga PHP sênior')
+        ->and($publication->content_version)->toBe(2)
+        ->and($publication->observations()->where('page_capture_id', $first->id)->sole()->content_version)->toBe(1)
+        ->and($publication->observations()->where('page_capture_id', $staleRecapture->id)->sole()->content_version)->toBe(1)
+        ->and($publication->observations()->where('page_capture_id', $sameSecond->id)->sole()->content_version)->toBe(2);
+});
+
 it('records an explicit identity conflict scoped to the capture and user', function () {
     $user = User::factory()->create();
     config(['jobora.mcp.user' => $user->email]);
@@ -818,7 +893,7 @@ it('recovers a stale running attempt from the queue', function () {
 
     $operation->forceFill([
         'status' => AiOperationStatus::Running,
-        'attempt_token' => 'stale-attempt-token',
+        'attempt_token' => (string) Str::uuid(),
         'attempts' => 1,
         'last_attempt_started_at' => now()->subMinutes(10),
     ])->save();
@@ -847,7 +922,7 @@ it('rejects a paused stale worker after a new attempt completes', function () {
 
     $operation->forceFill([
         'status' => AiOperationStatus::Queued,
-        'attempt_token' => 'attempt-A',
+        'attempt_token' => '00000000-0000-4000-8000-000000000044',
         'attempts' => 0,
     ])->save();
 
@@ -884,7 +959,7 @@ it('rejects a paused stale worker after a new attempt completes', function () {
     $staleFailed = false;
 
     try {
-        (new ProcessAiOperation($operation->id, $operation->run_token, 'attempt-A'))
+        (new ProcessAiOperation($operation->id, $operation->run_token, '00000000-0000-4000-8000-000000000044'))
             ->handle(app(AiOperationService::class));
     } catch (LogicException) {
         $staleFailed = true;
@@ -893,7 +968,7 @@ it('rejects a paused stale worker after a new attempt completes', function () {
     expect($newCompleted)->toBeTrue()
         ->and($staleFailed)->toBeTrue()
         ->and($operation->refresh()->status)->toBe(AiOperationStatus::Completed)
-        ->and($operation->attempt_token)->not->toBe('attempt-A')
+        ->and($operation->attempt_token)->not->toBe('00000000-0000-4000-8000-000000000044')
         ->and(PublicationObservation::query()->where('page_capture_id', $capture->id)->count())->toBe(1);
 });
 
@@ -963,6 +1038,69 @@ it('skips recovery for expired raw, missing raw path or captures outside the win
     $this->artisan('publication-extractions:recover')->assertSuccessful();
 
     expect(AiOperation::query()->count())->toBe(0);
+});
+
+it('resolve a operação de extração mesmo com operação mais recente de outro alvo', function () {
+    $user = User::factory()->create();
+    [$capture, $operation] = publicationExtractionIngest($user, [[
+        'block_id' => 'post-1',
+        'platform_id' => 'urn:li:activity:46',
+        'permalink' => 'https://www.linkedin.com/feed/update/urn:li:activity:46',
+        'text' => 'Vaga com id compartilhado',
+    ]]);
+
+    AiOperation::query()->create([
+        'user_id' => $user->id,
+        'operation_key' => 'ats_score:job_posting:'.$capture->id,
+        'operation_type' => AiOperationType::AtsScore,
+        'target_type' => 'job_posting',
+        'target_id' => $capture->id,
+        'run_token' => (string) Str::uuid(),
+        'status' => AiOperationStatus::Completed,
+        'queued_at' => now(),
+        'expires_at' => now()->addDay(),
+        'input_snapshot' => [],
+        'input_fingerprint' => 'test',
+    ]);
+
+    expect($capture->refresh()->extractionOperation?->id)->toBe($operation->id);
+
+    // A recuperação não pode reenfileirar uma captura que já tem extração.
+    expect(PageCapture::query()->whereDoesntHave('extractionOperation')->count())->toBe(0);
+});
+
+it('keeps recovering stuck operations when the capture disk raises on exists', function () {
+    Queue::fake([ProcessAiOperation::class]);
+    $user = User::factory()->create();
+    [, $operation] = publicationExtractionIngest($user, [[
+        'block_id' => 'post-1',
+        'platform_id' => 'urn:li:activity:45',
+        'permalink' => 'https://www.linkedin.com/feed/update/urn:li:activity:45',
+        'text' => 'Vaga com storage indisponível',
+    ]]);
+
+    $operation->forceFill([
+        'status' => AiOperationStatus::Running,
+        'attempt_token' => (string) Str::uuid(),
+        'attempts' => 1,
+        'last_attempt_started_at' => now()->subMinutes(10),
+    ])->save();
+
+    $local = Storage::disk('local');
+    $unreachable = new class($local->getDriver(), $local->getAdapter(), $local->getConfig()) extends FilesystemAdapter
+    {
+        public function exists($path)
+        {
+            throw new RuntimeException('Storage unreachable.');
+        }
+    };
+
+    Storage::set('unreachable', $unreachable);
+    config(['capture.ingestion.disk' => 'unreachable']);
+
+    $this->artisan('publication-extractions:recover')->assertSuccessful();
+
+    Queue::assertPushed(ProcessAiOperation::class, fn (ProcessAiOperation $job): bool => $job->operationId === $operation->id);
 });
 
 it('processes a queued extraction with a real database queue worker', function () {

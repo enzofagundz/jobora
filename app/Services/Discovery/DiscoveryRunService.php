@@ -9,12 +9,13 @@ use App\Models\DiscoveryRun;
 use App\Models\DiscoveryRunEvent;
 use App\Models\DiscoverySource;
 use App\Models\User;
+use Carbon\Carbon;
 use Carbon\CarbonInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\UniqueConstraintViolationException;
-use Illuminate\Support\Carbon;
+use Illuminate\Pagination\LengthAwarePaginator as Paginator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -97,21 +98,23 @@ class DiscoveryRunService
         $now ??= now();
         $limit = max(1, min($limit, 100));
 
-        return $this->eligibleSourcesQuery($user, $now)
+        $query = $this->eligibleSourcesQuery($user, $now)
             ->orderBy('next_due_at')
-            ->orderBy('id')
-            ->paginate(perPage: $limit, page: intdiv(max(0, $offset), $limit) + 1);
+            ->orderBy('id');
+
+        return $this->paginateQuery($query, $limit, max(0, $offset));
     }
 
     public function paginateRuns(User $user, array $filters = [], int $limit = 20, int $offset = 0): LengthAwarePaginator
     {
         $limit = max(1, min($limit, 100));
 
-        return DiscoveryRun::query()
+        $query = DiscoveryRun::query()
             ->where('user_id', $user->id)
             ->when(! empty($filters['status']), fn ($query) => $query->where('status', (string) $filters['status']))
-            ->orderByDesc('id')
-            ->paginate(perPage: $limit, page: intdiv(max(0, $offset), $limit) + 1);
+            ->orderByDesc('id');
+
+        return $this->paginateQuery($query, $limit, max(0, $offset));
     }
 
     public function get(User $user, int|string $id): DiscoveryRun
@@ -151,7 +154,9 @@ class DiscoveryRunService
             : $now;
         $this->assertCoherentPayload($outcome, $validated);
 
-        return DB::transaction(function () use ($user, $executionId, $validated, $outcome, $occurredAt, $now): DiscoveryRunEvent {
+        $expiredConflict = false;
+
+        $event = DB::transaction(function () use ($user, $executionId, $validated, $outcome, $occurredAt, $now, &$expiredConflict): ?DiscoveryRunEvent {
             $run = DiscoveryRun::query()
                 ->where('user_id', $user->id)
                 ->where('execution_id', $executionId)
@@ -174,7 +179,9 @@ class DiscoveryRunService
                     ])->save();
                 }
 
-                throw new DiscoveryRunConflictException('A execução expirou; um callback antigo não altera a execução atual.');
+                $expiredConflict = true;
+
+                return null;
             }
 
             if ($occurredAt->lessThan($run->reserved_at)
@@ -186,10 +193,13 @@ class DiscoveryRunService
             }
 
             $occurredAt = $occurredAt->copy()->startOfSecond();
-            $existing = DiscoveryRunEvent::query()->where('event_key', $validated['event_key'])->first();
+            $existing = DiscoveryRunEvent::query()
+                ->where('discovery_run_id', $run->id)
+                ->where('event_key', $validated['event_key'])
+                ->first();
 
             if ($existing !== null) {
-                if ($existing->discovery_run_id !== $run->id || ! $this->samePayload($existing, $validated, $outcome, $occurredAt)) {
+                if (! $this->samePayload($existing, $validated, $outcome, $occurredAt)) {
                     throw new DiscoveryRunConflictException('A chave do evento já foi usada com outro conteúdo.');
                 }
 
@@ -209,11 +219,12 @@ class DiscoveryRunService
                     'occurred_at' => $occurredAt,
                 ]));
             } catch (UniqueConstraintViolationException) {
-                $existing = DiscoveryRunEvent::query()->where('event_key', $validated['event_key'])->first();
+                $existing = DiscoveryRunEvent::query()
+                    ->where('discovery_run_id', $run->id)
+                    ->where('event_key', $validated['event_key'])
+                    ->first();
 
-                if ($existing !== null
-                    && $existing->discovery_run_id === $run->id
-                    && $this->samePayload($existing, $validated, $outcome, $occurredAt)) {
+                if ($existing !== null && $this->samePayload($existing, $validated, $outcome, $occurredAt)) {
                     return $existing;
                 }
 
@@ -226,6 +237,12 @@ class DiscoveryRunService
 
             return $event;
         });
+
+        if ($expiredConflict || $event === null) {
+            throw new DiscoveryRunConflictException('A execução expirou; um callback antigo não altera a execução atual.');
+        }
+
+        return $event;
     }
 
     public function resolveForExtension(User $user, string $url, ?CarbonInterface $now = null): DiscoveryRun
@@ -368,9 +385,20 @@ class DiscoveryRunService
         return $event->outcome === $outcome
             && $event->final_url === ($validated['final_url'] ?? null)
             && $event->http_status === ($validated['http_status'] ?? null)
-            && $event->redirects === ($validated['redirects'] ?? [])
-            && $event->details === ($validated['details'] ?? null)
+            && ($event->redirects ?? []) === ($validated['redirects'] ?? [])
+            && $event->details == ($validated['details'] ?? null)
             && $event->error === ($validated['error'] ?? null)
             && (! isset($validated['occurred_at']) || $event->occurred_at?->equalTo($occurredAt));
+    }
+
+    /**
+     * @return LengthAwarePaginator<int, mixed>
+     */
+    private function paginateQuery(Builder $query, int $limit, int $offset): LengthAwarePaginator
+    {
+        $total = (clone $query)->count();
+        $items = $query->offset($offset)->limit($limit)->get();
+
+        return new Paginator($items, $total, $limit, intdiv($offset, $limit) + 1);
     }
 }

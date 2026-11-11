@@ -18,7 +18,7 @@ class PublicationIdentityResolver
         'trackingid',
         'refid',
         'ref',
-        'originalSubdomain',
+        'originalsubdomain',
         'lipi',
         'midtoken',
         'midsig',

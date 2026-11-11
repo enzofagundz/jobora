@@ -188,3 +188,25 @@ it('replays an acquired batch through the mcp tool without taking new sources', 
     expect(DiscoveryRun::query()->orderBy('id')->pluck('id')->all())->toBe($ids)
         ->and(DiscoveryRun::query()->count())->toBe(2);
 });
+
+it('lists pending sources with the requested offset window', function () {
+    $user = McpTestHelpers::user();
+
+    foreach (range(1, 4) as $index) {
+        DiscoverySource::factory()->for($user, 'user')->create([
+            'name' => 'Fonte '.$index,
+            'active' => true,
+            'next_due_at' => now()->subMinutes(10 - $index),
+        ]);
+    }
+
+    JoboraServer::tool(ListPendingDiscoverySourcesTool::class, ['limit' => 2, 'offset' => 1])
+        ->assertOk()
+        ->assertStructuredContent(fn ($json) => $json
+            ->where('ok', true)
+            ->where('data.total', 4)
+            ->where('data.next_offset', 3)
+            ->where('data.items.0.name', 'Fonte 2')
+            ->where('data.items.1.name', 'Fonte 3')
+            ->etc());
+});

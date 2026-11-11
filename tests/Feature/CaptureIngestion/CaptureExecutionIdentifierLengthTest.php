@@ -1,6 +1,10 @@
 <?php
 
 use App\Enums\DiscoveryRunStatus;
+use App\Mcp\Servers\JoboraServer;
+use App\Mcp\Tools\Captures\GetPageCaptureTool;
+use App\Mcp\Tools\Discovery\GetDiscoveryRunTool;
+use App\Mcp\Tools\Discovery\ReportDiscoveryAccessTool;
 use App\Models\DiscoveryRun;
 use App\Models\DiscoverySource;
 use App\Models\PageCapture;
@@ -11,6 +15,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Testing\TestResponse;
+use Tests\Feature\Mcp\McpTestHelpers;
 
 uses(RefreshDatabase::class);
 
@@ -120,7 +125,8 @@ it('does not shrink identifiers when V2 data exceeds the old limit', function ()
     captureExecutionFixture($user, 65);
 
     $migration = require database_path('migrations/2026_11_04_320002_widen_capture_execution_identifiers.php');
-    $migration->down();
+
+    expect(fn () => $migration->down())->toThrow(RuntimeException::class);
 
     $runColumn = collect(Schema::getColumns('discovery_runs'))->firstWhere('name', 'execution_id');
 
@@ -129,6 +135,51 @@ it('does not shrink identifiers when V2 data exceeds the old limit', function ()
     if (DB::connection()->getDriverName() === 'pgsql') {
         expect($runColumn['type'])->toContain('200');
     }
+});
+
+it('reads and reports 200-character execution ids through the mcp tools', function () {
+    $user = McpTestHelpers::user();
+
+    [, , $payload] = captureExecutionFixture($user, 200);
+    captureExecutionPost($user, $payload)->assertStatus(201);
+
+    JoboraServer::tool(GetPageCaptureTool::class, ['execution_id' => str_repeat('e', 200)])
+        ->assertOk()
+        ->assertStructuredContent(fn ($json) => $json
+            ->where('ok', true)
+            ->where('data.capture.execution_id', str_repeat('e', 200))
+            ->etc());
+
+    $source = DiscoverySource::factory()->for($user, 'user')->create();
+    $run = DiscoveryRun::factory()->for($user, 'user')->create([
+        'discovery_source_id' => $source->id,
+        'execution_id' => str_repeat('f', 200),
+        'idempotency_key' => 'run-'.uniqid(),
+        'status' => DiscoveryRunStatus::Active,
+        'active_key' => 'run:'.uniqid(),
+        'canonical_url_hash' => $source->canonical_url_hash,
+        'initial_url' => $source->url,
+        'surface' => $source->surface,
+        'expires_at' => now()->addMinutes(30),
+    ]);
+
+    JoboraServer::tool(GetDiscoveryRunTool::class, ['execution_id' => str_repeat('f', 200)])
+        ->assertOk()
+        ->assertStructuredContent(fn ($json) => $json
+            ->where('ok', true)
+            ->where('data.run.id', $run->id)
+            ->etc());
+
+    JoboraServer::tool(ReportDiscoveryAccessTool::class, [
+        'execution_id' => str_repeat('f', 200),
+        'event_key' => 'long-200',
+        'outcome' => 'failure',
+        'error' => 'login exigido',
+    ])->assertOk()
+        ->assertStructuredContent(fn ($json) => $json
+            ->where('ok', true)
+            ->where('data.event.event_key', 'long-200')
+            ->etc());
 });
 
 it('keeps execution identifier metadata and uniqueness for both tables', function () {
