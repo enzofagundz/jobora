@@ -14,9 +14,11 @@ use App\Jobs\ProcessAiOperation;
 use App\Models\AiOperation;
 use App\Models\JobPosting;
 use App\Models\PageCapture;
+use App\Models\ProfessionalProfile;
 use App\Models\Publication;
 use App\Models\PublicationClefResult;
 use App\Models\PublicationTriageResult;
+use App\Models\Resume;
 use App\Models\User;
 use App\Services\Discovery\PublicationExtractionException;
 use App\Services\Discovery\PublicationExtractionProcessor;
@@ -29,6 +31,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
 use LogicException;
 use Throwable;
@@ -48,7 +51,74 @@ class AiOperationService
         private readonly AtsScorerService $atsScorer,
         private readonly PublicationExtractionProcessor $publicationExtraction,
         private readonly PublicationTriageProcessor $publicationTriage,
+        private readonly ProfileImportProcessor $profileImport,
     ) {}
+
+    /** @param array{source?: string, integration_id?: int} $actorMetadata */
+    public function enqueueProfileImport(User $user, ResumeLanguage $language, int $expectedVersion, array $actorMetadata = [], bool $retry = false): AiOperation
+    {
+        Validator::validate(['expected_version' => $expectedVersion], ['expected_version' => ['integer', 'min:0', 'max:2147483644']]);
+        app(ProfileImportService::class)->validateActor($user, $actorMetadata);
+        $state = app(ProfessionalProfileService::class)->get($user);
+        if ($expectedVersion < 0 || $state['version'] !== $expectedVersion) {
+            throw new ProfessionalProfileConflictException;
+        }
+        if (! $retry) {
+            $resume = Resume::query()->where('user_id', $user->id)->where('language', $language->value)->first();
+            $content = $resume?->content;
+            if (! is_string($content) || trim($content) === '' || mb_strlen($content) > (int) config('ai.profile_import.max_content_characters', 100000)) {
+                throw new LogicException('Cadastre um currículo válido no idioma solicitado antes de importar.');
+            }
+            $sourceFingerprint = hash('sha256', $content);
+            $content = ResumeService::plainText($content);
+            if (trim($content) === '' || mb_strlen($content) > (int) config('ai.profile_import.max_content_characters', 100000)) {
+                throw new LogicException('Cadastre um currículo válido no idioma solicitado antes de importar.');
+            }
+        } elseif (! ProfessionalProfile::query()->where('user_id', $user->id)->exists()) {
+            throw new LogicException('Não há importação solicitada para retry.');
+        }
+        $draft = $state['draft'];
+        unset($draft['preferences'], $draft['restrictions']);
+        $profile = ProfessionalProfile::query()->firstOrCreate(['user_id' => $user->id], ['version' => 0, 'draft' => $draft, 'confirmed_version' => 0]);
+
+        if ($retry) {
+            $previous = AiOperation::query()->where('user_id', $user->id)->where('operation_type', AiOperationType::ProfileImport)
+                ->where('target_id', $profile->id)->latest('id')->get()->first(fn (AiOperation $operation): bool => ($operation->input_snapshot['base_version'] ?? null) === $expectedVersion
+                    && ($operation->input_snapshot['source']['language'] ?? null) === $language->value);
+            if ($previous === null) {
+                throw new LogicException('Não há importação solicitada para retry.');
+            }
+            if ($previous->isActive() || $previous->status === AiOperationStatus::Completed) {
+                return $previous;
+            }
+            if ($previous->attempts >= self::MAX_ATTEMPTS) {
+                throw new LogicException('Limite de tentativas de importação atingido.');
+            }
+            $snapshot = ['payload' => $previous->input_snapshot, 'fingerprint' => $previous->input_fingerprint];
+            $key = $previous->operation_key;
+        } else {
+            $blocks = [];
+            foreach (preg_split('/\R/u', $content) ?: [] as $line) {
+                if (trim($line) !== '') {
+                    $blocks['block-'.(count($blocks) + 1)] = $line;
+                }
+            }
+            $payload = [
+                'profile_id' => $profile->id, 'base_version' => $expectedVersion,
+                'base_confirmed_version' => $state['confirmed_version'], 'base_document' => $state['draft'],
+                'source' => ['language' => $language->value, 'fingerprint' => $sourceFingerprint, 'content' => $content],
+                'blocks' => $blocks, 'requester_actor' => $actorMetadata,
+                'provider' => (string) config('ai.profile_import.provider'), 'model' => (string) config('ai.profile_import.model'),
+                'schema_version' => (string) config('ai.profile_import.schema_version'),
+            ];
+            $fingerprint = hash('sha256', json_encode([$user->id, $profile->id, $expectedVersion, $payload['source']['language'], $payload['source']['fingerprint'], $payload['schema_version'], $payload['provider'], $payload['model']], JSON_THROW_ON_ERROR));
+            $snapshot = ['payload' => $payload, 'fingerprint' => $fingerprint];
+            $key = 'profile_import:'.$fingerprint;
+        }
+
+        return $this->enqueue($user, AiOperationType::ProfileImport, $key, 'professional_profile', $profile->id, null, $snapshot,
+            failOnDispatchError: false, idempotent: true, retry: $retry);
+    }
 
     public function enqueueResumeAdaptation(User $user, JobPosting $posting, ResumeLanguage $language = ResumeLanguage::PtBr): AiOperation
     {
@@ -536,7 +606,7 @@ class AiOperationService
                     'run_token' => (string) Str::uuid(),
                     'attempt_token' => (string) Str::uuid(),
                     'status' => AiOperationStatus::Queued,
-                    'attempts' => 0,
+                    'attempts' => $operationType === AiOperationType::ProfileImport ? ($operation?->attempts ?? 0) : 0,
                     'queued_at' => $now,
                     'started_at' => null,
                     'last_attempt_started_at' => null,
@@ -575,12 +645,14 @@ class AiOperationService
             unset($pendingDispatch);
         } catch (Throwable $exception) {
             if (! $failOnDispatchError) {
-                Log::channel('ai')->warning($operationType === AiOperationType::PublicationTriage
-                    ? 'Publication triage dispatch failed; recovery will retry.'
-                    : 'Publication extraction dispatch failed; recovery will retry.', [
-                        'operation_id' => $operation->id,
-                        'error' => $exception->getMessage(),
-                    ]);
+                Log::channel('ai')->warning(match ($operationType) {
+                    AiOperationType::ProfileImport => 'Profile import dispatch failed; recovery will retry.',
+                    AiOperationType::PublicationTriage => 'Publication triage dispatch failed; recovery will retry.',
+                    default => 'Publication extraction dispatch failed; recovery will retry.',
+                }, [
+                    'operation_id' => $operation->id,
+                    'error' => $exception->getMessage(),
+                ]);
 
                 return $operation;
             }
@@ -637,6 +709,7 @@ class AiOperationService
             AiOperationType::AtsScore => 'Simulação ATS já está em andamento para esta vaga.',
             AiOperationType::PublicationExtraction => 'A extração de publicações já está em andamento para esta captura.',
             AiOperationType::PublicationTriage => 'A triagem da publicação já está em andamento.',
+            AiOperationType::ProfileImport => 'A importação do currículo já está em andamento.',
         };
     }
 
@@ -752,7 +825,20 @@ class AiOperationService
                 AiOperationType::AtsScore => $this->processAtsScore($operation, $runToken, $ownedAttemptToken),
                 AiOperationType::PublicationExtraction => $this->processPublicationExtraction($operation, $runToken, $ownedAttemptToken),
                 AiOperationType::PublicationTriage => $this->processPublicationTriage($operation, $runToken, $ownedAttemptToken),
+                AiOperationType::ProfileImport => $this->profileImport->process($operation, $runToken, $ownedAttemptToken,
+                    fn (Closure $persist): mixed => $this->persistForAttempt($operation->id, $runToken, $ownedAttemptToken, $persist)),
             };
+        } catch (ProfileImportException $exception) {
+            $updated = AiOperation::query()->whereKey($operation->id)->where('run_token', $runToken)->where('attempt_token', $ownedAttemptToken)
+                ->where('status', AiOperationStatus::Running)->update([
+                    'status' => AiOperationStatus::Failed->value, 'failed_at' => now(), 'failure_code' => $exception->failureCode,
+                ]);
+
+            if ($updated === 1) {
+                $this->notifyFailed($operation->fresh(['user']));
+            }
+
+            return;
         } catch (PublicationTriageInvalidOutput $exception) {
             $this->persistForAttempt(
                 $operation->id,
@@ -1264,6 +1350,7 @@ class AiOperationService
                 'Triagem de publicação concluída',
                 'O resultado estruturado está disponível para consulta.',
             ],
+            AiOperationType::ProfileImport => ['Proposta de perfil disponível', 'Revise os fatos e as evidências antes de confirmar.'],
         };
 
         $this->sendTerminalNotification($operation, true, $title, $body);
@@ -1300,6 +1387,7 @@ class AiOperationService
                 'Falha na triagem da publicação',
                 'Não foi possível estruturar esta publicação. Tente novamente.',
             ],
+            AiOperationType::ProfileImport => ['Falha na importação do currículo', 'Consulte a operação antes de tentar novamente.'],
         };
 
         $this->sendTerminalNotification($operation, false, $title, $body);
@@ -1400,6 +1488,7 @@ class AiOperationService
             AiOperationType::ResumeTranslation => [ResumePage::getUrl(), 'Ver currículo'],
             AiOperationType::PublicationExtraction => [null, null],
             AiOperationType::PublicationTriage => [null, null],
+            AiOperationType::ProfileImport => [null, null],
         };
     }
 }

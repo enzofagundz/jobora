@@ -16,6 +16,8 @@ enum AgentIntegrationScope: string
     case JobPostingsWrite = 'job_postings:write';
     case ResumeRead = 'resume:read';
     case ResumeWrite = 'resume:write';
+    case ProfileRead = 'profile:read';
+    case ProfileWrite = 'profile:write';
     case ScreeningRead = 'screening:read';
     case ScreeningWrite = 'screening:write';
     case MarketRead = 'market:read';
@@ -57,6 +59,8 @@ enum AgentIntegrationScope: string
             self::JobPostingsWrite => 'Criar, excluir, analisar e confirmar vagas',
             self::ResumeRead => 'Ler currículo',
             self::ResumeWrite => 'Salvar currículo',
+            self::ProfileRead => 'Ler perfil profissional',
+            self::ProfileWrite => 'Salvar e confirmar perfil profissional',
             self::ScreeningRead => 'Ler preferências de triagem',
             self::ScreeningWrite => 'Salvar preferências de triagem',
             self::MarketRead => 'Ler dados de mercado',
@@ -112,6 +116,9 @@ enum AgentIntegrationScope: string
             'GetMarketComparisonTool', 'GetMarketFrequenciesTool',
             'GetMarketPairsTool', 'GetMarketTrendsTool' => self::MarketRead,
             'GetResumeTool' => self::ResumeRead,
+            'GetProfessionalProfileTool', 'GetProfileImportTool' => self::ProfileRead,
+            'SaveProfessionalProfileTool', 'ConfirmProfessionalProfileTool', 'RequestProfileImportTool',
+            'ConfirmProfileImportTool', 'RejectProfileImportTool' => self::ProfileWrite,
             'SaveResumeTool' => self::ResumeWrite,
             'GetScreeningPreferencesTool' => self::ScreeningRead,
             'SaveScreeningPreferencesTool' => self::ScreeningWrite,

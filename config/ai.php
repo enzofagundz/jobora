@@ -2,6 +2,13 @@
 
 return [
 
+    'profile_import' => [
+        'provider' => 'opencode_go',
+        'model' => 'deepseek-v4.1-flash',
+        'schema_version' => '1',
+        'max_content_characters' => 100000,
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Default AI Provider Names

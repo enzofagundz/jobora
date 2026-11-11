@@ -9,6 +9,7 @@ use App\Filament\Pages\JobSearchPage;
 use App\Filament\Pages\MarketComparisonPage;
 use App\Filament\Pages\MarketTrendsPage;
 use App\Filament\Pages\ProfessionalCompetenciesPage;
+use App\Filament\Pages\ProfessionalProfilePage;
 use App\Filament\Pages\ResumePage;
 use App\Filament\Pages\ScreeningPreferencesPage;
 use App\Filament\Resources\AgentIntegrations\AgentIntegrationResource;
@@ -702,6 +703,7 @@ it('ordena a navegação lateral conforme o fluxo do produto', function () {
         JobCaptureResource::class,
         JobPostingResource::class,
         DiscoverySourceResource::class,
+        ProfessionalProfilePage::class,
         ResumePage::class,
         ScreeningPreferencesPage::class,
         ProfessionalCompetenciesPage::class,
