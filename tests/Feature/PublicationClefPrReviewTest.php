@@ -9,7 +9,9 @@ use App\Services\AiOperationService;
 use App\Services\CaptureTokenService;
 use App\Services\Triage\JobPrefilter;
 use App\Services\Triage\PrefilterPolicy;
+use Illuminate\Bus\UniqueLock;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 
@@ -102,4 +104,46 @@ it('keeps Clef gating and explicit bypass audit when enabled', function () {
     config(['triage.prefilter.enabled' => false]);
     expect(fn () => app(AiOperationService::class)->enqueuePublicationTriage($user, $publication->id, 2))
         ->toThrow(LogicException::class, 'A versão informada não é a versão atual da publicação.');
+});
+
+it('recovers Clef despite an orphaned initial unique lock', function () {
+    Queue::fake();
+    $publication = Publication::factory()->create();
+    $result = PublicationClefResult::query()->create([
+        'publication_id' => $publication->id,
+        'content_version' => 1,
+        'attempt' => 1,
+        'status' => 'running',
+        'lease_token' => '00000000-0000-4000-8000-000000000001',
+        'started_at' => now()->subSeconds(131),
+    ]);
+    $initial = new ClassifyPublicationWithClef($result->id);
+    $lock = new UniqueLock(Cache::store('array'));
+    expect($lock->acquire($initial))->toBeTrue();
+
+    $this->artisan('publication-clef:recover')->assertSuccessful();
+
+    Queue::assertPushed(ClassifyPublicationWithClef::class, fn ($job): bool => $job->resultId === $result->id
+        && $job->uniqueId() !== $initial->uniqueId());
+    expect($result->refresh()->status)->toBe('pending');
+});
+
+it('does not let an old Clef failure callback overwrite a recovered execution', function () {
+    $publication = Publication::factory()->create();
+    $result = PublicationClefResult::query()->create([
+        'publication_id' => $publication->id,
+        'content_version' => 1,
+        'attempt' => 1,
+        'status' => 'running',
+        'lease_token' => '00000000-0000-4000-8000-000000000002',
+        'started_at' => now(),
+    ]);
+    $oldJob = new ClassifyPublicationWithClef($result->id);
+    $oldJob->leaseToken = '00000000-0000-4000-8000-000000000001';
+
+    $oldJob->failed(new RuntimeException('Old worker timed out'));
+
+    expect($result->refresh()->status)->toBe('running')
+        ->and($result->lease_token)->toBe('00000000-0000-4000-8000-000000000002')
+        ->and($result->error)->toBeNull();
 });

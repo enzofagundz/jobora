@@ -9,6 +9,7 @@ use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Throwable;
 
 #[Signature('publication-clef:recover')]
@@ -69,7 +70,7 @@ class PublicationClefRecover extends Command
     private function dispatch(int $resultId): bool
     {
         try {
-            ClassifyPublicationWithClef::dispatch($resultId);
+            ClassifyPublicationWithClef::dispatch($resultId, recoveryToken: (string) Str::uuid());
 
             return true;
         } catch (Throwable $exception) {

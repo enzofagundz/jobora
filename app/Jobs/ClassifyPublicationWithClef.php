@@ -28,11 +28,11 @@ class ClassifyPublicationWithClef implements ShouldBeUnique, ShouldQueueAfterCom
 
     public ?string $leaseToken = null;
 
-    public function __construct(public int $resultId) {}
+    public function __construct(public int $resultId, public ?string $recoveryToken = null) {}
 
     public function uniqueId(): string
     {
-        return 'publication-clef-result:'.$this->resultId;
+        return 'publication-clef-result:'.$this->resultId.':'.($this->recoveryToken ?? 'initial');
     }
 
     public function uniqueFor(): int
