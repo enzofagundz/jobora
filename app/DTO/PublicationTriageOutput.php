@@ -450,7 +450,11 @@ final class PublicationTriageOutput
             ApplicationMethodType::Whatsapp => self::quoteContainsAny($quotes, ['whatsapp']),
             ApplicationMethodType::Phone => self::quoteContainsAny($quotes, ['phone', 'telephone', 'telefone', 'ligue', 'call']),
             ApplicationMethodType::Form => self::quoteContainsAny($quotes, ['form', 'formulário', 'formulario']),
-            ApplicationMethodType::Other, null => false,
+            ApplicationMethodType::Other => self::quoteContains($quotes, (string) ($method['instructions'] ?? ''))
+                || self::quoteContains($quotes, (string) ($method['url'] ?? ''))
+                || self::quoteContains($quotes, (string) ($method['email'] ?? ''))
+                || self::quoteContains($quotes, (string) ($method['phone'] ?? '')),
+            null => false,
         };
     }
 

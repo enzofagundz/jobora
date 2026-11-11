@@ -47,3 +47,23 @@ it('recognizes grouped salary evidence without accepting a different amount', fu
     ['5.000,50', 5000.5],
     ['1,500.50', 1500.5],
 ]);
+
+it('accepts other application methods only with useful grounded data', function (array $method, bool $ready) {
+    $content = 'Developer: bring your resume to reception. https://example.com/apply jobs@example.com +5511999999999';
+    $opportunity = [
+        'role' => 'Developer',
+        'application_methods' => [['type' => 'other', ...$method]],
+        'evidence' => [['quote' => $content, 'block_ids' => ['block-1'], 'fields' => ['role', 'application_methods']]],
+    ];
+    $output = PublicationTriageOutput::fromStructured(['opportunities' => [$opportunity]], $content, ['block-1'], null);
+    expect($output->opportunities[0]['readiness'])->toBe($ready ? 'ready' : 'needs_review');
+})->with([
+    [['instructions' => 'bring your resume to reception'], true],
+    [['url' => 'https://example.com/apply'], true],
+    [['email' => 'jobs@example.com'], true],
+    [['phone' => '+5511999999999'], true],
+    [[], false],
+    [['platform' => 'Developer'], false],
+    [['instructions' => 'send a private message'], false],
+    [['instructions' => 'bring your resume to reception', 'email' => 'invented@example.com'], false],
+]);
