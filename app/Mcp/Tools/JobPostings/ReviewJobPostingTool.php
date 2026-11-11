@@ -15,9 +15,11 @@ use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
 use Laravel\Mcp\Server\Attributes\Description;
+use Laravel\Mcp\Server\Tools\Annotations\IsIdempotent;
 use Laravel\Mcp\Server\Tools\Annotations\IsOpenWorld;
 
-#[IsOpenWorld]
+#[IsOpenWorld(false)]
+#[IsIdempotent]
 #[Description('Corrige oportunidade estruturada em needs_review com controle de versão. source_url e evidence aceitam correção auditada, verificada contra snapshot persistido; resultado original da IA permanece intacto. Não confirma vaga V1. Replay idempotente pela chave ou conteúdo e versão esperada.')]
 class ReviewJobPostingTool extends JoboraTool
 {
