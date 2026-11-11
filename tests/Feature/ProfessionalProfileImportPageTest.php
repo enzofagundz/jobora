@@ -86,7 +86,9 @@ it('requests extraction, refreshes proposal, and confirms reviewed facts', funct
         ->call('requestImportConfirmation')
         ->assertSet('showImportConfirmation', true)
         ->call('confirmProfileImport')
-        ->assertSet('importProposal.status', 'confirmed');
+        ->assertSet('importProposal.status', 'confirmed')
+        ->set('importProposal.stale', true)
+        ->assertDontSee('Proposta desatualizada');
 
     $proposalId = $page->get('importProposal.id');
     $replay = app(ProfileImportService::class)->confirm($this->owner, $proposalId, 2, ['source' => 'filament']);
@@ -110,14 +112,12 @@ it('rejects stale proposal and keeps edits made while import is pending', functi
         ->assertNotified('Esta proposta ficou desatualizada');
 
     $page->call('rejectProfileImport')
-        ->assertSet('importProposal.status', 'rejected');
+        ->assertSet('importProposal.status', 'rejected')
+        ->set('importProposal.stale', true)
+        ->assertDontSee('Proposta desatualizada');
     expect(app(ProfileImportService::class)->get($this->owner, (string) $proposal->id)['status'])->toBe('rejected');
 });
 
-it('does not request extraction from unsaved profile edits', function () {
-    Livewire::test(ProfessionalProfilePage::class)
-        ->set('data.competencies.0.value', 'Uncommitted')
-        ->call('requestProfileImport')
 it('refreshes and notifies when proposal rejection loses a concurrency race', function () {
     $page = Livewire::test(ProfessionalProfilePage::class)->call('requestProfileImport');
     $proposal = pendingProfileImportForPage();
@@ -132,6 +132,10 @@ it('refreshes and notifies when proposal rejection loses a concurrency race', fu
         ->assertNotified('Proposta desatualizada');
 });
 
+it('does not request extraction from unsaved profile edits', function () {
+    Livewire::test(ProfessionalProfilePage::class)
+        ->set('data.competencies.0.value', 'Uncommitted')
+        ->call('requestProfileImport')
         ->assertNotified('Salve o rascunho antes de importar')
         ->assertSet('data.competencies.0.value', 'Uncommitted')
         ->assertSet('importOperation', null);
