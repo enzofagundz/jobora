@@ -49,6 +49,7 @@ final class OpportunityReviewService
         array $corrections,
         ?string $idempotencyKey = null,
     ): OpportunityReviewRevision {
+        $idempotencyKey = blank($idempotencyKey) ? null : $idempotencyKey;
         $validated = $this->validateCorrections($corrections);
         $fingerprint = hash('sha256', json_encode([
             'expected_version' => $expectedVersion,
