@@ -150,7 +150,6 @@ export function createLinkedInController(
       identity = await deriveCaptureIdentity({ ...payload, url: normalizedUrl });
       if (
         occurrence?.signature === signature &&
-        occurrence.identity.startsWith(`${current.idempotencyKey}:occurrence:`) &&
         current.builder.has(occurrence.identity)
       ) {
         occurrenceIdentityToEnrich = occurrence.identity;

@@ -46,7 +46,12 @@ describe('LinkedIn publicação anônima hidratada', () => {
     document.body.innerHTML = '';
   });
 
-  it('updates same observed card before durable envelope enqueue', async () => {
+  it.each([null, 'https://www.linkedin.com/feed/update/urn:li:share:9000000000000000991'])('updates same observed card with initial URL %s before durable envelope enqueue', async (initialUrl) => {
+    if (initialUrl) {
+      const link = document.createElement('a');
+      link.href = initialUrl;
+      document.querySelector('[role="listitem"]')!.appendChild(link);
+    }
     const queue = createCaptureQueue(store);
     const identities = createHydrationIdentityCollector();
     vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockImplementation(async (raw: unknown) => {
@@ -102,12 +107,12 @@ describe('LinkedIn publicação anônima hidratada', () => {
     expect(envelope.blocks[0]).toMatchObject({
       block_id: 'post-1',
       platform_id: `urn:li:activity:${ACTIVITY_ID}`,
-      permalink: `https://www.linkedin.com/feed/update/urn:li:activity:${ACTIVITY_ID}`,
+      permalink: initialUrl ?? `https://www.linkedin.com/feed/update/urn:li:activity:${ACTIVITY_ID}`,
     });
     expect(envelope.capture.html.match(/data-block-id=/g)).toHaveLength(1);
     expect(envelope.capture.html).toContain(`data-platform-id="urn:li:activity:${ACTIVITY_ID}"`);
     expect(envelope.capture.html).toContain(
-      `data-permalink="https://www.linkedin.com/feed/update/urn:li:activity:${ACTIVITY_ID}"`,
+      `data-permalink="${initialUrl ?? `https://www.linkedin.com/feed/update/urn:li:activity:${ACTIVITY_ID}`}"`,
     );
     expect(envelope.capture.html).toContain('Synthetic job post.');
     expect(controller.getCaptureState().blocks).toBe(1);
