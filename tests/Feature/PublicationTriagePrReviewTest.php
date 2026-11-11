@@ -1,6 +1,7 @@
 <?php
 
 use App\Agents\PublicationTriageAgent;
+use App\DTO\PublicationTriageOutput;
 use App\Enums\ApplicationMethodType;
 use Illuminate\JsonSchema\JsonSchemaTypeFactory;
 
@@ -26,3 +27,23 @@ it('constrains triage schema strings to the DTO contract', function () {
         ->and($schema['evidence']['items']['properties']['block_ids']['items']['maxLength'] ?? null)->toBe(128)
         ->and($schema['evidence']['items']['properties']['fields']['items']['maxLength'] ?? null)->toBe(64);
 });
+
+it('recognizes grouped salary evidence without accepting a different amount', function (string $salary, float $amount) {
+    $content = "Developer salary {$salary}";
+    $opportunity = [
+        'role' => 'Developer',
+        'salary_min' => $amount,
+        'salary_max' => $amount,
+        'evidence' => [['quote' => $content, 'block_ids' => ['block-1'], 'fields' => ['role', 'salary_min', 'salary_max']]],
+    ];
+    $output = PublicationTriageOutput::fromStructured(['opportunities' => [$opportunity]], $content, ['block-1'], null);
+    expect($output->opportunities[0]['readiness'])->toBe('ready');
+    $opportunity['salary_min'] = $amount + 1;
+    expect(PublicationTriageOutput::unsupportedFields($opportunity))->toContain('salary_min');
+})->with([
+    ['R$ 5.000', 5000.0],
+    ['1,500', 1500.0],
+    ['1.234.567', 1234567.0],
+    ['5.000,50', 5000.5],
+    ['1,500.50', 1500.5],
+]);

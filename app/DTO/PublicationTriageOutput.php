@@ -416,6 +416,11 @@ final class PublicationTriageOutput
                 $decimalDigits = strlen($token) - $lastSeparator - 1;
 
                 if ($decimalDigits === 3) {
+                    if (preg_match('/^\d{1,3}([.,])\d{3}(?:\1\d{3})*$/', $token) === 1
+                        && abs((float) str_replace(['.', ','], '', $token) - $value) < 0.000001) {
+                        return true;
+                    }
+
                     continue;
                 }
 
