@@ -17,7 +17,7 @@ use Illuminate\Support\Str;
 
 uses(RefreshDatabase::class);
 
-function prReviewTriage(array $opportunities, string $content, string $provider = 'opencode_go', ?Closure $onRequest = null): AiOperation
+function prReviewTriage(array $opportunities, string $content, string $provider = 'opencode_go', ?Closure $onRequest = null, bool $withUsage = true): AiOperation
 {
     Http::preventStrayRequests();
     config(["ai.providers.{$provider}.key" => 'test-key']);
@@ -48,12 +48,12 @@ function prReviewTriage(array $opportunities, string $content, string $provider 
         'input_snapshot' => $snapshot,
         'input_fingerprint' => hash('sha256', json_encode($snapshot)),
     ]);
-    Http::fake(function () use ($opportunities, $onRequest) {
+    Http::fake(function () use ($opportunities, $onRequest, $withUsage) {
         $onRequest?->__invoke();
 
         return Http::response([
             'choices' => [['message' => ['content' => json_encode(['opportunities' => $opportunities])], 'finish_reason' => 'stop']],
-            'usage' => ['prompt_tokens' => 6, 'completion_tokens' => 2],
+            ...($withUsage ? ['usage' => ['prompt_tokens' => 6, 'completion_tokens' => 2]] : []),
         ]);
     });
     app(PublicationTriageProcessor::class)->process($user, $operation, $snapshot, $operation->run_token, $operation->attempt_token, function (Closure $persist): void {
@@ -140,6 +140,20 @@ it('holds the shared provider model gate during both triage transports and relea
     $lock->release();
     Http::assertSentCount(1);
 })->with(['opencode_go', 'opencode_zen']);
+
+it('persists valid legacy triage with unknown token counts when the HTTP provider omits usage', function (bool $withUsage) {
+    $content = 'Developer wanted';
+    $operation = prReviewTriage([[
+        'role' => 'Developer',
+        'evidence' => [['quote' => $content, 'block_ids' => ['block-1'], 'fields' => ['role']]],
+    ]], $content, 'opencode_zen', withUsage: $withUsage);
+    $result = PublicationTriageResult::query()->sole();
+    expect($operation->status->value)->toBe('completed')
+        ->and($operation->user->jobPostings()->sole()->role)->toBe('Developer')
+        ->and($result->prompt_tokens)->toBe($withUsage ? 6 : null)
+        ->and($result->completion_tokens)->toBe($withUsage ? 2 : null);
+    Http::assertSentCount(1);
+})->with([false, true]);
 
 it('releases the triage gate after provider failure without partial persistence', function (string $provider) {
     config(['cache.lock_store' => 'array']);

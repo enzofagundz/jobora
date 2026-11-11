@@ -55,8 +55,14 @@ final class PublicationTriageProcessor
             model: (string) $snapshot['model'],
             timeout: $gateway === null ? null : 45,
         ));
-        $promptTokens = $gateway === null ? $response->usage->promptTokens : $gateway->promptTokens;
-        $completionTokens = $gateway === null ? $response->usage->completionTokens : $gateway->completionTokens;
+        $usage = $response->usage ?? null;
+        $promptTokens = $gateway === null ? $usage?->promptTokens : $gateway->promptTokens;
+        $completionTokens = $gateway === null ? $usage?->completionTokens : $gateway->completionTokens;
+
+        if ($gateway === null && $response->raw !== null) {
+            $promptTokens = is_int($response->raw->json('usage.prompt_tokens')) ? $response->raw->json('usage.prompt_tokens') : null;
+            $completionTokens = is_int($response->raw->json('usage.completion_tokens')) ? $response->raw->json('usage.completion_tokens') : null;
+        }
 
         try {
             if ($gateway !== null) {
