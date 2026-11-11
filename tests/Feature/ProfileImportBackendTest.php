@@ -75,6 +75,21 @@ function importProposal(object $test, string $language = 'pt-BR'): array
     return importCall($test, 'get_ai_operation', ['id' => $request['data']['operation_id']])['data'];
 }
 
+it('round trips proposal ciphertext larger than mysql text capacity through its upgrade', function () {
+    $id = importProposal($this)['profile_import_proposal_id'];
+    $proposal = ProfileImportProposal::findOrFail($id);
+    $payload = ['content' => str_repeat('Perfil profissional ', 6000)];
+    $columns = ['source', 'base_document', 'candidate', 'evidence', 'decision_result'];
+    $proposal->forceFill(array_fill_keys($columns, $payload))->save();
+    (require database_path('migrations/2026_11_11_190012_widen_profile_import_proposal_payloads.php'))->up();
+    $proposal->refresh();
+
+    foreach ($columns as $column) {
+        expect($proposal->$column)->toBe($payload)
+            ->and(strlen($proposal->getRawOriginal($column)))->toBeGreaterThan(65535);
+    }
+});
+
 it('persists exactly one terminal notification for an invalid profile import', function () {
     $request = importCall($this, 'request_profile_import', ['expected_version' => 2]);
     importProvider('invalid');
