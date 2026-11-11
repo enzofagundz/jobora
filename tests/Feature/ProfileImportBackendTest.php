@@ -283,6 +283,17 @@ it('rejects once without changing any professional data and denies the opposite 
         ->and(app(ProfessionalProfileService::class)->get($this->owner))->toEqual($this->base);
 });
 
+it('does not mark decided proposals stale after profile changes', function (string $decision) {
+    $id = importProposal($this)['profile_import_proposal_id'];
+    importCall($this, $decision.'_profile_import', ['id' => $id, ...($decision === 'confirm' ? ['expected_version' => 2, 'confirm' => true] : [])]);
+    $service = app(ProfessionalProfileService::class);
+    $state = $service->get($this->owner);
+    $service->saveDraft($this->owner, $state['draft'], $state['version']);
+    $proposal = importCall($this, 'get_profile_import', ['id' => $id])['data'];
+
+    expect($proposal['stale'])->toBeFalse()->and($proposal['allowed_actions'])->toBe([]);
+})->with(['confirm', 'reject']);
+
 it('requires a fresh proposal after a draft or preference edit without automatic rebase', function (bool $preferences) {
     $id = importProposal($this)['profile_import_proposal_id'];
     $service = app(ProfessionalProfileService::class);
