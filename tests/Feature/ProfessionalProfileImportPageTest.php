@@ -172,3 +172,19 @@ it('offers retry for a failed extraction and reuses owned operation', function (
         ->assertSet('importOperation.status', 'queued')
         ->assertSet('importOperation.id', $operationId);
 });
+
+it('hides retry when profile version changed after failed extraction', function () {
+    $page = Livewire::test(ProfessionalProfilePage::class)->call('requestProfileImport');
+    Http::fake(['*' => Http::response([
+        'choices' => [['message' => ['content' => 'not valid json'], 'finish_reason' => 'stop']],
+    ])]);
+    Artisan::call('queue:work', ['connection' => 'database', '--once' => true, '--sleep' => 0, '--tries' => 3]);
+
+    $this->profiles->saveDraft($this->owner, [
+        'experiences' => [], 'education' => [], 'competencies' => ['Changed'], 'preferences' => ['Remote'], 'restrictions' => [], 'compensation_expectation' => null,
+    ], 2);
+
+    $page->call('refreshProfileImport')
+        ->assertSet('importOperation.retry_allowed', false)
+        ->assertDontSee('Tentar novamente');
+});
