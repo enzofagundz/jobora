@@ -2,6 +2,7 @@
 
 use App\Enums\ResumeLanguage;
 use App\Mcp\Servers\JoboraServer;
+use App\Mcp\Tools\Profile\GetProfessionalProfileTool;
 use App\Mcp\Tools\Profile\RequestProfileImportTool;
 use App\Mcp\Tools\Resume\GetResumeTool;
 use App\Mcp\Tools\Resume\SaveResumeTool;
@@ -11,9 +12,15 @@ use App\Mcp\Tools\Search\GenerateSearchUrlTool;
 use App\Services\ResumeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Mcp\Server\Tools\Annotations\IsOpenWorld;
+use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 use Tests\Feature\Mcp\McpTestHelpers;
 
 uses(RefreshDatabase::class);
+
+it('declara consulta de perfil como somente leitura', function () {
+    expect((new ReflectionClass(GetProfessionalProfileTool::class))
+        ->getAttributes(IsReadOnly::class))->toHaveCount(1);
+});
 
 it('declara importação de perfil como operação de mundo aberto', function () {
     expect((new ReflectionClass(RequestProfileImportTool::class))
