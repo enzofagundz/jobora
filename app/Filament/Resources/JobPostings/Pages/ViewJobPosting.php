@@ -78,6 +78,8 @@ class ViewJobPosting extends ViewRecord
                             $data,
                         );
                     } catch (OpportunityReviewConflict $exception) {
+                        $this->record->refresh()->load(['sources.publication', 'reviewRevisions']);
+
                         Notification::make()
                             ->danger()
                             ->title('A oportunidade mudou')

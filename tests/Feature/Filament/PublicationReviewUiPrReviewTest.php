@@ -3,10 +3,13 @@
 use App\Enums\JobPostingStatus;
 use App\Filament\Resources\JobPostings\Pages\ViewJobPosting;
 use App\Models\AiOperation;
+use App\Models\JobPosting;
 use App\Models\OpportunitySource;
 use App\Models\Publication;
 use App\Models\PublicationTriageResult;
 use App\Models\User;
+use App\Services\OpportunityReviewConflict;
+use App\Services\OpportunityReviewService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
@@ -75,4 +78,51 @@ it('shows needs-review triage status in Portuguese', function () {
         ->assertSuccessful()
         ->assertSee('Aguardando revisão')
         ->assertDontSee('needs_review');
+});
+
+it('refreshes correction data after a version conflict so the user can resubmit', function () {
+    $user = User::factory()->create();
+    $this->actingAs($user);
+    [$posting] = publicationReviewPosting($user);
+    $page = Livewire::test(ViewJobPosting::class, ['record' => $posting->id])
+        ->mountAction('correctOpportunity')
+        ->assertSet('mountedActions.0.data.expected_version', 1);
+
+    app()->instance(OpportunityReviewService::class, new class($posting->id)
+    {
+        public function __construct(private int $postingId) {}
+
+        public function review(
+            User $actor,
+            JobPosting $posting,
+            int $expectedVersion,
+            array $corrections,
+            ?string $idempotencyKey = null,
+        ): never {
+            JobPosting::query()->whereKey($this->postingId)->update([
+                'opportunity_version' => 2,
+                'company' => 'Updated Example Ltd',
+            ]);
+
+            throw new OpportunityReviewConflict('A oportunidade mudou. Reabra a correção.');
+        }
+    });
+
+    $page->setActionData(['role' => 'Backend Engineer'])
+        ->callMountedAction()
+        ->assertNotified('A oportunidade mudou')
+        ->assertSet('record.opportunity_version', 2)
+        ->assertSet('record.company', 'Updated Example Ltd')
+        ->unmountAction();
+
+    app()->forgetInstance(OpportunityReviewService::class);
+
+    $page->mountAction('correctOpportunity')
+        ->assertSet('mountedActions.0.data.expected_version', 2)
+        ->assertSet('mountedActions.0.data.company', 'Updated Example Ltd')
+        ->setActionData(['role' => 'Backend Engineer'])
+        ->callMountedAction()
+        ->assertNotified();
+
+    expect($posting->refresh()->opportunity_version)->toBe(3);
 });
