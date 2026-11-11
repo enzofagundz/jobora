@@ -430,14 +430,16 @@ final class OpportunityReviewService
             ]);
 
         $posting->items()->where('category', $category->value)->delete();
+        $seenNames = [];
 
-        foreach (array_unique($names) as $name) {
+        foreach ($names as $name) {
             $normalizedName = $this->normalizeItem($category, $name);
 
-            if ($normalizedName === '') {
+            if ($normalizedName === '' || isset($seenNames[$normalizedName])) {
                 continue;
             }
 
+            $seenNames[$normalizedName] = true;
             $posting->items()->create([
                 'category' => $category,
                 'name' => $normalizedName,
