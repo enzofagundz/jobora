@@ -306,7 +306,7 @@ class ProfessionalProfilePage extends Page
         $data = $this->form->getState();
 
         foreach (['competencies', 'preferences', 'restrictions'] as $field) {
-            $data[$field] = array_values(array_filter(array_column($data[$field] ?? [], 'value')));
+            $data[$field] = array_values(array_filter(array_column($data[$field] ?? [], 'value'), static fn (?string $value): bool => $value !== null && $value !== ''));
         }
 
         return $data;
