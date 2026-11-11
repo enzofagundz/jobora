@@ -74,6 +74,20 @@ function importProposal(object $test, string $language = 'pt-BR'): array
     return importCall($test, 'get_ai_operation', ['id' => $request['data']['operation_id']])['data'];
 }
 
+it('disallows retry when the profile version changes or its matching profile disappears', function () {
+    $request = importCall($this, 'request_profile_import', ['expected_version' => 2]);
+    importProvider('invalid');
+    importWork();
+    $arguments = ['id' => $request['data']['operation_id']];
+    expect(importCall($this, 'get_ai_operation', $arguments)['data']['retry_allowed'])->toBeTrue();
+
+    app(ProfessionalProfileService::class)->saveDraft($this->owner, $this->base['draft'], 2);
+    expect(importCall($this, 'get_ai_operation', $arguments)['data']['retry_allowed'])->toBeFalse();
+
+    $this->owner->professionalProfile()->delete();
+    expect(importCall($this, 'get_ai_operation', $arguments)['data']['retry_allowed'])->toBeFalse();
+});
+
 it('extracts visible legacy HTML text and retains the raw source fingerprint', function () {
     $raw = '<p class="PHP">R&amp;D</p>';
     $this->resume->update(['content' => $raw]);
