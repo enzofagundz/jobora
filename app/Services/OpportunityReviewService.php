@@ -11,7 +11,7 @@ use App\Models\ApplicationMethod;
 use App\Models\JobPosting;
 use App\Models\JobPostingItem;
 use App\Models\OpportunityReviewRevision;
-use App\Models\Publication;
+use App\Models\OpportunitySource;
 use App\Models\PublicationObservation;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
@@ -229,7 +229,7 @@ final class OpportunityReviewService
             throw ValidationException::withMessages($errors);
         }
 
-        $snapshot = $this->publicationSnapshot($source->publication, $source->publication_content_version);
+        $snapshot = $this->publicationSnapshot($source);
 
         if (array_key_exists('source_url', $corrections) && $corrections['source_url'] !== null) {
             $url = $corrections['source_url'];
@@ -348,7 +348,7 @@ final class OpportunityReviewService
             $content = null;
             $blockIds = [];
         } else {
-            $snapshot = $this->publicationSnapshot($source->publication, $source->publication_content_version);
+            $snapshot = $this->publicationSnapshot($source);
             $content = $snapshot['content'];
             $blockIds = $snapshot['block_ids'];
         }
@@ -384,9 +384,36 @@ final class OpportunityReviewService
     /**
      * @return array{content: string|null, block_ids: list<string>}
      */
-    private function publicationSnapshot(Publication $publication, ?int $contentVersion): array
+    private function publicationSnapshot(OpportunitySource $source): array
     {
+        $publication = $source->publication;
+        $contentVersion = $source->publication_content_version;
+
         if ($contentVersion === null) {
+            return ['content' => null, 'block_ids' => []];
+        }
+
+        if ($source->publication_triage_result_id !== null) {
+            $triage = $source->triageResult;
+            $payload = $triage?->operation?->input_snapshot ?? [];
+            $content = $payload['content'] ?? null;
+            $contentHash = $payload['content_hash'] ?? null;
+
+            if ($triage?->publication_id === $publication->id
+                && $triage->content_version === $contentVersion
+                && ($payload['publication_id'] ?? null) === $publication->id
+                && ($payload['content_version'] ?? null) === $contentVersion
+                && is_string($content) && trim($content) !== ''
+                && is_string($contentHash) && hash_equals($contentHash, hash('sha256', $content))) {
+                return [
+                    'content' => $content,
+                    'block_ids' => array_values(array_unique(array_filter(
+                        $payload['evidence_block_ids'] ?? [],
+                        'is_string',
+                    ))),
+                ];
+            }
+
             return ['content' => null, 'block_ids' => []];
         }
 
@@ -403,7 +430,7 @@ final class OpportunityReviewService
             return [
                 'content' => $observation->content,
                 'block_ids' => array_values(array_unique(array_filter(
-                    $observation->evidence_block_ids ?? [],
+                    [...($source->evidence_block_ids ?? []), ...($observation->evidence_block_ids ?? [])],
                     'is_string',
                 ))),
             ];
