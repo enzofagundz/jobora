@@ -5,6 +5,7 @@ use App\Models\AiOperation;
 use App\Models\ProfileImportProposal;
 use App\Models\Resume;
 use App\Models\User;
+use App\Services\AiOperationService;
 use App\Services\ProfessionalProfileService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
@@ -73,6 +74,22 @@ function importProposal(object $test, string $language = 'pt-BR'): array
 
     return importCall($test, 'get_ai_operation', ['id' => $request['data']['operation_id']])['data'];
 }
+
+it('persists exactly one terminal notification for an invalid profile import', function () {
+    $request = importCall($this, 'request_profile_import', ['expected_version' => 2]);
+    importProvider('invalid');
+    importWork();
+    $operation = AiOperation::findOrFail($request['data']['operation_id']);
+
+    expect($operation->notified_at)->not->toBeNull()
+        ->and($this->owner->notifications()->count())->toBe(1)
+        ->and($this->owner->notifications()->sole()->data['title'])->toBe('Falha na importação do currículo');
+
+    $attemptToken = $operation->attempt_token;
+    app(AiOperationService::class)->process($operation->id, $operation->run_token, $attemptToken);
+    expect($this->owner->notifications()->count())->toBe(1);
+    Http::assertSentCount(1);
+});
 
 it('disallows retry when the profile version changes or its matching profile disappears', function () {
     $request = importCall($this, 'request_profile_import', ['expected_version' => 2]);
@@ -410,10 +427,12 @@ it('bounds explicit retries while reusing the original encrypted snapshot and fe
     importProvider('invalid');
     importWork();
     $this->resume->update(['content' => 'Changed after failed extraction']);
+    importWork();
     for ($attempt = 2; $attempt <= 3; $attempt++) {
         $request = importCall($this, 'request_profile_import', ['expected_version' => 2, 'retry' => true]);
         expect($request['data']['operation_id'] ?? null)->toBe($operation->id);
         expect($operation->refresh()->input_snapshot)->toBe($originalSnapshot);
+        importWork();
         importWork();
     }
     expect($operation->refresh()->attempts)->toBe(3)

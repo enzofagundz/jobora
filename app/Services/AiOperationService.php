@@ -829,10 +829,14 @@ class AiOperationService
                     fn (Closure $persist): mixed => $this->persistForAttempt($operation->id, $runToken, $ownedAttemptToken, $persist)),
             };
         } catch (ProfileImportException $exception) {
-            AiOperation::query()->whereKey($operation->id)->where('run_token', $runToken)->where('attempt_token', $ownedAttemptToken)
+            $updated = AiOperation::query()->whereKey($operation->id)->where('run_token', $runToken)->where('attempt_token', $ownedAttemptToken)
                 ->where('status', AiOperationStatus::Running)->update([
                     'status' => AiOperationStatus::Failed->value, 'failed_at' => now(), 'failure_code' => $exception->failureCode,
                 ]);
+
+            if ($updated === 1) {
+                $this->notifyFailed($operation->fresh(['user']));
+            }
 
             return;
         } catch (PublicationTriageInvalidOutput $exception) {
