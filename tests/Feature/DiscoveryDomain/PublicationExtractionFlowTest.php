@@ -21,6 +21,7 @@ use App\Services\Discovery\CaptureBlockReader;
 use App\Services\Discovery\CaptureValidationException;
 use App\Services\Discovery\CaptureValidator;
 use App\Services\Discovery\DiscoveryRunService;
+use App\Services\Discovery\DiscoverySourceUrl;
 use App\Services\Discovery\LinkedInPublicationsDecoder;
 use App\Services\Discovery\PublicationExtractionException;
 use App\Services\Discovery\PublicationExtractionProcessor;
@@ -92,7 +93,7 @@ function publicationExtractionRun(User $user): array
         'source' => 'linkedin',
         'surface' => 'linkedin_publications',
         'url' => $url,
-        'canonical_url_hash' => hash('sha256', $url),
+        'canonical_url_hash' => app(DiscoverySourceUrl::class)->hash($url),
         'active' => true,
         'next_due_at' => now()->subMinute(),
     ]);
