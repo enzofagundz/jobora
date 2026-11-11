@@ -11,12 +11,13 @@ use App\Models\User;
 use App\Services\PublicationTriageProcessor;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\JsonSchema\JsonSchemaTypeFactory;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 
 uses(RefreshDatabase::class);
 
-function prReviewTriage(array $opportunities, string $content, string $provider = 'opencode_go'): AiOperation
+function prReviewTriage(array $opportunities, string $content, string $provider = 'opencode_go', ?Closure $onRequest = null): AiOperation
 {
     Http::preventStrayRequests();
     config(["ai.providers.{$provider}.key" => 'test-key']);
@@ -47,10 +48,14 @@ function prReviewTriage(array $opportunities, string $content, string $provider 
         'input_snapshot' => $snapshot,
         'input_fingerprint' => hash('sha256', json_encode($snapshot)),
     ]);
-    Http::fake(['*' => Http::response([
-        'choices' => [['message' => ['content' => json_encode(['opportunities' => $opportunities])], 'finish_reason' => 'stop']],
-        'usage' => ['prompt_tokens' => 6, 'completion_tokens' => 2],
-    ])]);
+    Http::fake(function () use ($opportunities, $onRequest) {
+        $onRequest?->__invoke();
+
+        return Http::response([
+            'choices' => [['message' => ['content' => json_encode(['opportunities' => $opportunities])], 'finish_reason' => 'stop']],
+            'usage' => ['prompt_tokens' => 6, 'completion_tokens' => 2],
+        ]);
+    });
     app(PublicationTriageProcessor::class)->process($user, $operation, $snapshot, $operation->run_token, $operation->attempt_token, function (Closure $persist): void {
         $persist();
     });
@@ -122,6 +127,32 @@ it('deduplicates triage items and normalized application methods before insertio
         ->and($posting->readiness)->toBe('ready')
         ->and(PublicationTriageResult::query()->count())->toBe(1);
 })->with([true, false]);
+
+it('holds the shared provider model gate during both triage transports and releases it afterward', function (string $provider) {
+    config(['cache.lock_store' => 'array']);
+    $model = $provider === 'opencode_go' ? 'deepseek-v4.1-flash' : 'deepseek-v4.1-flash-free';
+    $key = "ai:gate:{$provider}:{$model}";
+    $operation = prReviewTriage([], 'Not a job.', $provider, function () use ($key): void {
+        expect(Cache::store('array')->lock($key, 130)->get())->toBeFalse();
+    });
+    $lock = Cache::store('array')->lock($key, 130);
+    expect($operation->status->value)->toBe('completed')->and($lock->get())->toBeTrue();
+    $lock->release();
+    Http::assertSentCount(1);
+})->with(['opencode_go', 'opencode_zen']);
+
+it('releases the triage gate after provider failure without partial persistence', function (string $provider) {
+    config(['cache.lock_store' => 'array']);
+    $model = $provider === 'opencode_go' ? 'deepseek-v4.1-flash' : 'deepseek-v4.1-flash-free';
+    expect(fn () => prReviewTriage([], 'Not a job.', $provider, function (): void {
+        throw new RuntimeException('Provider unavailable.');
+    }))->toThrow(RuntimeException::class, 'Provider unavailable.');
+    $lock = Cache::store('array')->lock("ai:gate:{$provider}:{$model}", 130);
+    expect($lock->get())->toBeTrue()
+        ->and(PublicationTriageResult::query()->count())->toBe(0)
+        ->and(AiOperation::query()->sole()->user->jobPostings()->count())->toBe(0);
+    $lock->release();
+})->with(['opencode_go', 'opencode_zen']);
 
 it('retains valid opportunities and skips unsafe application methods', function (array $method, string $reason) {
     $content = 'Developer apply www.example.com/apply javascript:alert(1) https:// jobs@invalid jobs@example.com';

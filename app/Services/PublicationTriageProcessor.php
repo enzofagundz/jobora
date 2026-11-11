@@ -15,6 +15,7 @@ use App\Models\JobPostingItem;
 use App\Models\OpportunitySource;
 use App\Models\PublicationTriageResult;
 use App\Models\User;
+use App\Support\Ai\AiRequestGate;
 use Closure;
 use Illuminate\Support\Facades\DB;
 use Laravel\Ai\Ai;
@@ -22,7 +23,10 @@ use LogicException;
 
 final class PublicationTriageProcessor
 {
-    public function __construct(private readonly PublicationTriageAgent $agent) {}
+    public function __construct(
+        private readonly PublicationTriageAgent $agent,
+        private readonly ?AiRequestGate $gate = null,
+    ) {}
 
     public function process(
         User $user,
@@ -44,12 +48,13 @@ final class PublicationTriageProcessor
             $gateway = new PublicationTriageGoGateway(app('events'));
             Ai::textProvider('opencode_go')->useTextGateway($gateway);
         }
-        $response = $this->agent->prompt(
+        $gate = $this->gate ?? new AiRequestGate;
+        $response = $gate->run((string) $snapshot['provider'], (string) $snapshot['model'], fn () => $this->agent->prompt(
             $prompt,
             provider: (string) $snapshot['provider'],
             model: (string) $snapshot['model'],
             timeout: $gateway === null ? null : 45,
-        );
+        ));
         $promptTokens = $gateway === null ? $response->usage->promptTokens : $gateway->promptTokens;
         $completionTokens = $gateway === null ? $response->usage->completionTokens : $gateway->completionTokens;
 
