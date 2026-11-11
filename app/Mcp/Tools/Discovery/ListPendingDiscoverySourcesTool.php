@@ -26,10 +26,12 @@ class ListPendingDiscoverySourcesTool extends DiscoveryRunTool
             (int) ($validated['offset'] ?? 0),
         );
 
-        return $this->ok([
-            'items' => array_map(fn ($source): array => $this->presentSource($source), $page->items()),
-            'total' => $page->total(),
-        ]);
+        return $this->listed(
+            array_map(fn ($source): array => $this->presentSource($source), $page->items()),
+            $page->total(),
+            $page->perPage(),
+            (int) ($validated['offset'] ?? 0),
+        );
     }
 
     /**

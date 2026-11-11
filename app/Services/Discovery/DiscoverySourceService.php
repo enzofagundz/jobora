@@ -12,7 +12,10 @@ use App\Models\DiscoverySource;
 use App\Models\User;
 use App\Services\Search\SearchUrlGenerator;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Pagination\LengthAwarePaginator as Paginator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\ValidationException;
@@ -22,11 +25,11 @@ class DiscoverySourceService
 {
     private const CRITERIA_RULES = [
         'criteria' => ['nullable', 'array'],
-        'criteria.keywords' => ['required_with:criteria', 'array', 'min:1', 'max:20'],
+        'criteria.keywords' => ['nullable', 'array', 'min:1', 'max:20'],
         'criteria.keywords.*' => ['string', 'max:100'],
         'criteria.excluded_terms' => ['nullable', 'array', 'max:20'],
         'criteria.excluded_terms.*' => ['string', 'max:100'],
-        'criteria.operator' => ['nullable', 'in:all,any'],
+        'criteria.operator' => ['nullable', 'in:all,any,and,or'],
         'criteria.seniority' => ['nullable', 'in:internship,junior,mid_level,senior'],
         'criteria.location' => ['nullable', 'string', 'max:255'],
         'criteria.work_mode' => ['nullable', 'in:any,remote,hybrid,onsite'],
@@ -41,7 +44,7 @@ class DiscoverySourceService
         $limit = max(1, min($limit, 100));
         $offset = max(0, $offset);
 
-        return DiscoverySource::query()
+        $query = DiscoverySource::query()
             ->where('user_id', $user->id)
             ->when(array_key_exists('active', $filters) && $filters['active'] !== null, function ($query) use ($filters): void {
                 $query->where('active', (bool) $filters['active']);
@@ -49,8 +52,9 @@ class DiscoverySourceService
             ->when(! empty($filters['source']), function ($query) use ($filters): void {
                 $query->where('source', (string) $filters['source']);
             })
-            ->orderByDesc('id')
-            ->paginate(perPage: $limit, page: intdiv($offset, $limit) + 1);
+            ->orderByDesc('id');
+
+        return $this->paginateQuery($query, $limit, $offset);
     }
 
     public function get(User $user, int $id): DiscoverySource
@@ -89,7 +93,7 @@ class DiscoverySourceService
         $url = $this->resolveUrl($platform, $surface, $criteria, $validated['url'] ?? null);
         $hash = app(DiscoverySourceUrl::class)->hash($url);
 
-        $unique = DiscoverySource::withTrashed()
+        $unique = DiscoverySource::query()
             ->where('user_id', $user->id)
             ->where('canonical_url_hash', $hash)
             ->exists();
@@ -100,7 +104,7 @@ class DiscoverySourceService
             ]);
         }
 
-        return DB::transaction(fn (): DiscoverySource => DiscoverySource::create([
+        return $this->guardUnique(fn (): DiscoverySource => DB::transaction(fn (): DiscoverySource => DiscoverySource::create([
             'user_id' => $user->id,
             'name' => $validated['name'],
             'source' => $platform->value,
@@ -113,7 +117,7 @@ class DiscoverySourceService
             'active' => (bool) ($validated['active'] ?? true),
             'version' => 1,
             'next_due_at' => $validated['next_due_at'] ?? now(),
-        ]));
+        ])));
     }
 
     public function update(User $user, int $id, int $expectedVersion, array $data): DiscoverySource
@@ -130,7 +134,7 @@ class DiscoverySourceService
             ...self::CRITERIA_RULES,
         ])->validate();
 
-        return DB::transaction(function () use ($user, $id, $expectedVersion, $validated): DiscoverySource {
+        return $this->guardUnique(fn (): DiscoverySource => DB::transaction(function () use ($user, $id, $expectedVersion, $validated): DiscoverySource {
             $source = DiscoverySource::query()
                 ->where('user_id', $user->id)
                 ->whereKey($id)
@@ -150,7 +154,7 @@ class DiscoverySourceService
             $this->assertSurface($platform, $surface);
 
             $criteria = array_key_exists('criteria', $validated)
-                ? $this->criteria($validated['criteria'])
+                ? $this->criteria($this->mergeCriteria($source->criteria, $validated['criteria']))
                 : $source->criteria;
 
             $url = $this->resolveUrl(
@@ -163,7 +167,7 @@ class DiscoverySourceService
 
             $hash = app(DiscoverySourceUrl::class)->hash($url);
 
-            $unique = DiscoverySource::withTrashed()
+            $unique = DiscoverySource::query()
                 ->where('user_id', $user->id)
                 ->where('canonical_url_hash', $hash)
                 ->whereKeyNot($source->id)
@@ -175,6 +179,11 @@ class DiscoverySourceService
                 ]);
             }
 
+            $active = array_key_exists('active', $validated) ? (bool) $validated['active'] : $source->active;
+            $nextDueAt = array_key_exists('next_due_at', $validated)
+                ? $validated['next_due_at']
+                : ($active && ! $source->active ? now() : $source->next_due_at);
+
             $source->fill([
                 'name' => $validated['name'] ?? $source->name,
                 'source' => $platform->value,
@@ -184,14 +193,14 @@ class DiscoverySourceService
                 'purpose' => array_key_exists('purpose', $validated) ? $validated['purpose'] : $source->purpose,
                 'criteria' => $criteria,
                 'frequency_minutes' => $validated['frequency_minutes'] ?? $source->frequency_minutes,
-                'active' => array_key_exists('active', $validated) ? (bool) $validated['active'] : $source->active,
-                'next_due_at' => array_key_exists('next_due_at', $validated) ? $validated['next_due_at'] : $source->next_due_at,
+                'active' => $active,
+                'next_due_at' => $nextDueAt,
             ]);
             $source->version = $source->version + 1;
             $source->save();
 
             return $source->refresh();
-        });
+        }));
     }
 
     public function deactivate(User $user, int $id, int $expectedVersion): DiscoverySource
@@ -219,6 +228,7 @@ class DiscoverySourceService
             $source->forceFill([
                 'active' => false,
                 'next_due_at' => null,
+                'canonical_url_hash' => null,
                 'version' => $source->version + 1,
             ])->save();
             $source->delete();
@@ -244,7 +254,11 @@ class DiscoverySourceService
         $urls = app(DiscoverySourceUrl::class);
 
         if ($criteria !== null) {
-            $generated = $this->generator->build($platform, $this->toCriteria($criteria), $surface->mode());
+            try {
+                $generated = $this->generator->build($platform, $this->toCriteria($criteria), $surface->mode());
+            } catch (InvalidArgumentException $exception) {
+                throw ValidationException::withMessages(['criteria' => $exception->getMessage()]);
+            }
 
             if ($url !== null && $urls->hash($url) !== $urls->hash($generated)) {
                 throw new InvalidArgumentException('A URL informada não corresponde aos critérios da fonte.');
@@ -280,7 +294,7 @@ class DiscoverySourceService
             $criteria = SearchCriteria::fromInput(
                 keywords: $input['keywords'] ?? [],
                 excludedTerms: $input['excluded_terms'] ?? [],
-                operator: SearchOperator::tryFrom((string) ($input['operator'] ?? 'all')) ?? SearchOperator::All,
+                operator: SearchOperator::fromInput($input['operator'] ?? null),
                 seniority: isset($input['seniority']) ? SearchSeniority::tryFrom((string) $input['seniority']) : null,
                 location: $input['location'] ?? null,
                 workMode: SearchWorkMode::tryFrom((string) ($input['work_mode'] ?? 'any')) ?? SearchWorkMode::Any,
@@ -311,12 +325,54 @@ class DiscoverySourceService
         return SearchCriteria::fromInput(
             keywords: $criteria['keywords'] ?? [],
             excludedTerms: $criteria['excluded_terms'] ?? [],
-            operator: SearchOperator::tryFrom((string) ($criteria['operator'] ?? 'all')) ?? SearchOperator::All,
+            operator: SearchOperator::fromInput($criteria['operator'] ?? null),
             seniority: isset($criteria['seniority']) ? SearchSeniority::tryFrom((string) $criteria['seniority']) : null,
             location: $criteria['location'] ?? null,
             workMode: SearchWorkMode::tryFrom((string) ($criteria['work_mode'] ?? 'any')) ?? SearchWorkMode::Any,
             publishedWithinDays: isset($criteria['published_within_days']) ? (int) $criteria['published_within_days'] : null,
             easyApply: (bool) ($criteria['easy_apply'] ?? false),
         );
+    }
+
+    /**
+     * @template TReturn
+     *
+     * @param  callable(): TReturn  $callback
+     * @return TReturn
+     */
+    private function guardUnique(callable $callback): mixed
+    {
+        try {
+            return $callback();
+        } catch (UniqueConstraintViolationException $exception) {
+            throw ValidationException::withMessages([
+                'url' => 'Já existe uma fonte com esta URL para o usuário.',
+            ])->setPrevious($exception);
+        }
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $existing
+     * @param  array<string, mixed>|null  $input
+     * @return array<string, mixed>|null
+     */
+    private function mergeCriteria(?array $existing, ?array $input): ?array
+    {
+        if ($input === null) {
+            return null;
+        }
+
+        return array_merge($existing ?? [], $input);
+    }
+
+    /**
+     * @return LengthAwarePaginator<int, DiscoverySource>
+     */
+    private function paginateQuery(Builder $query, int $limit, int $offset): LengthAwarePaginator
+    {
+        $total = (clone $query)->count();
+        $items = $query->offset($offset)->limit($limit)->get();
+
+        return new Paginator($items, $total, $limit, intdiv($offset, $limit) + 1);
     }
 }

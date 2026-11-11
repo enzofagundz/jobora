@@ -28,7 +28,7 @@ class UpdateDiscoverySourceTool extends DiscoverySourceTool
             'keywords.*' => ['string', 'max:100'],
             'excluded_terms' => ['sometimes', 'nullable', 'array', 'max:20'],
             'excluded_terms.*' => ['string', 'max:100'],
-            'operator' => ['sometimes', 'nullable', 'in:all,any'],
+            'operator' => ['sometimes', 'nullable', 'in:all,any,and,or'],
             'seniority' => ['sometimes', 'nullable', 'in:internship,junior,mid_level,senior'],
             'location' => ['sometimes', 'nullable', 'string', 'max:255'],
             'work_mode' => ['sometimes', 'nullable', 'in:any,remote,hybrid,onsite'],

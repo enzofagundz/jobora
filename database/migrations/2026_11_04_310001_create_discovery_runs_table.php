@@ -30,6 +30,7 @@ return new class extends Migration
             $table->unique(['user_id', 'idempotency_key']);
             $table->index(['user_id', 'status']);
             $table->index(['discovery_source_id', 'status']);
+            $table->index(['status', 'expires_at']);
             $table->index('canonical_url_hash');
         });
     }

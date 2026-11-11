@@ -16,22 +16,40 @@ class DiscoveryRunFactory extends Factory
 {
     public function definition(): array
     {
-        $source = DiscoverySource::factory();
-
         return [
-            'user_id' => User::factory(),
-            'discovery_source_id' => $source,
+            'user_id' => null,
+            'discovery_source_id' => null,
             'agent_integration_id' => null,
             'execution_id' => (string) Str::uuid(),
             'idempotency_key' => (string) Str::uuid(),
             'status' => DiscoveryRunStatus::Active,
             'active_key' => 'run:'.Str::uuid(),
-            'canonical_url_hash' => str_repeat('a', 64),
-            'initial_url' => 'https://www.linkedin.com/jobs/search/?keywords=Laravel',
-            'surface' => 'linkedin_jobs',
+            'canonical_url_hash' => null,
+            'initial_url' => null,
+            'surface' => null,
             'reserved_at' => now(),
             'expires_at' => now()->addMinutes(30),
         ];
+    }
+
+    public function configure(): static
+    {
+        return $this->afterMaking(function (DiscoveryRun $run): void {
+            $source = $run->discovery_source_id === null
+                ? null
+                : DiscoverySource::withTrashed()->find($run->discovery_source_id);
+
+            $run->user_id ??= $source?->user_id ?? User::factory()->create()->id;
+
+            $source ??= DiscoverySource::factory()
+                ->for(User::query()->findOrFail($run->user_id), 'user')
+                ->create();
+
+            $run->discovery_source_id = $source->id;
+            $run->canonical_url_hash ??= $source->canonical_url_hash;
+            $run->initial_url ??= $source->url;
+            $run->surface ??= $source->surface;
+        });
     }
 
     public function expired(): static

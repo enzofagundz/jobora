@@ -4,6 +4,7 @@ namespace App\Services\Discovery;
 
 use App\Enums\DiscoverySourceSurface;
 use App\Enums\SearchPlatform;
+use InvalidArgumentException;
 
 class CaptureValidator
 {
@@ -55,7 +56,11 @@ class CaptureValidator
             throw new CaptureValidationException('execution_id deve ser string de 1 a 200 caracteres ou null.');
         }
 
-        app(DiscoverySourceUrl::class)->validate($platform, $surface, (string) ($capture['initial_url'] ?? ''));
+        try {
+            app(DiscoverySourceUrl::class)->validate($platform, $surface, (string) ($capture['initial_url'] ?? ''));
+        } catch (InvalidArgumentException $exception) {
+            throw new CaptureValidationException($exception->getMessage(), 0, $exception);
+        }
 
         $final = $capture['final_url'] ?? null;
 
@@ -107,7 +112,7 @@ class CaptureValidator
 
         $expected = $coverage['blocks_expected'] ?? null;
 
-        if ($expected !== null && (! is_int($expected) || $expected < 0)) {
+        if ($expected !== null && (! is_int($expected) || $expected < 0 || $expected > (int) config('capture.ingestion.blocks_max', 1000))) {
             throw new CaptureValidationException('blocks_expected inválido.');
         }
 

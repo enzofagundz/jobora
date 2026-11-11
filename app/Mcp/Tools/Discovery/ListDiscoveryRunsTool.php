@@ -28,10 +28,12 @@ class ListDiscoveryRunsTool extends DiscoveryRunTool
             (int) ($validated['offset'] ?? 0),
         );
 
-        return $this->ok([
-            'items' => array_map(fn ($run): array => $this->presentRun($run), $page->items()),
-            'total' => $page->total(),
-        ]);
+        return $this->listed(
+            array_map(fn ($run): array => $this->presentRun($run), $page->items()),
+            $page->total(),
+            $page->perPage(),
+            (int) ($validated['offset'] ?? 0),
+        );
     }
 
     /**

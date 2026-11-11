@@ -6,6 +6,7 @@ use App\Enums\DiscoverySourceSurface;
 use App\Enums\SearchPlatform;
 use App\Models\DiscoverySource;
 use App\Models\User;
+use App\Services\Discovery\DiscoverySourceUrl;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -24,7 +25,7 @@ class DiscoverySourceFactory extends Factory
             'source' => SearchPlatform::LinkedIn->value,
             'surface' => $surface->value,
             'url' => $url,
-            'canonical_url_hash' => hash('sha256', $url),
+            'canonical_url_hash' => app(DiscoverySourceUrl::class)->hash($url),
             'purpose' => null,
             'criteria' => null,
             'frequency_minutes' => 60,

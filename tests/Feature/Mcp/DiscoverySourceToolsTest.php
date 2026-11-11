@@ -158,3 +158,52 @@ it('rejects an invalid source url through the mcp tool', function () {
         'url' => 'https://evil.example/jobs?q=PHP',
     ])->assertHasErrors(['validation']);
 });
+
+it('returns the requested window and next offset for non aligned offsets', function () {
+    $user = McpTestHelpers::user();
+
+    foreach (range(1, 4) as $index) {
+        DiscoverySource::factory()->for($user, 'user')->create(['name' => 'Fonte '.$index]);
+    }
+
+    $expected = DiscoverySource::query()->orderByDesc('id')->pluck('id')->all();
+
+    JoboraServer::tool(ListDiscoverySourcesTool::class, ['limit' => 2, 'offset' => 1])
+        ->assertOk()
+        ->assertStructuredContent(fn ($json) => $json
+            ->where('ok', true)
+            ->where('data.total', 4)
+            ->where('data.next_offset', 3)
+            ->where('data.items.0.id', $expected[1])
+            ->where('data.items.1.id', $expected[2])
+            ->etc());
+});
+
+it('merges a partial criteria update through the mcp tool', function () {
+    $user = McpTestHelpers::user();
+    $source = DiscoverySource::factory()->for($user, 'user')->create([
+        'criteria' => [
+            'keywords' => ['Laravel'],
+            'excluded_terms' => [],
+            'operator' => 'or',
+            'seniority' => null,
+            'location' => 'São Paulo',
+            'work_mode' => 'remote',
+            'published_within_days' => 7,
+            'easy_apply' => false,
+        ],
+    ]);
+
+    JoboraServer::tool(UpdateDiscoverySourceTool::class, [
+        'id' => $source->id,
+        'expected_version' => 1,
+        'keywords' => ['PHP'],
+    ])->assertOk()
+        ->assertStructuredContent(fn ($json) => $json
+            ->where('data.source.criteria.keywords', ['PHP'])
+            ->where('data.source.criteria.location', 'São Paulo')
+            ->where('data.source.criteria.work_mode', 'remote')
+            ->where('data.source.criteria.published_within_days', 7)
+            ->where('data.source.criteria.operator', 'or')
+            ->etc());
+});

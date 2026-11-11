@@ -24,7 +24,9 @@ return new class extends Migration
             || DB::table('page_captures')->whereNotNull('execution_id')->whereRaw('LENGTH(execution_id) > 64')->exists();
 
         if ($tooLong) {
-            return;
+            throw new RuntimeException(
+                'Existem execution_ids com mais de 64 caracteres; a reversão foi interrompida para não truncar dados V2.',
+            );
         }
 
         Schema::table('page_captures', function (Blueprint $table): void {
