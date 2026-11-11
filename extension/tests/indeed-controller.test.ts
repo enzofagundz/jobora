@@ -275,6 +275,62 @@ describe('indeed controller — integridade observer/SPA', () => {
     deactivate();
   });
 
+  it('captura painel já selecionado com permalink correto sem mudança de conteúdo', async () => {
+    mountList(1);
+    document.removeEventListener('click', spaClickHandler, true);
+    window.happyDOM.setURL(`${SEARCH_URL}&vjk=jk1`);
+    openPane('Vaga 1');
+    document.querySelector('#jobsearch-ViewjobPaneWrapper')!.insertAdjacentHTML(
+      'beforeend', '<a href="/viewjob?jk=jk1">Vaga atual</a>',
+    );
+    const { deactivate } = await activateUntilDone();
+    await advance(3_000);
+    const submitted = sendMessageMock.mock.calls
+      .map(([message]) => message as CaptureMessage)
+      .find((message) => message.type === 'capture:submit-envelope');
+    expect(submitted?.envelope.blocks.map((block) => [block.kind, block.platform_id])).toEqual([
+      ['card', 'jk1'], ['detail', 'jk1'],
+    ]);
+    expect(submitted?.envelope.capture.coverage).toMatchObject({
+      status: 'complete', reason: null, blocks_expected: 2, blocks_captured: 2,
+    });
+    deactivate();
+  });
+
+  it('link relacionado não associa painel antigo ao segundo card sem atualizar conteúdo', async () => {
+    mountList(2);
+    document.removeEventListener('click', spaClickHandler, true);
+    const staleRelatedPaneHandler = (event: Event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const jk = target?.closest('a[data-jk]')?.getAttribute('data-jk');
+      if (!jk) return;
+      window.happyDOM.setURL(`${SEARCH_URL}&vjk=${jk}`);
+      if (jk === 'jk1') {
+        openPane('Vaga 1');
+        document.querySelector('#jobsearch-ViewjobPaneWrapper')!.insertAdjacentHTML(
+          'beforeend', '<div data-jk="jk1"></div><a href="/viewjob?jk=jk2">Vaga relacionada</a>',
+        );
+      }
+    };
+    document.addEventListener('click', staleRelatedPaneHandler, true);
+    try {
+      const { deactivate } = await activateUntilDone();
+      await advance(3_000);
+      const submitted = sendMessageMock.mock.calls
+        .map(([message]) => message as CaptureMessage)
+        .find((message) => message.type === 'capture:submit-envelope');
+      expect(submitted?.envelope.blocks.map((block) => [block.kind, block.platform_id])).toEqual([
+        ['card', 'jk1'], ['detail', 'jk1'], ['card', 'jk2'],
+      ]);
+      expect(submitted?.envelope.capture.coverage).toMatchObject({
+        status: 'partial', reason: 'timeout', blocks_expected: 4, blocks_captured: 3,
+      });
+      deactivate();
+    } finally {
+      document.removeEventListener('click', staleRelatedPaneHandler, true);
+    }
+  });
+
   it('painel antigo sem jk não vira detalhe do card seguinte', async () => {
     mountList(2);
     document.removeEventListener('click', spaClickHandler, true);

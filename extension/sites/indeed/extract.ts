@@ -73,20 +73,27 @@ export function indeedPaneMatches(
   previousPane: Element | null = null,
   previousPaneHtml: string | null = null,
 ): boolean {
-  const candidates = [pane, ...pane.querySelectorAll('[data-jk]')];
-  for (const candidate of candidates) {
+  const ownJk = pane.getAttribute('data-jk')?.trim();
+  if (ownJk) return ownJk === jk;
+
+  let hasExplicitIdentity = false;
+  for (const candidate of pane.querySelectorAll('[data-jk]')) {
     const paneJk = candidate.getAttribute('data-jk')?.trim();
-    if (paneJk) return paneJk === jk;
+    if (paneJk === jk) return true;
+    if (paneJk) hasExplicitIdentity = true;
   }
 
   for (const link of pane.querySelectorAll<HTMLAnchorElement>('a[href*="jk="]')) {
     try {
       const paneJk = new URL(link.href, location.href).searchParams.get('jk');
-      if (paneJk) return paneJk === jk;
+      if (paneJk === jk && (previousVjk === jk || pane !== previousPane || pane.innerHTML !== previousPaneHtml)) return true;
+      if (paneJk) hasExplicitIdentity = true;
     } catch {
       // Ignore malformed platform links and use selected-card identity below.
     }
   }
+
+  if (hasExplicitIdentity) return false;
 
   return (
     new URLSearchParams(location.search).get('vjk') === jk &&
