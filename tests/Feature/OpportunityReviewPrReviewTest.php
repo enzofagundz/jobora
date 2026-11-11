@@ -1,5 +1,6 @@
 <?php
 
+use App\DTO\ApplicationMethodData;
 use App\Enums\ConceptCategory;
 use App\Enums\ItemSource;
 use App\Models\JobPosting;
@@ -58,4 +59,32 @@ it('deduplica itens após normalização e preserva origem existente', function 
 })->with([
     'requisitos' => ['requirements', ConceptCategory::Requirement, ['PHP', ' php '], 'php'],
     'aliases de tecnologias' => ['technologies', ConceptCategory::Skill, ['js', 'javascript'], 'JavaScript'],
+]);
+
+it('deduplica formas de candidatura equivalentes e preserva origem', function (array $first, array $duplicate) {
+    $user = User::factory()->create();
+    $posting = JobPosting::factory()->for($user)->create([
+        'readiness' => 'needs_review',
+        'opportunity_version' => 1,
+    ]);
+    $original = ApplicationMethodData::fromArray($first);
+    $posting->applicationMethods()->create([
+        ...$original->toArray(),
+        'dedup_key' => $original->dedupKey(),
+        'source' => ItemSource::Ai,
+    ]);
+
+    $revision = app(OpportunityReviewService::class)->review($user, $posting, 1, [
+        'application_methods' => [$first, $duplicate],
+    ]);
+
+    $method = $posting->applicationMethods()->sole();
+    expect($method->dedup_key)->toBe($original->dedupKey())
+        ->and($method->source)->toBe(ItemSource::Ai)
+        ->and($method->url)->toBe($original->url)
+        ->and($revision->to_version)->toBe(2)
+        ->and(OpportunityReviewRevision::query()->count())->toBe(1);
+})->with([
+    'email' => [['type' => 'email', 'email' => 'a@example.com'], ['type' => 'email', 'email' => 'A@Example.com']],
+    'url' => [['type' => 'form', 'url' => 'https://example.com/apply'], ['type' => 'form', 'url' => 'https://example.com/apply/']],
 ]);

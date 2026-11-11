@@ -472,12 +472,20 @@ final class OpportunityReviewService
                 return [$data?->dedupKey() ?? $method->dedup_key => $method->source];
             });
         $posting->applicationMethods()->delete();
+        $seenKeys = [];
 
         foreach ($methods as $method) {
+            $dedupKey = $method->dedupKey();
+
+            if (isset($seenKeys[$dedupKey])) {
+                continue;
+            }
+
+            $seenKeys[$dedupKey] = true;
             $posting->applicationMethods()->create([
                 ...$method->toArray(),
-                'source' => $existingSources[$method->dedupKey()] ?? ItemSource::User,
-                'dedup_key' => $method->dedupKey(),
+                'source' => $existingSources[$dedupKey] ?? ItemSource::User,
+                'dedup_key' => $dedupKey,
             ]);
         }
     }
