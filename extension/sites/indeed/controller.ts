@@ -48,6 +48,7 @@ interface CaptureAttempt {
   captured: boolean;
   coverage: 'complete' | 'partial' | null;
   detailFailure: boolean;
+  skippedClaim: boolean;
 }
 
 export function createIndeedController(): IndeedController {
@@ -106,8 +107,11 @@ export function createIndeedController(): IndeedController {
     }
 
     if (!current.builder.hasCard(jk)) {
+      if (!session.claim(jobIdentity(jk))) {
+        current.skippedClaim = true;
+        return;
+      }
       current.builder.addCard(jk, element);
-      session.claim(jobIdentity(jk));
     }
     if (current.builder.hasDetail(jk)) return;
     if (!element.isConnected) {
@@ -274,6 +278,7 @@ export function createIndeedController(): IndeedController {
 
     const blocks = current.builder.blocks();
     const cards = blocks.filter((block) => block.kind === 'card');
+    if (cards.length === 0 && current.skippedClaim) return;
     const coverageReason = reason ?? (current.detailFailure ? 'timeout' : cards.length === 0 ? 'no_content' : null);
     const finalUrl = isIndeedRoute(location) ? location.href : current.initialUrl;
     if (!current.credentialContext) {
@@ -339,6 +344,7 @@ export function createIndeedController(): IndeedController {
       captured: false,
       coverage: null,
       detailFailure: false,
+      skippedClaim: false,
     };
   }
 

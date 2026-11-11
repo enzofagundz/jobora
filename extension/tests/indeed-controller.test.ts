@@ -147,6 +147,22 @@ describe('indeed controller — integridade observer/SPA', () => {
     deactivate();
   });
 
+  it('não reclica nem reenvia cards settled após reativar captura', async () => {
+    mountList(1);
+    const { controller, deactivate } = await activateUntilDone();
+    await advance(3_000);
+    deactivate();
+    const click = vi.spyOn(document.querySelector('a[data-jk]') as HTMLElement, 'click');
+    const activation = controller.activate(new ContentScriptContext('test-indeed-reactivation'));
+    await advance(3_000);
+    await activation;
+    await advance(3_000);
+    expect(click).not.toHaveBeenCalled();
+    expect(sentJks()).toEqual(['jk1']);
+    expect(sendMessageMock.mock.calls.filter(([message]) => (message as CaptureMessage).type === 'capture:submit-envelope')).toHaveLength(1);
+    deactivate();
+  });
+
   it('11 cards → um envelope com cards e detalhes; recriação não duplica', async () => {
     mountList();
     const { controller, deactivate } = await activateUntilDone();
