@@ -1,8 +1,5 @@
 import { toText } from '@/utils/to-text';
 
-/** Casa qualquer subdomínio do Indeed na rota /jobs (filtro fino é o pathname). */
-export const INDEED_ROUTE = new MatchPattern('https://*.indeed.com/jobs*');
-
 export const OBSERVER_DEBOUNCE_MS = 400;
 const PANE_WAIT_TIMEOUT_MS = 12_000;
 const PANE_POLL_MS = 150;
@@ -11,7 +8,9 @@ const EXPAND_WAIT_MS = 150;
 const PANE_SELECTOR = '#jobsearch-ViewjobPaneWrapper';
 
 export function isIndeedRoute(url: URL | Location): boolean {
-  return url.pathname.startsWith('/jobs');
+  return url.protocol === 'https:'
+    && ['br.indeed.com', 'www.indeed.com', 'indeed.com'].includes(url.hostname)
+    && url.pathname.startsWith('/jobs');
 }
 
 /** Card visível: âncora com data-jk e caixas de layout não vazias. */

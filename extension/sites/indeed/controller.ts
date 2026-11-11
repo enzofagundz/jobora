@@ -349,6 +349,7 @@ export function createIndeedController(): IndeedController {
   }
 
   async function activate(ctx: ContentScriptContext): Promise<void> {
+    if (!isIndeedRoute(location)) return;
     const generation = lifecycleGeneration;
     context = ctx;
     pendingElements = [];

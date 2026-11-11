@@ -163,6 +163,17 @@ describe('indeed controller — integridade observer/SPA', () => {
     deactivate();
   });
 
+  it('não resolve nem envia initial_url de host Indeed não suportado', async () => {
+    mountList(1);
+    window.happyDOM.setURL('https://de.indeed.com/jobs?q=php');
+    const controller = createIndeedController();
+    await controller.activate(new ContentScriptContext('test-indeed-host'));
+    await advance(3_000);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(controller.getCaptureState()).toMatchObject({ cards: 0, captured: false });
+    controller.deactivate();
+  });
+
   it('11 cards → um envelope com cards e detalhes; recriação não duplica', async () => {
     mountList();
     const { controller, deactivate } = await activateUntilDone();
