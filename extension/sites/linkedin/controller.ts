@@ -164,11 +164,14 @@ export function createLinkedInController(
     }
     if (!isGenerationActive(generation) || attempt !== current) return;
 
-    if (
-      occurrenceIdentityToEnrich !== null &&
-      current.builder.enrich(occurrenceIdentityToEnrich, identity, raw, el)
-    ) {
-      // Promote only this unchanged DOM occurrence, never a content match across cards.
+    if (occurrenceIdentityToEnrich !== null && occurrenceIdentityToEnrich !== identity) {
+      if (current.builder.isSamePost(occurrenceIdentityToEnrich, identity)) return;
+      if (session.transferClaim(occurrenceIdentityToEnrich, identity)) {
+        current.builder.enrich(occurrenceIdentityToEnrich, identity, raw, el);
+      } else {
+        current.builder.remove(occurrenceIdentityToEnrich);
+      }
+      current.occurrenceIdentities.set(el, { signature, identity });
       if (!jumpState.active) scheduleFinalize();
       return;
     }
