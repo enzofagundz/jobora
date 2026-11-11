@@ -6,6 +6,7 @@ use App\Models\AiOperation;
 use App\Models\ProfileImportProposal;
 use App\Models\Resume;
 use App\Models\User;
+use App\Services\ProfessionalProfileConflictException;
 use App\Services\ProfessionalProfileService;
 use App\Services\ProfileImportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -117,6 +118,20 @@ it('does not request extraction from unsaved profile edits', function () {
     Livewire::test(ProfessionalProfilePage::class)
         ->set('data.competencies.0.value', 'Uncommitted')
         ->call('requestProfileImport')
+it('refreshes and notifies when proposal rejection loses a concurrency race', function () {
+    $page = Livewire::test(ProfessionalProfilePage::class)->call('requestProfileImport');
+    $proposal = pendingProfileImportForPage();
+    $page->call('refreshProfileImport');
+
+    $imports = Mockery::mock(ProfileImportService::class, [$this->profiles])->makePartial();
+    $imports->shouldReceive('reject')->once()->andThrow(new ProfessionalProfileConflictException);
+    $this->app->instance(ProfileImportService::class, $imports);
+
+    $page->call('rejectProfileImport')
+        ->assertSet('importProposal.id', (string) $proposal->id)
+        ->assertNotified('Proposta desatualizada');
+});
+
         ->assertNotified('Salve o rascunho antes de importar')
         ->assertSet('data.competencies.0.value', 'Uncommitted')
         ->assertSet('importOperation', null);

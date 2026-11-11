@@ -280,8 +280,13 @@ class ProfessionalProfilePage extends Page
             return;
         }
 
-        $this->importProposal = $imports->reject(Auth::user(), $this->importProposal['id'], ['source' => 'filament']);
-        Notification::make()->success()->title('Proposta rejeitada')->send();
+        try {
+            $this->importProposal = $imports->reject(Auth::user(), $this->importProposal['id'], ['source' => 'filament']);
+            Notification::make()->success()->title('Proposta rejeitada')->send();
+        } catch (ProfessionalProfileConflictException) {
+            $this->refreshProfileImport($imports, $profiles);
+            Notification::make()->warning()->title('Proposta desatualizada')->body('Atualize a proposta antes de decidir.')->send();
+        }
     }
 
     private function latestImportOperation(User $user): ?AiOperation
