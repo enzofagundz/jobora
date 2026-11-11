@@ -47,7 +47,6 @@ interface CaptureAttempt {
   pending: boolean;
   captured: boolean;
   coverage: 'complete' | 'partial' | null;
-  detailFailure: boolean;
   skippedClaim: boolean;
 }
 
@@ -100,7 +99,6 @@ export function createIndeedController(): IndeedController {
 
     const jk = element.getAttribute('data-jk')?.trim();
     if (!jk) {
-      current.detailFailure = true;
       session.markInvalidElement(element);
       session.counters.errors++;
       return;
@@ -115,7 +113,6 @@ export function createIndeedController(): IndeedController {
     }
     if (current.builder.hasDetail(jk)) return;
     if (!element.isConnected) {
-      current.detailFailure = true;
       session.counters.errors++;
       return;
     }
@@ -129,7 +126,6 @@ export function createIndeedController(): IndeedController {
     try {
       (element as HTMLElement).click();
     } catch {
-      current.detailFailure = true;
       session.counters.errors++;
       return;
     }
@@ -144,7 +140,6 @@ export function createIndeedController(): IndeedController {
     );
     if (!isGenerationActive(generation) || attempt !== current) return;
     if (!paneReady) {
-      current.detailFailure = true;
       session.counters.errors++;
       return;
     }
@@ -157,7 +152,6 @@ export function createIndeedController(): IndeedController {
       !pane ||
       !indeedPaneMatches(pane, jk, previousVjk, previousPane, previousPaneHtml)
     ) {
-      current.detailFailure = true;
       session.counters.errors++;
       return;
     }
@@ -279,7 +273,8 @@ export function createIndeedController(): IndeedController {
     const blocks = current.builder.blocks();
     const cards = blocks.filter((block) => block.kind === 'card');
     if (cards.length === 0 && current.skippedClaim) return;
-    const coverageReason = reason ?? (current.detailFailure ? 'timeout' : cards.length === 0 ? 'no_content' : null);
+    const missingDetail = cards.some((card) => !current.builder.hasDetail(card.platform_id));
+    const coverageReason = reason ?? (missingDetail ? 'timeout' : cards.length === 0 ? 'no_content' : null);
     const finalUrl = isIndeedRoute(location) ? location.href : current.initialUrl;
     if (!current.credentialContext) {
       session.counters.phase = 'error';
@@ -343,7 +338,6 @@ export function createIndeedController(): IndeedController {
       pending: false,
       captured: false,
       coverage: null,
-      detailFailure: false,
       skippedClaim: false,
     };
   }

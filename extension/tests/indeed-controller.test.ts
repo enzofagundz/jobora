@@ -174,6 +174,24 @@ describe('indeed controller — integridade observer/SPA', () => {
     controller.deactivate();
   });
 
+  it('cobertura volta a completa quando retry recupera detalhe antes de settle', async () => {
+    mountList(1);
+    document.removeEventListener('click', spaClickHandler, true);
+    const { controller, deactivate } = await activateUntilDone();
+    expect(controller.getCaptureState()).toMatchObject({ cards: 1, details: 0, captured: false });
+    document.addEventListener('click', spaClickHandler, true);
+    document.querySelector('a[data-jk]')!.setAttribute('href', '/viewjob?jk=jk1');
+    await advance(4_000);
+    const submitted = sendMessageMock.mock.calls
+      .map(([message]) => message as CaptureMessage)
+      .find((message) => message.type === 'capture:submit-envelope');
+    expect(submitted?.envelope.capture.coverage).toEqual({
+      status: 'complete', reason: null, blocks_expected: 2, blocks_captured: 2,
+    });
+    expect(controller.getCaptureState()).toMatchObject({ details: 1, coverage: 'complete' });
+    deactivate();
+  });
+
   it('11 cards → um envelope com cards e detalhes; recriação não duplica', async () => {
     mountList();
     const { controller, deactivate } = await activateUntilDone();
