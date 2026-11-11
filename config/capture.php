@@ -26,6 +26,8 @@ return [
         'raw_retention_days' => (int) env('CAPTURE_RAW_RETENTION_DAYS', 30),
         'disk' => env('CAPTURE_DISK', 'local'),
         'path' => env('CAPTURE_PATH', 'capture-envelopes'),
+        'publication_extraction_ttl_minutes' => (int) env('CAPTURE_PUBLICATION_EXTRACTION_TTL_MINUTES', 60),
+        'publication_extraction_recovery_hours' => (int) env('CAPTURE_PUBLICATION_EXTRACTION_RECOVERY_HOURS', 24),
     ],
 
 ];

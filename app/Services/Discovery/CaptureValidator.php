@@ -82,7 +82,7 @@ class CaptureValidator
             throw new CaptureTooLargeException('HTML excede o limite configurado.');
         }
 
-        $this->validateBlocks($payload['blocks'] ?? null);
+        $this->validateBlocks($payload['blocks'] ?? null, $capture['surface']);
         $this->validateCoverage($capture['coverage'] ?? null, count($payload['blocks'] ?? []));
     }
 
@@ -135,7 +135,7 @@ class CaptureValidator
         }
     }
 
-    private function validateBlocks(mixed $blocks): void
+    private function validateBlocks(mixed $blocks, string $surface): void
     {
         if (! is_array($blocks) || array_is_list($blocks) === false) {
             throw new CaptureValidationException('blocks deve ser lista.');
@@ -166,11 +166,17 @@ class CaptureValidator
                 throw new CaptureValidationException('kind inválido.');
             }
 
-            if (! is_string($block['platform_id'] ?? null) || $block['platform_id'] === '' || mb_strlen($block['platform_id']) > 255) {
+            $nullablePostIdentity = $surface === 'linkedin_publications' && $block['kind'] === 'post';
+            $platformId = $block['platform_id'];
+            $permalink = $block['permalink'];
+
+            if (! ($nullablePostIdentity && $platformId === null)
+                && (! is_string($platformId) || trim($platformId) === '' || mb_strlen($platformId) > 255)) {
                 throw new CaptureValidationException('platform_id inválido.');
             }
 
-            if (! is_string($block['permalink'] ?? null) || ! $this->isHttpsUrl($block['permalink']) || mb_strlen($block['permalink']) > 2000) {
+            if (! ($nullablePostIdentity && $permalink === null)
+                && (! is_string($permalink) || trim($permalink) === '' || ! $this->isHttpsUrl($permalink) || mb_strlen($permalink) > 2000)) {
                 throw new CaptureValidationException('permalink inválido.');
             }
         }

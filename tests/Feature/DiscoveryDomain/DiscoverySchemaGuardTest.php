@@ -18,6 +18,25 @@ it('protege a reversão quando existem dados V2', function () {
         ->and(Schema::hasTable('publications'))->toBeTrue();
 });
 
+it('protege a reversão do conteúdo extraído enquanto houver dados', function () {
+    Publication::factory()->create();
+
+    $migration = require database_path('migrations/2026_11_04_234249_add_publication_extraction_content.php');
+
+    expect(fn () => $migration->down())->toThrow(RuntimeException::class)
+        ->and(Schema::hasColumn('publications', 'content_hash'))->toBeTrue()
+        ->and(Schema::hasColumn('publication_observations', 'evidence_block_ids'))->toBeTrue();
+});
+
+it('reverte o conteúdo extraído quando as tabelas do domínio estão vazias', function () {
+    $migration = require database_path('migrations/2026_11_04_234249_add_publication_extraction_content.php');
+
+    $migration->down();
+
+    expect(Schema::hasColumn('publications', 'content_hash'))->toBeFalse()
+        ->and(Schema::hasColumn('publication_observations', 'evidence_block_ids'))->toBeFalse();
+});
+
 it('impede conflito de identidade duplicado no banco', function () {
     $user = User::factory()->create();
     $row = [

@@ -25,6 +25,7 @@ use App\Filament\Widgets\TrendsChartWidget;
 use App\Jobs\AnalyzeJobPosting;
 use App\Jobs\ProcessAiOperation;
 use App\Models\AiOperation;
+use App\Models\JobIaAttempt;
 use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
 use App\Models\User;
@@ -34,7 +35,9 @@ use App\Services\JobAnalysisService;
 use App\Services\ResumeService;
 use Filament\Facades\Filament;
 use Filament\Pages\Dashboard;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 use Spatie\LaravelPdf\Facades\Pdf;
@@ -565,6 +568,91 @@ it('permite visualizar vagas pendentes e confirmadas', function () {
 
     Livewire::test(ViewJobPosting::class, ['record' => $pending->id])->assertSuccessful();
     Livewire::test(ViewJobPosting::class, ['record' => $confirmed->id])->assertSuccessful();
+});
+
+it('loads latest attempt once per render with a separate aggregate count', function () {
+    $user = auth()->user();
+    $failed = JobPosting::factory()->for($user, 'user')->failed()->create(['description' => longDescription()]);
+    $failedAttempt = JobIaAttempt::factory()->for($failed, 'jobPosting')->for($user, 'user')->create([
+        'operation' => 'failed_operation',
+        'provider' => 'failed_provider',
+        'model' => 'failed_model',
+        'error_class' => 'FailedAttemptException',
+        'error_message' => 'Failed attempt detail.',
+    ]);
+    $confirmed = JobPosting::factory()->for($user, 'user')->confirmed()->create(['description' => longDescription()]);
+    $confirmedAttempt = JobIaAttempt::factory()->for($confirmed, 'jobPosting')->for($user, 'user')->create([
+        'operation' => 'confirmed_operation',
+        'provider' => 'confirmed_provider',
+        'model' => 'confirmed_model',
+        'error_class' => 'ConfirmedAttemptException',
+        'error_message' => 'Confirmed attempt detail.',
+    ]);
+    $pending = JobPosting::factory()->for($user, 'user')->create(['description' => longDescription()]);
+    $attemptQueries = 0;
+
+    DB::listen(function (QueryExecuted $query) use (&$attemptQueries): void {
+        if (str_contains($query->sql, 'job_ia_attempts')) {
+            $attemptQueries++;
+
+            if (str_starts_with($query->sql, 'select') && ! str_contains($query->sql, 'count(*)')) {
+                expect($query->sql)->toContain('limit 1');
+            }
+        }
+    });
+
+    $queriesBeforeFailed = $attemptQueries;
+    Livewire::test(ViewJobPosting::class, ['record' => $failed->id])
+        ->assertSuccessful()
+        ->assertSee('Diagnóstico da análise')
+        ->assertSee('Tentativas')
+        ->assertSee('Detalhes técnicos')
+        ->assertSee('Falha simulada na análise.')
+        ->assertSee($failedAttempt->operation)
+        ->assertSee($failedAttempt->provider)
+        ->assertSee($failedAttempt->model)
+        ->assertSee($failedAttempt->error_message);
+    $failedQueries = $attemptQueries - $queriesBeforeFailed;
+
+    $queriesBeforeConfirmed = $attemptQueries;
+    Livewire::test(ViewJobPosting::class, ['record' => $confirmed->id])
+        ->assertSuccessful()
+        ->assertDontSee('Diagnóstico da análise')
+        ->assertSee('Detalhes técnicos')
+        ->assertSee($confirmedAttempt->operation)
+        ->assertSee($confirmedAttempt->provider)
+        ->assertSee($confirmedAttempt->model)
+        ->assertSee($confirmedAttempt->error_message);
+    $confirmedQueries = $attemptQueries - $queriesBeforeConfirmed;
+
+    $queriesBeforePending = $attemptQueries;
+    $pendingPage = Livewire::test(ViewJobPosting::class, ['record' => $pending->id])
+        ->assertSuccessful()
+        ->assertDontSee('Detalhes técnicos');
+    $pendingQueries = $attemptQueries - $queriesBeforePending;
+
+    $newAttempt = JobIaAttempt::factory()->for($pending, 'jobPosting')->for($user, 'user')->create([
+        'operation' => 'new_pending_operation',
+        'provider' => 'new_pending_provider',
+        'model' => 'new_pending_model',
+    ]);
+    $queriesBeforePendingRefresh = $attemptQueries;
+    $pendingPage->call('$refresh')
+        ->assertSee('Detalhes técnicos')
+        ->assertSee($newAttempt->operation);
+    $pendingRefreshQueries = $attemptQueries - $queriesBeforePendingRefresh;
+
+    expect([
+        'failed' => $failedQueries,
+        'confirmed' => $confirmedQueries,
+        'pending' => $pendingQueries,
+        'pending_refresh' => $pendingRefreshQueries,
+    ])->toBe([
+        'failed' => 2,
+        'confirmed' => 1,
+        'pending' => 1,
+        'pending_refresh' => 1,
+    ]);
 });
 
 it('renderiza a página de onboarding da extensão com os quatro passos e máscara quando há token', function () {

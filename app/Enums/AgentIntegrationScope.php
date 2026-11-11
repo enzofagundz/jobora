@@ -99,7 +99,7 @@ enum AgentIntegrationScope: string
             'StartApplicationTool', 'RecordApplicationUpdateTool' => self::ApplicationsWrite,
             'GetResumeAdaptationTool', 'ExportAdaptedResumePdfTool' => self::AtsRead,
             'AdaptResumeTool', 'SetAtsOptimizationTool', 'ScoreAtsTool' => self::AtsWrite,
-            'GetJobCaptureTool', 'ListJobCapturesTool', 'GetPageCaptureTool' => self::CapturesRead,
+            'GetJobCaptureTool', 'ListJobCapturesTool', 'GetPageCaptureTool', 'ListPublicationsTool' => self::CapturesRead,
             'CaptureJobTool', 'IngestPageCaptureTool', 'DeleteJobCaptureTool', 'TriageJobCapturesTool',
             'PromoteJobCaptureTool', 'PromoteEligibleJobCapturesTool' => self::CapturesWrite,
             'ListProfessionalCompetenciesTool' => self::CompetenciesRead,

@@ -12,7 +12,10 @@ use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Jobs\ProcessAiOperation;
 use App\Models\AiOperation;
 use App\Models\JobPosting;
+use App\Models\PageCapture;
 use App\Models\User;
+use App\Services\Discovery\PublicationExtractionException;
+use App\Services\Discovery\PublicationExtractionProcessor;
 use Closure;
 use Filament\Actions\Action;
 use Filament\Notifications\Events\DatabaseNotificationsSent;
@@ -39,6 +42,7 @@ class AiOperationService
         private readonly ResumeTranslationService $resumeTranslation,
         private readonly StrategicCompetencyService $strategicCompetency,
         private readonly AtsScorerService $atsScorer,
+        private readonly PublicationExtractionProcessor $publicationExtraction,
     ) {}
 
     public function enqueueResumeAdaptation(User $user, JobPosting $posting, ResumeLanguage $language = ResumeLanguage::PtBr): AiOperation
@@ -173,6 +177,37 @@ class AiOperationService
         );
     }
 
+    public function enqueuePublicationExtraction(PageCapture $capture): AiOperation
+    {
+        $snapshot = [
+            'payload' => [
+                'page_capture_id' => $capture->id,
+                'html_path' => $capture->html_path,
+                'surface' => $capture->surface,
+                'format_version' => $capture->format_version,
+                'payload_hash' => $capture->payload_hash,
+            ],
+            'fingerprint' => hash('sha256', implode('|', [
+                $capture->id,
+                (string) $capture->html_path,
+                (string) $capture->surface,
+                (string) $capture->format_version,
+                (string) $capture->payload_hash,
+            ])),
+        ];
+
+        return $this->enqueue(
+            $capture->user,
+            AiOperationType::PublicationExtraction,
+            AiOperationType::PublicationExtraction->value.':page_capture:'.$capture->id,
+            'page_capture',
+            $capture->id,
+            null,
+            $snapshot,
+            failOnDispatchError: false,
+        );
+    }
+
     /**
      * @param  array{payload: array<string, mixed>, fingerprint: string}  $snapshot
      */
@@ -184,6 +219,7 @@ class AiOperationService
         int $targetId,
         ?int $jobPostingId,
         array $snapshot,
+        bool $failOnDispatchError = true,
     ): AiOperation {
         $now = now();
 
@@ -237,7 +273,7 @@ class AiOperationService
                     'last_attempt_started_at' => null,
                     'completed_at' => null,
                     'failed_at' => null,
-                    'expires_at' => $now->copy()->addMinutes(5),
+                    'expires_at' => $now->copy()->addMinutes($this->queueTtlMinutes($operationType)),
                     'input_snapshot' => $snapshot['payload'],
                     'input_fingerprint' => $snapshot['fingerprint'],
                     'failure_code' => null,
@@ -265,6 +301,15 @@ class AiOperationService
             );
             unset($pendingDispatch);
         } catch (Throwable $exception) {
+            if (! $failOnDispatchError) {
+                Log::channel('ai')->warning('Publication extraction dispatch failed; recovery will retry.', [
+                    'operation_id' => $operation->id,
+                    'error' => $exception->getMessage(),
+                ]);
+
+                return $operation;
+            }
+
             $this->fail(
                 $operation->id,
                 $operation->run_token,
@@ -294,6 +339,15 @@ class AiOperationService
         return Cache::store($store)->lock($key, 10);
     }
 
+    private function queueTtlMinutes(AiOperationType $operationType): int
+    {
+        if ($operationType === AiOperationType::PublicationExtraction) {
+            return max(1, (int) config('capture.ingestion.publication_extraction_ttl_minutes', 60));
+        }
+
+        return 5;
+    }
+
     private function inProgressMessage(AiOperationType $operationType): string
     {
         return match ($operationType) {
@@ -302,6 +356,7 @@ class AiOperationService
             AiOperationType::StrategicCompetencyClassification => 'Classificação já está em andamento para este usuário.',
             AiOperationType::AtsOptimization => 'Atualização da otimização ATS já está em andamento para esta vaga.',
             AiOperationType::AtsScore => 'Simulação ATS já está em andamento para esta vaga.',
+            AiOperationType::PublicationExtraction => 'A extração de publicações já está em andamento para esta captura.',
         };
     }
 
@@ -405,7 +460,30 @@ class AiOperationService
                 AiOperationType::StrategicCompetencyClassification => $this->processStrategicCompetency($operation, $runToken, $ownedAttemptToken),
                 AiOperationType::AtsOptimization => $this->processAtsOptimization($operation, $runToken, $ownedAttemptToken),
                 AiOperationType::AtsScore => $this->processAtsScore($operation, $runToken, $ownedAttemptToken),
+                AiOperationType::PublicationExtraction => $this->processPublicationExtraction($operation, $runToken, $ownedAttemptToken),
             };
+        } catch (PublicationExtractionException $exception) {
+            $failed = AiOperation::query()
+                ->whereKey($operation->id)
+                ->where('run_token', $runToken)
+                ->where('attempt_token', $ownedAttemptToken)
+                ->where('status', AiOperationStatus::Running)
+                ->update([
+                    'status' => AiOperationStatus::Failed->value,
+                    'failed_at' => now(),
+                    'failure_code' => $exception->failureCode,
+                ]);
+
+            if ($failed === 1) {
+                $operation->forceFill([
+                    'status' => AiOperationStatus::Failed,
+                    'failed_at' => now(),
+                    'failure_code' => $exception->failureCode,
+                ]);
+                $this->notifyFailed($operation);
+            }
+
+            return;
         } catch (Throwable $exception) {
             AiOperation::query()
                 ->whereKey($operation->id)
@@ -529,6 +607,24 @@ class AiOperationService
             $operation->jobPosting,
             $operation->input_snapshot ?? [],
             $operation->input_fingerprint,
+            fn (Closure $persist): mixed => $this->persistForAttempt(
+                $operation->id,
+                $runToken,
+                $attemptToken,
+                $persist,
+            ),
+        );
+    }
+
+    private function processPublicationExtraction(AiOperation $operation, string $runToken, string $attemptToken): void
+    {
+        if ($operation->user === null) {
+            throw new LogicException('O usuário da extração de publicações não está disponível.');
+        }
+
+        $this->publicationExtraction->extractFromSnapshot(
+            $operation->user,
+            $operation->input_snapshot ?? [],
             fn (Closure $persist): mixed => $this->persistForAttempt(
                 $operation->id,
                 $runToken,
@@ -730,6 +826,10 @@ class AiOperationService
                 'Simulação ATS concluída',
                 'A nota da simulação ATS está disponível na candidatura.',
             ],
+            AiOperationType::PublicationExtraction => [
+                'Extração de publicações concluída',
+                'As publicações da captura estão disponíveis para consulta.',
+            ],
         };
 
         $this->sendTerminalNotification($operation, true, $title, $body);
@@ -757,6 +857,10 @@ class AiOperationService
             AiOperationType::AtsScore => [
                 'Falha na simulação ATS',
                 'Não foi possível simular a nota ATS. Tente novamente.',
+            ],
+            AiOperationType::PublicationExtraction => [
+                'Falha na extração de publicações',
+                'Não foi possível processar as publicações desta captura.',
             ],
         };
 
@@ -856,6 +960,7 @@ class AiOperationService
                 : [null, null],
             AiOperationType::StrategicCompetencyClassification => [ProfessionalCompetenciesPage::getUrl(), 'Ver competências'],
             AiOperationType::ResumeTranslation => [ResumePage::getUrl(), 'Ver currículo'],
+            AiOperationType::PublicationExtraction => [null, null],
         };
     }
 }

@@ -1,5 +1,7 @@
 <?php
 
+use App\Services\Discovery\CaptureValidator;
+
 const CAPTURE_ENVELOPE_FIXTURES = 'fixtures/capture-envelope/v1';
 const CAPTURE_ENVELOPE_FORMAT = 'jobora.capture-envelope';
 const CAPTURE_ENVELOPE_VERSION = 1;
@@ -154,6 +156,26 @@ it('publica o schema fechado do envelope v1', function () {
         ->toBe(['post', 'card', 'detail']);
     expect($schema['properties']['capture']['properties']['coverage']['properties']['reason']['enum'])
         ->toContain('cancelled', 'navigation_interrupted', 'timeout', 'no_content');
+    expect($schema['description'])->toContain('null only for kind=post on surface=linkedin_publications')
+        ->and($schema['$defs']['block']['required'])->toContain('platform_id', 'permalink')
+        ->and($schema['$defs']['block']['properties']['platform_id']['type'])->toBe(['string', 'null'])
+        ->and($schema['$defs']['block']['properties']['permalink']['type'])->toBe(['string', 'null'])
+        ->and($schema['allOf'][0]['if']['properties']['capture']['properties']['surface']['const'])->toBe('linkedin_publications')
+        ->and($schema['allOf'][0]['then']['properties']['blocks']['items']['if']['properties']['kind']['const'])->toBe('post')
+        ->and($schema['allOf'][0]['then']['properties']['blocks']['items']['else']['properties']['platform_id']['type'])->toBe('string')
+        ->and($schema['allOf'][0]['else']['properties']['blocks']['items']['properties']['permalink']['type'])->toBe('string');
+});
+
+it('keeps existing v1 envelope fixtures valid for ingestion', function () {
+    foreach ([
+        'linkedin-publications.json',
+        'linkedin-jobs.json',
+        'indeed-jobs.json',
+        'indeed-jobs-partial.json',
+    ] as $file) {
+        expect(captureEnvelopeJson($file)['version'])->toBe(CAPTURE_ENVELOPE_VERSION);
+        app(CaptureValidator::class)->validate(captureEnvelopeJson($file));
+    }
 });
 
 it('mantém manifesto com as três superfícies e cobertura parcial', function () {

@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { ContentScriptContext } from 'wxt/utils/content-script-context';
-import type { CaptureMessage } from '@/types/capture';
+import type { CaptureSubmitMessage } from '@/types/capture';
 import { createIndeedController } from '@/sites/indeed/controller';
 
 /**
@@ -76,7 +76,7 @@ describe('indeed controller — integridade observer/SPA', () => {
 
   function sentJks(): string[] {
     return sendMessageMock.mock.calls.map((call) => {
-      const message = call[0] as CaptureMessage;
+      const message = call[0] as CaptureSubmitMessage;
       return message.payload.external_id ?? '';
     });
   }

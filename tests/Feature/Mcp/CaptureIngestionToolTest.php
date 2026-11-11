@@ -4,6 +4,7 @@ use App\Mcp\Servers\JoboraServer;
 use App\Mcp\Tools\Captures\GetPageCaptureTool;
 use App\Mcp\Tools\Captures\IngestPageCaptureTool;
 use App\Models\DiscoverySource;
+use App\Models\PageCapture;
 use App\Services\Discovery\DiscoveryRunService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Storage;
@@ -63,5 +64,21 @@ it('ingests a capture through mcp and reads it back by execution id', function (
             ->where('ok', true)
             ->where('data.capture.execution_id', $run->execution_id)
             ->where('data.capture.coverage', 'complete')
+            ->etc());
+});
+
+it('reads a capture by a 200 character execution id', function () {
+    $user = McpTestHelpers::user();
+    $executionId = str_repeat('e', 200);
+    PageCapture::factory()->for($user, 'user')->create([
+        'execution_id' => $executionId,
+        'coverage_status' => 'complete',
+    ]);
+
+    JoboraServer::tool(GetPageCaptureTool::class, ['execution_id' => $executionId])
+        ->assertOk()
+        ->assertStructuredContent(fn ($json) => $json
+            ->where('ok', true)
+            ->where('data.capture.execution_id', $executionId)
             ->etc());
 });

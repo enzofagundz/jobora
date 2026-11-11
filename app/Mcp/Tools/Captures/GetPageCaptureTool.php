@@ -6,6 +6,7 @@ use App\Mcp\Support\McpUserResolver;
 use App\Mcp\Support\ToolException;
 use App\Mcp\Tools\JoboraTool;
 use App\Models\PageCapture;
+use App\Services\Discovery\PublicationExtractionService;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -17,8 +18,10 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[Description('Obtém metadados de uma captura de página por id ou execution_id.')]
 class GetPageCaptureTool extends JoboraTool
 {
-    public function __construct(McpUserResolver $users)
-    {
+    public function __construct(
+        McpUserResolver $users,
+        private readonly PublicationExtractionService $extractions,
+    ) {
         parent::__construct($users);
     }
 
@@ -51,6 +54,9 @@ class GetPageCaptureTool extends JoboraTool
                 'raw_expires_at' => $capture->raw_expires_at?->toIso8601String(),
                 'raw_deleted_at' => $capture->raw_deleted_at?->toIso8601String(),
                 'captured_at' => $capture->captured_at?->toIso8601String(),
+                'extraction' => $this->extractions->supports((string) $capture->surface)
+                    ? $this->extractions->describe($capture)
+                    : null,
             ],
         ]);
     }
