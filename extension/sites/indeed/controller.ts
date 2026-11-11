@@ -168,9 +168,23 @@ export function createIndeedController(): IndeedController {
     }
     scanRunning = true;
     const generation = lifecycleGeneration;
-    const current = attempt;
+    let current = attempt;
     try {
       if (!current || !current.resolved || current.blocked || !isGenerationActive(generation)) return;
+      if (current.finalized) {
+        const previousBuilder = current.builder;
+        pendingElements = pendingElements.filter((element) => {
+          const jk = element.getAttribute('data-jk')?.trim();
+          if (jk && !previousBuilder.hasCard(jk)) return true;
+          pendingSet.delete(element);
+          return false;
+        });
+        if (pendingElements.length === 0) return;
+        current = newAttempt();
+        attempt = current;
+        await resolveAttempt(current, generation);
+        if (!isGenerationActive(generation) || attempt !== current || current.blocked) return;
+      }
       session.counters.phase = 'processing';
 
       while (pendingElements.length > 0) {

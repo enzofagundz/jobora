@@ -129,6 +129,24 @@ describe('indeed controller — integridade observer/SPA', () => {
     return { controller, deactivate: () => controller.deactivate() };
   }
 
+  it('captura cards adicionados após settle em outro envelope sem repetir lote anterior', async () => {
+    mountList(1);
+    const { deactivate } = await activateUntilDone();
+    await advance(3_000);
+    document.querySelector('.jobsearch-ResultsList')!.insertAdjacentHTML(
+      'beforeend',
+      '<a data-jk="jk-late"><h2><span title="Vaga tardia">Vaga tardia</span></h2></a>',
+    );
+    await advance(4_000);
+    const submissions = sendMessageMock.mock.calls
+      .map(([message]) => message as CaptureMessage)
+      .filter((message) => message.type === 'capture:submit-envelope');
+    expect(submissions).toHaveLength(2);
+    expect(sentJks()).toEqual(['jk1', 'jk-late']);
+    expect(submissions[0]!.envelope.capture.idempotency_key).not.toBe(submissions[1]!.envelope.capture.idempotency_key);
+    deactivate();
+  });
+
   it('11 cards → um envelope com cards e detalhes; recriação não duplica', async () => {
     mountList();
     const { controller, deactivate } = await activateUntilDone();
