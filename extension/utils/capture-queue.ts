@@ -145,11 +145,8 @@ export function createCaptureQueue(store: CaptureQueueStore): CaptureQueue {
     const due = records
       .filter(
         (record) =>
-          record.origin === target.origin &&
-          record.credentialFingerprint === target.credentialFingerprint &&
-          (record.ownerUserId === null ||
-            target.ownerUserId === null ||
-            record.ownerUserId === target.ownerUserId) &&
+          // Mesmo critério do status: quem aparece como pendente é entregável.
+          viewerMatches(record, target) &&
           record.state === 'pending' &&
           (force || record.nextAttemptAt <= now),
       )
@@ -214,11 +211,7 @@ export function createCaptureQueue(store: CaptureQueueStore): CaptureQueue {
     }
 
     const after = await store.getAll();
-    const targetRecords = after.filter(
-      (record) =>
-        record.origin === target.origin &&
-        record.credentialFingerprint === target.credentialFingerprint,
-    );
+    const targetRecords = after.filter((record) => viewerMatches(record, target));
     return toDrain(targetRecords, results);
   }
 

@@ -599,7 +599,15 @@ describe('linkedin-jobs controller — envelope consolidado', () => {
     let fetchCalls = 0;
     const bodies: CaptureEnvelope[] = [];
     vi.spyOn(globalThis, 'fetch').mockImplementation(
-      async (_url: string | URL | Request, init?: RequestInit) => {
+      async (url: string | URL | Request, init?: RequestInit) => {
+        if (String(url).includes('/extension/auth/validate')) {
+          const token = ((init?.headers as Record<string, string> | undefined)?.Authorization ?? '')
+            .replace(/^Bearer\s+/, '');
+          return new Response(
+            JSON.stringify({ valid: true, owner_user_id: token === 'token-b' ? 2 : 1 }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
         fetchCalls++;
         bodies.push(JSON.parse((init?.body as string) ?? '{}') as CaptureEnvelope);
         if (fetchCalls === 1) throw new TypeError('offline depois do persist');

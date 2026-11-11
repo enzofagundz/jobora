@@ -181,7 +181,9 @@ export function createCaptureMessageHandler(
       const credential = credentialOverride ?? (await currentCredential());
       if (!credential) return null;
 
-      const target = targetOf(credential);
+      // Mesmo dono com token trocado continua entregável: status e drain
+      // precisam julgar a fila pelo mesmo critério.
+      const target = targetOf(credential, await ownerForStatus(credential));
       const summary = await queue.drain(
         target,
         (envelope) =>

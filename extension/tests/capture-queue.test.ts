@@ -72,7 +72,10 @@ function mockFetch(fn: (call: number, init: RequestInit) => Promise<Response>): 
     .spyOn(globalThis, 'fetch')
     .mockImplementation(async (url: string | URL | Request, init?: RequestInit) => {
       if (String(url).includes('/extension/auth/validate')) {
-        return response(200, { valid: true, owner_user_id: 1 });
+        // Cada token pertence a um dono distinto: troca de token é troca de conta.
+        const token = ((init?.headers as Record<string, string> | undefined)?.Authorization ?? '')
+          .replace(/^Bearer\s+/, '');
+        return response(200, { valid: true, owner_user_id: token === TOKEN_B ? 2 : 1 });
       }
       return fn(++calls, init ?? {});
     }) as FetchMock;
@@ -81,7 +84,10 @@ function mockFetch(fn: (call: number, init: RequestInit) => Promise<Response>): 
 }
 
 function submittedEnvelopes(spy: ReturnType<typeof vi.fn>): CaptureEnvelope[] {
-  return spy.mock.calls.map(([, init]) => JSON.parse((init as RequestInit).body as string) as CaptureEnvelope);
+  return spy.mock.calls
+    .map(([, init]) => (init as RequestInit | undefined)?.body)
+    .filter((body): body is string => typeof body === 'string')
+    .map((body) => JSON.parse(body) as CaptureEnvelope);
 }
 
 
