@@ -183,7 +183,7 @@ class DiscoverySourceUrl
             [$key, $value] = array_pad(explode('=', $pair, 2), 2, '');
             $key = urldecode($key);
             if (in_array(mb_strtolower($key), self::TRACKING_PARAMETERS, true)
-                || in_array($key, ['currentJobId', 'skipRedirect', 'infoNotice'], true)) {
+                || in_array($key, ['currentJobId', 'position', 'pageNum', 'skipRedirect', 'infoNotice'], true)) {
                 continue;
             }
             $parameters[$key][] = urldecode($value);

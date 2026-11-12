@@ -106,6 +106,21 @@ it('returns the existing capture on replay after the run is already completed', 
     expect(PageCapture::query()->count())->toBe(1);
 });
 
+it('accepts volatile LinkedIn navigation parameters without accepting another search', function () {
+    $user = User::factory()->create();
+    DiscoverySource::factory()->for($user, 'user')->create(['active' => true, 'next_due_at' => now()->subMinute()]);
+    $run = app(DiscoveryRunService::class)->acquire($user, null, 'volatile-navigation')->first();
+    $payload = gapEnvelope($user, $run, 'volatile-navigation');
+    $payload['capture']['final_url'] .= '&position=2&pageNum=1&currentJobId=123';
+
+    gapPost($user, $payload)->assertCreated();
+
+    $payload['capture']['idempotency_key'] = 'different-search';
+    $payload['capture']['final_url'] .= '&keywords=unrelated';
+    gapPost($user, $payload)->assertUnprocessable();
+    expect(PageCapture::query()->count())->toBe(1);
+});
+
 it('treats a recursive key permutation as the same canonical payload', function () {
     $user = User::factory()->create();
     $payload = gapEnvelope($user, null, 'perm-key');
