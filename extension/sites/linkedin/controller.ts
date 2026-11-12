@@ -173,6 +173,8 @@ export function createLinkedInController(
       if (current.builder.isSamePost(occurrenceIdentityToEnrich, identity)) return;
       if (session.transferClaim(occurrenceIdentityToEnrich, identity)) {
         current.builder.enrich(occurrenceIdentityToEnrich, identity, raw, el);
+        current.occurrencePool.set(signature, (current.occurrencePool.get(signature) ?? [])
+          .filter((candidate) => candidate !== occurrenceIdentityToEnrich));
       } else {
         current.builder.remove(occurrenceIdentityToEnrich);
       }

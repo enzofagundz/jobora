@@ -317,6 +317,41 @@ describe('LinkedIn publicação anônima hidratada', () => {
     controller.deactivate();
   });
 
+  it.each([ACTIVITY_ID, '9000000000000000992'])('retains promoted posts when an identical anonymous replacement hydrates as %s', async (replacementId) => {
+    const envelopes: CaptureEnvelope[] = [];
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockImplementation(async (raw: unknown) => {
+      const message = raw as CaptureMessage;
+      if (message.type === 'capture:resolve-run') {
+        return { ok: true, run: null, context: 'ctx-hydration' };
+      }
+      if (message.type === 'capture:submit-envelope') envelopes.push(message.envelope);
+      return { ok: true, duplicate: false };
+    });
+    const controller = createLinkedInController();
+    cleanup = () => controller.deactivate();
+    const activation = controller.activate(new ContentScriptContext('linkedin-distinct-replacement'));
+    await vi.advanceTimersByTimeAsync(200);
+    await activation;
+    const original = document.querySelector('[role="listitem"]')!;
+    const replacement = original.cloneNode(true) as Element;
+    original.setAttribute('data-urn', `urn:li:activity:${ACTIVITY_ID}`);
+    original.remove();
+    document.querySelector('.feed')!.appendChild(original);
+    await vi.advanceTimersByTimeAsync(OBSERVER_DEBOUNCE_MS + 100);
+    original.replaceWith(replacement);
+    await vi.advanceTimersByTimeAsync(OBSERVER_DEBOUNCE_MS + 100);
+    replacement.setAttribute('data-urn', `urn:li:activity:${replacementId}`);
+    replacement.remove();
+    document.querySelector('.feed')!.appendChild(replacement);
+    await vi.advanceTimersByTimeAsync(OBSERVER_DEBOUNCE_MS + 100);
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await vi.advanceTimersByTimeAsync(2000);
+
+    const expectedIds = [...new Set([ACTIVITY_ID, replacementId])].map((id) => `urn:li:activity:${id}`);
+    expect(envelopes.flatMap((envelope) => envelope.blocks.map((block) => block.platform_id))).toEqual(expectedIds);
+    expect(controller.getCaptureState().blocks).toBe(expectedIds.length);
+  });
+
   it('transfers claims without counting promotion or accepting repeated results', () => {
     const session = createCaptureSession();
     expect(session.claim('occurrence')).toBe(true);
