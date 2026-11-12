@@ -52,7 +52,7 @@ enum AgentIntegrationScope: string
      */
     public static function defaults(): array
     {
-        return self::values();
+        return array_values(array_diff(self::values(), [self::ApplicationsSubmit->value]));
     }
 
     public function label(): string

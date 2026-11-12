@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\AgentIntegrationScope;
 use App\Enums\AiOperationType;
 use App\Filament\Pages\TelegramIdentityPage;
 use App\Filament\Resources\AgentIntegrations\Pages\ListAgentIntegrations;
@@ -169,7 +170,7 @@ it('homologates two private accounts from three capture surfaces through human a
     foreach (['ANA', 'BRUNO'] as $name) {
         $user = User::factory()->create(['name' => $name, 'password' => 'flow-password']);
         $client = Helpers::client('Hermes homologação '.$name);
-        $actors[] = ['user' => $user, 'integration' => Helpers::integration($user, $client), 'token' => Helpers::accessToken($user, $client),
+        $actors[] = ['user' => $user, 'integration' => Helpers::integration($user, $client, AgentIntegrationScope::values()), 'token' => Helpers::accessToken($user, $client),
             'capture_token' => app(CaptureTokenService::class)->issueToken($user)];
     }
     $finished = [];
