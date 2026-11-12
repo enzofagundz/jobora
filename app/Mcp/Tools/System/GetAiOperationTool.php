@@ -3,6 +3,7 @@
 namespace App\Mcp\Tools\System;
 
 use App\Enums\AiOperationType;
+use App\Mcp\Support\AgentIntegrationContext;
 use App\Mcp\Support\ToolException;
 use App\Mcp\Tools\JoboraTool;
 use App\Models\AiOperation;
@@ -102,7 +103,7 @@ class GetAiOperationTool extends JoboraTool
             'profile_import_proposal_id' => $operation->operation_type === AiOperationType::ProfileImport
                 ? ProfileImportProposal::query()->where('ai_operation_id', $operation->id)->where('run_token', $operation->run_token)->latest('id')->value('id') : null,
             'retry_allowed' => $operation->operation_type === AiOperationType::Matching
-                ? app(MatchingService::class)->retryAllowed($this->user(), $operation)
+                ? $this->matchingRetryAllowed($operation)
                 : $operation->operation_type === AiOperationType::ProfileImport && $operation->status?->value === 'failed' && $operation->attempts < 3 && $operation->failure_code !== 'authorization_revoked',
             'type' => $operation->operation_type?->value,
             'status' => $operation->status?->value,
@@ -126,6 +127,17 @@ class GetAiOperationTool extends JoboraTool
                 ->all(),
             'publication_triage_history' => $publicationTriageHistory,
         ];
+    }
+
+    private function matchingRetryAllowed(AiOperation $operation): bool
+    {
+        $candidate = clone $operation;
+        $actor = app()->bound(AgentIntegrationContext::class)
+            ? ['source' => 'mcp', 'integration_id' => app(AgentIntegrationContext::class)->integration->id]
+            : ['source' => 'stdio'];
+        $candidate->input_snapshot = [...($operation->input_snapshot ?? []), 'requester_actor' => $actor];
+
+        return app(MatchingService::class)->retryAllowed($this->user(), $candidate);
     }
 
     private function serializeTriageResult(PublicationTriageResult $result): array
