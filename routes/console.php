@@ -53,3 +53,5 @@ Schedule::command('captures:reconcile-orphans')
     ->withoutOverlapping();
 
 Schedule::command('auth:clear-resets')->everyFifteenMinutes();
+
+Schedule::command('document-artifacts:prune')->hourly()->withoutOverlapping();

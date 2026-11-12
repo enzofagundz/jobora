@@ -122,8 +122,38 @@ class DocumentArtifactService
     {
         $this->access->authorize($user);
         $artifact = DocumentArtifact::query()->where('user_id', $user->id)->findOrFail($id);
+        $this->removeFile($artifact);
         if ($artifact->revoked_at === null) {
             $artifact->forceFill(['revoked_at' => now()])->save();
+        }
+    }
+
+    public function pruneExpired(int $limit = 500): int
+    {
+        $artifacts = DocumentArtifact::query()
+            ->where(fn ($query) => $query->where('expires_at', '<=', now())->orWhereNotNull('revoked_at'))
+            ->orderBy('updated_at')->orderBy('id')->limit(max(1, min(1000, $limit)))->get();
+        foreach ($artifacts as $artifact) {
+            $this->removeFile($artifact);
+            if ($artifact->preparation_id === null) {
+                $artifact->delete();
+            } else {
+                // Preserve preparation audit metadata and rotate processed rows behind the remaining backlog.
+                $artifact->forceFill(['revoked_at' => $artifact->revoked_at ?? now(), 'updated_at' => now()])->save();
+            }
+        }
+
+        return $artifacts->count();
+    }
+
+    private function removeFile(DocumentArtifact $artifact): void
+    {
+        if (! str_starts_with($artifact->path, 'documents/'.$artifact->user_id.'/') || str_contains($artifact->path, '..')) {
+            throw new LogicException('Caminho de artefato inválido.');
+        }
+        $disk = Storage::disk('local');
+        if ($disk->exists($artifact->path) && ! $disk->delete($artifact->path)) {
+            throw new LogicException('Não foi possível remover o PDF do artefato.');
         }
     }
 
