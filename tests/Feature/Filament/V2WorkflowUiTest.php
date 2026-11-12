@@ -149,6 +149,8 @@ it('lists only own safe AI operation metadata and hides private snapshots', func
     $owner = User::factory()->create();
     $other = User::factory()->create();
     $own = v2UiOperation($owner, 'safe-error-code');
+    v2UiOperation($owner, 'profile-target')->update(['target_type' => 'professional_profile', 'target_id' => 1]);
+    v2UiOperation($owner, 'opportunity-target')->update(['target_type' => 'opportunity', 'target_id' => 1]);
     $foreign = v2UiOperation($other, 'foreign-private-code');
     $own->update(['input_snapshot' => ['secret' => 'PRIVATE_SNAPSHOT']]);
 
@@ -156,6 +158,8 @@ it('lists only own safe AI operation metadata and hides private snapshots', func
         ->assertSuccessful()
         ->assertSee('Extração de publicação')
         ->assertSee('safe-error-code')
+        ->assertSee('Oportunidade')
+        ->assertSee('Perfil')
         ->assertDontSee('foreign-private-code')
         ->assertDontSee('PRIVATE_SNAPSHOT')
         ->assertCanSeeTableRecords([$own])

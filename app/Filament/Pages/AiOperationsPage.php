@@ -59,7 +59,8 @@ class AiOperationsPage extends Page implements HasTable
                         AiOperationStatus::Failed => 'Falhou',
                     }),
                 TextColumn::make('target_type')->label('Alvo')->formatStateUsing(fn (string $state): string => match ($state) {
-                    'job_posting' => 'Vaga', 'page_capture' => 'Captura', 'publication' => 'Publicação', 'user' => 'Perfil', default => $state,
+                    'job_posting' => 'Vaga', 'page_capture' => 'Captura', 'publication' => 'Publicação', 'user' => 'Perfil',
+                    'professional_profile' => 'Perfil', 'opportunity' => 'Oportunidade', default => $state,
                 }),
                 TextColumn::make('target_id')->label('ID do alvo'),
                 TextColumn::make('attempts')->label('Tentativas')->numeric(),
