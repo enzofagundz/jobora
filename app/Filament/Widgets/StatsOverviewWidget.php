@@ -18,8 +18,16 @@ class StatsOverviewWidget extends BaseStatsOverviewWidget
             Stat::make('Oportunidades prontas', JobPosting::query()->where('user_id', $user->id)->where('readiness', 'ready')->count())
                 ->description('com prontidão V2 marcada como pronta')
                 ->color('success'),
-            Stat::make('Precisam de revisão', JobPosting::query()->where('user_id', $user->id)->where('readiness', 'needs_review')->count())
+            Stat::make('Precisam de revisão', JobPosting::query()->where('user_id', $user->id)->where(function ($query): void {
+                $query->where('readiness', 'needs_review')
+                    ->orWhere(function ($legacy): void {
+                        $legacy->whereNull('readiness')->where('status', 'needs_review');
+                    });
+            })->count())
                 ->color('warning'),
+            Stat::make('Falhas na análise', JobPosting::query()->where('user_id', $user->id)
+                ->whereNull('readiness')->where('status', 'failed')->count())
+                ->color('danger'),
         ];
     }
 }

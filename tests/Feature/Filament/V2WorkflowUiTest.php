@@ -8,6 +8,7 @@ use App\Filament\Pages\MarketTrendsPage;
 use App\Filament\Resources\JobCaptures\JobCaptureResource;
 use App\Filament\Resources\JobPostings\Pages\ListJobPostings;
 use App\Filament\Resources\PageCaptures\Pages\ManagePageCaptures;
+use App\Filament\Widgets\StatsOverviewWidget;
 use App\Models\AiOperation;
 use App\Models\DiscoveryRun;
 use App\Models\DiscoveryRunEvent;
@@ -247,6 +248,19 @@ it('separates V2 readiness from legacy posting status in the postings list', fun
         ->assertSee('Status legado')
         ->assertDontSee('Arquivada')
         ->assertCanSeeTableRecords([$ready, $legacy]);
+});
+
+it('keeps legacy review and failure work visible without double counting V2 review', function () {
+    $owner = User::factory()->create();
+    JobPosting::factory()->for($owner, 'user')->create(['readiness' => null, 'status' => 'needs_review']);
+    JobPosting::factory()->for($owner, 'user')->create(['readiness' => 'needs_review', 'status' => 'pending']);
+    JobPosting::factory()->for($owner, 'user')->create(['readiness' => null, 'status' => 'failed']);
+    JobPosting::factory()->for($owner, 'user')->create(['readiness' => 'ready', 'status' => 'failed']);
+
+    Livewire::actingAs($owner)->test(StatsOverviewWidget::class)
+        ->assertSee('Precisam de revisão')
+        ->assertSee('Falhas na análise')
+        ->assertSee('2');
 });
 
 function v2UiOperation(User $user, string $failureCode): AiOperation
