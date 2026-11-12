@@ -13,7 +13,9 @@ use App\Services\CaptureTokenService;
 use App\Services\Discovery\CaptureIngestionService;
 use App\Services\Discovery\DiscoveryRunService;
 use App\Services\Discovery\ObservationRecorder;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Testing\TestResponse;
@@ -69,6 +71,25 @@ function gapPost(User $user, array $payload): TestResponse
 
 beforeEach(function (): void {
     Storage::fake('local');
+});
+
+it('locks the user then the run before the source when completing a capture', function () {
+    $user = User::factory()->create();
+    DiscoverySource::factory()->for($user, 'user')->create(['active' => true, 'next_due_at' => now()->subMinute()]);
+    $run = app(DiscoveryRunService::class)->acquire($user, null, 'lock-order')->first();
+    $payload = gapEnvelope($user, $run, 'lock-order');
+    $tables = [];
+    DB::listen(function (QueryExecuted $query) use (&$tables): void {
+        if (preg_match('/^select .* from "(users|discovery_runs|discovery_sources)"/', $query->sql, $matches)) {
+            $tables[] = $matches[1];
+        }
+    });
+
+    app(CaptureIngestionService::class)->ingest($user, $payload);
+
+    $sourceIndex = array_search('discovery_sources', $tables, true);
+    expect(array_slice($tables, $sourceIndex - 2, 3))->toBe(['users', 'discovery_runs', 'discovery_sources'])
+        ->and($run->refresh()->status)->toBe(DiscoveryRunStatus::Completed);
 });
 
 it('returns the existing capture on replay after the run is already completed', function () {

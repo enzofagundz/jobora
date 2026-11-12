@@ -141,8 +141,8 @@ class CaptureIngestionService
     private function completeRun(DiscoveryRun $run, PageCapture $pageCapture, array $coverage, CarbonInterface $now): void
     {
         User::query()->whereKey($run->user_id)->lockForUpdate()->firstOrFail();
-        $source = DiscoverySource::query()->where('user_id', $run->user_id)->whereKey($run->discovery_source_id)->lockForUpdate()->first();
         $locked = DiscoveryRun::query()->whereKey($run->id)->lockForUpdate()->first();
+        $source = DiscoverySource::query()->where('user_id', $run->user_id)->whereKey($run->discovery_source_id)->lockForUpdate()->first();
 
         if ($locked === null
             || $locked->status !== DiscoveryRunStatus::Active
