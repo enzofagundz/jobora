@@ -297,3 +297,21 @@ it('disables requesting terminal operations and reports their actual state', fun
     $this->assertDatabaseCount('ai_operations', 1);
     Http::assertNothingSent();
 })->with(['completed', 'failed']);
+
+it('keeps history cursor stable across new evaluations and stops at an exact page boundary', function () {
+    $ids = matchingUiHistory($this, 20);
+    $page = Livewire::test(MatchingPage::class, ['record' => $this->posting->id]);
+    $newEvaluation = MatchingEvaluation::query()->first()->replicate();
+    $newEvaluation->input_fingerprint = hash('sha256', 'concurrent-history');
+    $newEvaluation->attempt_token = (string) Str::uuid();
+    $newEvaluation->save();
+
+    $page->call('showMoreHistory')
+        ->assertSet('nextHistoryCursor', null)
+        ->assertDontSee('Carregar avaliações anteriores');
+    expect(array_column($page->get('matchingData.history.items'), 'id'))->toBe($ids);
+
+    $offsetPage = app(MatchingService::class)->forOpportunity($this->owner, $this->posting->id, 10, 10);
+    expect(array_column($offsetPage['history']['items'], 'id'))->toBe(array_slice([$newEvaluation->id, ...$ids], 10, 10))
+        ->and($offsetPage['history']['next_offset'])->toBe(20);
+});

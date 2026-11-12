@@ -161,7 +161,7 @@
                             </div>
                         </details>
                     @endforeach
-                    @if ($nextHistoryOffset !== null)
+                    @if ($nextHistoryCursor !== null)
                         <x-filament::button color="gray" wire:click="showMoreHistory">Carregar avaliações anteriores</x-filament::button>
                     @endif
                 </div>

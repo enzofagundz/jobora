@@ -175,10 +175,11 @@ class MatchingService
         $query = MatchingEvaluation::query()->where('user_id', $user->id)->where('job_posting_id', $opportunityId);
         $total = (clone $query)->count();
         $current = $fingerprint === null ? null : (clone $query)->where('input_fingerprint', $fingerprint)->first();
-        $pageQuery = (clone $query)->when($beforeId !== null, fn ($builder) => $builder->where('id', '<', $beforeId))->latest('id')->offset($beforeId === null ? $offset : 0)->limit($limit);
-        $page = $pageQuery->get();
+        $pageQuery = (clone $query)->when($beforeId !== null, fn ($builder) => $builder->where('id', '<', $beforeId))->latest('id')->offset($beforeId === null ? $offset : 0)->limit($limit + 1);
+        $rows = $pageQuery->get();
+        $page = $rows->take($limit);
         $items = $page->map(fn (MatchingEvaluation $evaluation): array => $this->present($evaluation, $fingerprint))->all();
-        $nextCursor = $page->count() === $limit ? (int) $page->last()->id : null;
+        $nextCursor = $rows->count() > $limit ? (int) $page->last()->id : null;
 
         return ['opportunity_id' => $opportunityId, 'current' => $current === null ? null : $this->present($current, $fingerprint), 'history' => [
             'items' => $items, 'total' => $total, 'limit' => $limit, 'offset' => $offset, 'next_offset' => $offset + $limit < $total ? $offset + $limit : null, 'next_cursor' => $nextCursor,
