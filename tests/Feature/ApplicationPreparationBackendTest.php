@@ -402,7 +402,7 @@ it('delivers independent current artifacts and authenticated session links', fun
     app()->forgetInstance(AgentIntegrationContext::class);
     $delivery = app(DocumentArtifactService::class)->deliver($this->owner, DocumentArtifact::findOrFail($first['artifact_id']), session: true);
     app('auth')->forgetGuards();
-    $this->withHeader('Authorization', '')->actingAs($this->owner)->get($delivery['download_url'])->assertOk();
+    $this->withHeader('Authorization', '')->actingAs($this->owner, 'web')->get($delivery['download_url'])->assertOk();
 });
 
 it('never exports an ATS block without explicit consent and rechecks ATS authorization on download', function () {
