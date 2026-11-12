@@ -57,6 +57,12 @@ class MatchingPage extends ViewRecord
     {
         $this->assertOwnedOpportunity();
 
+        if (in_array($this->operationState['status'] ?? null, ['completed', 'failed'], true)) {
+            Notification::make()->warning()->title('Avaliação já finalizada')->body('Atualize o estado ou use “Tentar novamente” quando disponível.')->send();
+
+            return;
+        }
+
         if (! $this->record->isStructuredOpportunity() || $this->record->readiness !== 'ready' || ! $this->profileConfirmed) {
             Notification::make()->warning()->title('Não é possível solicitar compatibilidade')->body('Confirme o perfil e use oportunidade pronta.')->send();
 

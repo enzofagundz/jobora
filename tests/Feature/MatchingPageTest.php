@@ -281,3 +281,19 @@ it('appends earlier evaluations without losing displayed history', function () {
     $page->call('showMoreHistory');
     expect(array_column($page->get('matchingData.history.items'), 'id'))->toBe($ids);
 });
+
+it('disables requesting terminal operations and reports their actual state', function (string $status) {
+    matchingUiSetup($this, matchingUiCases()[0]);
+    $operation = app(AiOperationService::class)->enqueueMatching(
+        $this->owner, $this->posting->id, 3, 4, 'matching-v1', ['source' => 'filament'],
+    );
+    $operation->update(['status' => $status, 'completed_at' => now()]);
+    $page = Livewire::test(MatchingPage::class, ['record' => $this->posting->id]);
+    $html = $page->html();
+    preg_match('/<button\b[^>]*wire:click="requestMatching"[^>]*>/s', $html, $button);
+    expect($button[0] ?? '')->toContain('disabled');
+
+    $page->call('requestMatching')->assertNotified('Avaliação já finalizada');
+    $this->assertDatabaseCount('ai_operations', 1);
+    Http::assertNothingSent();
+})->with(['completed', 'failed']);
