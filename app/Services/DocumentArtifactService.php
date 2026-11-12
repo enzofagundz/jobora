@@ -104,9 +104,7 @@ class DocumentArtifactService
             throw new LogicException('A entrega remota de documentos exige HTTPS.');
         }
 
-        return [...$this->present($artifact), 'download_url' => $url, 'expires_at' => $expiry->toISOString(),
-            'link_ttl_minutes' => (int) config('application-documents.link_ttl_minutes', 15),
-            'artifact_ttl_hours' => (int) config('application-documents.artifact_ttl_hours', 24)];
+        return [...$this->present($artifact), 'download_url' => $url, 'expires_at' => $expiry->toISOString()];
     }
 
     public function assertDownload(User $user, DocumentArtifact $artifact, bool $session = false): void
