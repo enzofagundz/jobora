@@ -32,3 +32,10 @@ it('allocates longtext for encrypted matching payloads on fresh and deployed MyS
     '2026_11_06_174356_create_matching_evaluations_table.php',
     '2026_11_12_105036_widen_matching_evaluation_payloads.php',
 ]);
+
+it('allocates longtext for preparation snapshots on fresh and deployed MySQL schemas', function (string $migration) {
+    expect(pr7MysqlMigrationSql($migration))->toContain('`snapshot` longtext not null');
+})->with([
+    '2026_11_06_171757_create_application_preparations_table.php',
+    '2026_11_12_105037_widen_application_preparation_snapshot.php',
+]);
