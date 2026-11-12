@@ -30,7 +30,7 @@ class ValidateDynamicClientRegistration
 
     private function isAllowedRedirect(string $uri): bool
     {
-        if (preg_match('/[\x00-\x1F\x7F]/', $uri) === 1) {
+        if (preg_match('/[\x00-\x20\x7F\\\\]/', $uri) === 1) {
             return false;
         }
 
@@ -40,23 +40,15 @@ class ValidateDynamicClientRegistration
             return false;
         }
 
-        if (! in_array(mb_strtolower($parts['scheme']), ['http', 'https'], true)) {
-            return false;
-        }
-
         if (isset($parts['user']) || isset($parts['pass']) || isset($parts['fragment'])) {
             return false;
         }
 
+        $scheme = mb_strtolower($parts['scheme']);
         $host = mb_strtolower($parts['host']);
-
-        if (! in_array($host, self::HOSTS, true)) {
-            return false;
-        }
-
         $path = $parts['path'] ?? '';
 
-        if ($path === '' || ! str_starts_with($path, '/') || str_contains($path, '..')) {
+        if (($path !== '' && ! str_starts_with($path, '/')) || str_contains($path, '..')) {
             return false;
         }
 
@@ -64,14 +56,48 @@ class ValidateDynamicClientRegistration
             return false;
         }
 
-        return true;
+        if (! in_array($scheme, ['http', 'https'], true)) {
+            return $host !== '' && in_array($scheme, config('mcp.custom_schemes', []), true);
+        }
+
+        if ($path === '') {
+            return false;
+        }
+
+        foreach (config('mcp.redirect_domains', []) as $domain) {
+            if ($domain === '*') {
+                return true;
+            }
+
+            $allowed = parse_url($domain);
+
+            if ($allowed === false || ! isset($allowed['scheme'], $allowed['host'])) {
+                continue;
+            }
+
+            if ($scheme !== mb_strtolower($allowed['scheme']) || $host !== mb_strtolower($allowed['host'])) {
+                continue;
+            }
+
+            if (in_array($host, self::HOSTS, true)) {
+                return true;
+            }
+
+            $defaultPort = $scheme === 'https' ? 443 : 80;
+
+            if (($parts['port'] ?? $defaultPort) === ($allowed['port'] ?? $defaultPort)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function invalid(): JsonResponse
     {
         return response()->json([
             'error' => 'invalid_redirect_uri',
-            'error_description' => 'redirect_uris devem ser loopback HTTP(S), sem credenciais, fragmento ou host ambíguo.',
+            'error_description' => 'redirect_uris devem usar domínios ou esquemas permitidos, sem credenciais, fragmento ou host ambíguo.',
         ], 400);
     }
 }
