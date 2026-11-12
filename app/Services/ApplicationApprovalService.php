@@ -28,6 +28,8 @@ class ApplicationApprovalService
             'input.approved_at' => ['required', 'string', 'date', 'regex:/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})\z/D'],
             'input.expires_at' => ['required', 'string', 'date', 'regex:/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})\z/D'],
         ])['input'];
+        $input['approved_at'] = CarbonImmutable::parse($input['approved_at'])->utc()->toISOString();
+        $input['expires_at'] = CarbonImmutable::parse($input['expires_at'])->utc()->toISOString();
         $integration = app(TelegramIdentityService::class)->authorizeRemote($user, $actorMetadata);
         $messageKey = hash('sha256', json_encode([$integration->id, $input['chat_id'], $input['message_id']], JSON_THROW_ON_ERROR));
         $requestHash = hash('sha256', json_encode(array_map(fn (string $key): mixed => $input[$key], [

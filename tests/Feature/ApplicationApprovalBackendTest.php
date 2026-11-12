@@ -142,6 +142,18 @@ it('does not consume when a frozen artifact disappears after reservation', funct
     $this->assertDatabaseHas('application_submission_attempts', ['id' => $reserved['attempt_id'], 'consumed_at' => null, 'revision' => 1]);
 });
 
+it('replays approval timestamps expressed with equivalent timezone offsets', function () {
+    approvalLink($this);
+    $first = approvalCall($this, 'record_application_approval', $this->approvalInput);
+    expect($first['ok'])->toBeTrue();
+    foreach (['approved_at', 'expires_at'] as $field) {
+        $this->approvalInput[$field] = CarbonImmutable::parse($this->approvalInput[$field])
+            ->setTimezone('America/Sao_Paulo')->format('Y-m-d\TH:i:s.uP');
+    }
+    expect(approvalCall($this, 'record_application_approval', $this->approvalInput)['data'])->toBe($first['data']);
+    $this->assertDatabaseCount('application_approvals', 1);
+});
+
 function submissionReserved(object $test): array
 {
     $test->integration->update(['scopes' => ['approvals:write', 'applications:submit', 'applications:read', 'applications:write']]);
