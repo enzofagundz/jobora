@@ -79,7 +79,7 @@ final class MatchingOutput
                     throw new MatchingException;
                 }
                 $sources[] = $anchor['source'];
-                if ($criterion->status === 'met' && $anchor['source'] === 'profile' && in_array($criterion->kind, ['technology', 'requirement'], true)) {
+                if (in_array($criterion->kind, ['technology', 'requirement'], true)) {
                     $index = (int) explode(':', $criterion->id)[1];
                     $field = $criterion->kind === 'technology' ? 'technologies' : 'requirements';
                     $target = $frozen['opportunity']['snapshot'][$field][$index];
