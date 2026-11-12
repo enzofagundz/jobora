@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\AgentIntegrationScope;
+use App\Mcp\Tools\Profile\SaveProfessionalProfileTool;
 use App\Models\ProfessionalProfile;
 use App\Models\Resume;
 use App\Models\ScreeningPreference;
@@ -8,9 +9,25 @@ use App\Models\User;
 use App\Services\ProfessionalProfileService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Validation\ValidationException;
+use Laravel\Mcp\Server\Tools\Annotations\IsDestructive;
 use Tests\Feature\AgentIntegrations\AgentIntegrationTestHelpers as Helpers;
 
 uses(RefreshDatabase::class);
+
+it('requires explicit authorization before overwriting the profile draft', function (?bool $confirm) {
+    $user = User::factory()->create();
+    $arguments = ['profile' => profileDocument(), 'expected_version' => 0];
+    if ($confirm !== null) {
+        $arguments['confirm'] = $confirm;
+    }
+    $body = Helpers::decodeToolResult($this->withToken(profileToken($user))
+        ->postJson('/mcp', Helpers::toolCall('save_professional_profile', $arguments))->assertOk()->getContent());
+
+    expect($body['error']['code'])->toBe('conflict')
+        ->and($user->professionalProfile()->exists())->toBeFalse()
+        ->and((new ReflectionClass(SaveProfessionalProfileTool::class))
+            ->getAttributes(IsDestructive::class))->toHaveCount(1);
+})->with([null, false]);
 
 function profileDocument(array $overrides = []): array
 {
@@ -31,6 +48,26 @@ function profileToken(User $user, array $scopes = ['profile:read', 'profile:writ
 
     return Helpers::accessToken($user, $client);
 }
+
+it('saves and confirms large valid profiles and preserves ciphertext through the upgrade', function () {
+    $user = User::factory()->create();
+    $document = profileDocument(['experiences' => array_fill(0, 20, [
+        'company' => 'Empresa', 'role' => 'Developer', 'period' => null, 'description' => str_repeat('PHP ', 1250),
+    ])]);
+    $service = app(ProfessionalProfileService::class);
+    $service->saveDraft($user, $document, 0);
+    $service->confirm($user, 1);
+    $before = $service->get($user);
+
+    (require database_path('migrations/2026_11_11_190130_widen_professional_profile_payloads.php'))->up();
+    expect($service->get($user))->toEqual($before)
+        ->and($before['draft'])->toEqual($document)
+        ->and($before['confirmed_snapshot'])->toEqual($document);
+    $profile = $user->professionalProfile()->sole();
+    foreach (['draft', 'confirmed_snapshot'] as $column) {
+        expect(strlen($profile->getRawOriginal($column)))->toBeGreaterThan(65535);
+    }
+});
 
 it('reads only the authenticated profile without inventing a confirmation', function () {
     $user = User::factory()->create();
@@ -58,7 +95,7 @@ it('replaces the draft atomically with CAS and a single mutable preference sourc
     $user = User::factory()->create();
     $token = profileToken($user);
     $save = fn (array $document, int $version): array => Helpers::decodeToolResult($this->withToken($token)
-        ->postJson('/mcp', Helpers::toolCall('save_professional_profile', ['profile' => $document, 'expected_version' => $version]))
+        ->postJson('/mcp', Helpers::toolCall('save_professional_profile', ['confirm' => true, 'profile' => $document, 'expected_version' => $version]))
         ->assertOk()->getContent());
 
     $first = $save(profileDocument(), 0);
@@ -86,7 +123,7 @@ it('replaces the draft atomically with CAS and a single mutable preference sourc
 it('rejects invalid documents without creating a draft or preferences', function (array $document) {
     $user = User::factory()->create();
     $body = Helpers::decodeToolResult($this->withToken(profileToken($user))
-        ->postJson('/mcp', Helpers::toolCall('save_professional_profile', ['profile' => $document, 'expected_version' => 0]))
+        ->postJson('/mcp', Helpers::toolCall('save_professional_profile', ['confirm' => true, 'profile' => $document, 'expected_version' => 0]))
         ->assertOk()->getContent());
 
     expect($body['error']['code'] ?? null)->toBe('validation');
@@ -109,7 +146,7 @@ it('confirms only the persisted version and preserves an immutable confirmed sna
     $call = fn (string $name, array $arguments): array => Helpers::decodeToolResult($this->withToken($token)
         ->postJson('/mcp', Helpers::toolCall($name, $arguments))->assertOk()->getContent());
 
-    $call('save_professional_profile', ['profile' => profileDocument(), 'expected_version' => 0]);
+    $call('save_professional_profile', ['confirm' => true, 'profile' => profileDocument(), 'expected_version' => 0]);
     expect($call('confirm_professional_profile', ['expected_version' => 1])['error']['code'] ?? null)->toBe('conflict');
     expect($call('confirm_professional_profile', ['expected_version' => 1, 'confirm' => true, 'actor_metadata' => ['source' => 'forged']])['error']['code'] ?? null)->toBe('validation');
     expect(app(ProfessionalProfileService::class)->confirmed($user))->toBeNull();
@@ -131,7 +168,7 @@ it('confirms only the persisted version and preserves an immutable confirmed sna
 
     expect($call('confirm_professional_profile', ['expected_version' => 1, 'confirm' => true])['error']['code'] ?? null)->toBe('conflict');
     $changed = profileDocument(['experiences' => [], 'preferences' => ['Híbrido']]);
-    $after = $call('save_professional_profile', ['profile' => $changed, 'expected_version' => 2]);
+    $after = $call('save_professional_profile', ['confirm' => true, 'profile' => $changed, 'expected_version' => 2]);
     expect($after['data']['version'])->toBe(3)
         ->and($after['data']['confirmed_version'])->toBe(2)
         ->and($after['data']['confirmed_at'])->toBe($confirmed['data']['confirmed_at'])
@@ -150,7 +187,7 @@ it('confirms only the persisted version and preserves an immutable confirmed sna
 it('requires explicit profile scopes and never expands an existing integration', function () {
     $user = User::factory()->create();
     $token = profileToken($user, ['resume:read', 'resume:write', 'screening:read', 'screening:write']);
-    foreach (['get_professional_profile' => [], 'save_professional_profile' => ['profile' => profileDocument(), 'expected_version' => 0], 'confirm_professional_profile' => ['confirm' => true, 'expected_version' => 0]] as $tool => $arguments) {
+    foreach (['get_professional_profile' => [], 'save_professional_profile' => ['confirm' => true, 'profile' => profileDocument(), 'expected_version' => 0], 'confirm_professional_profile' => ['confirm' => true, 'expected_version' => 0]] as $tool => $arguments) {
         $body = Helpers::decodeToolResult($this->withToken($token)->postJson('/mcp', Helpers::toolCall($tool, $arguments))->assertOk()->getContent());
         expect($body['error']['code'] ?? null)->toBe('forbidden');
     }
@@ -167,7 +204,7 @@ it('keeps every write and confirmation private to the authenticated owner', func
     $before = $service->get($bob);
 
     $token = profileToken($alice);
-    $write = Helpers::decodeToolResult($this->withToken($token)->postJson('/mcp', Helpers::toolCall('save_professional_profile', [
+    $write = Helpers::decodeToolResult($this->withToken($token)->postJson('/mcp', Helpers::toolCall('save_professional_profile', ['confirm' => true,
         'profile' => profileDocument(), 'expected_version' => 0,
     ]))->assertOk()->getContent());
     expect($write['data']['draft']['competencies'] ?? null)->toBe(['PHP']);
@@ -214,10 +251,10 @@ it('rejects extra MCP arguments and invalid versions before any write', function
     $this->assertDatabaseCount('screening_preferences', 0);
 })->with([
     'read owner injection' => ['get_professional_profile', ['user_id' => 123]],
-    'write owner injection' => fn () => ['save_professional_profile', ['profile' => profileDocument(), 'expected_version' => 0, 'user_id' => 123]],
-    'negative version' => fn () => ['save_professional_profile', ['profile' => profileDocument(), 'expected_version' => -1]],
-    'missing version' => fn () => ['save_professional_profile', ['profile' => profileDocument()]],
-    'string version' => fn () => ['save_professional_profile', ['profile' => profileDocument(), 'expected_version' => '0']],
+    'write owner injection' => fn () => ['save_professional_profile', ['confirm' => true, 'profile' => profileDocument(), 'expected_version' => 0, 'user_id' => 123]],
+    'negative version' => fn () => ['save_professional_profile', ['confirm' => true, 'profile' => profileDocument(), 'expected_version' => -1]],
+    'missing version' => fn () => ['save_professional_profile', ['confirm' => true, 'profile' => profileDocument()]],
+    'string version' => fn () => ['save_professional_profile', ['confirm' => true, 'profile' => profileDocument(), 'expected_version' => '0']],
     'legacy unknown key' => ['save_screening_preferences', ['preferences' => [], 'inferred' => true]],
     'legacy invalid list' => ['save_screening_preferences', ['preferences' => ['key' => 'x']]],
     'legacy invalid version' => ['save_screening_preferences', ['preferences' => [], 'expected_version' => -1]],
@@ -226,7 +263,7 @@ it('rejects extra MCP arguments and invalid versions before any write', function
 it('rolls back initial creation when the expected version is stale', function () {
     $user = User::factory()->create();
     $body = Helpers::decodeToolResult($this->withToken(profileToken($user))
-        ->postJson('/mcp', Helpers::toolCall('save_professional_profile', ['profile' => profileDocument(), 'expected_version' => 1]))
+        ->postJson('/mcp', Helpers::toolCall('save_professional_profile', ['confirm' => true, 'profile' => profileDocument(), 'expected_version' => 1]))
         ->assertOk()->getContent());
 
     expect($body['error']['code'] ?? null)->toBe('conflict');
@@ -275,7 +312,7 @@ it('denies unauthenticated access to professional profiles', function () {
 it('denies profile mutation with only a read scope', function () {
     $user = User::factory()->create();
     $token = profileToken($user, ['profile:read']);
-    foreach (['save_professional_profile' => ['profile' => profileDocument(), 'expected_version' => 0], 'confirm_professional_profile' => ['expected_version' => 0, 'confirm' => true]] as $tool => $arguments) {
+    foreach (['save_professional_profile' => ['confirm' => true, 'profile' => profileDocument(), 'expected_version' => 0], 'confirm_professional_profile' => ['expected_version' => 0, 'confirm' => true]] as $tool => $arguments) {
         $body = Helpers::decodeToolResult($this->withToken($token)->postJson('/mcp', Helpers::toolCall($tool, $arguments))->assertOk()->getContent());
         expect($body['error']['code'] ?? null)->toBe('forbidden');
     }

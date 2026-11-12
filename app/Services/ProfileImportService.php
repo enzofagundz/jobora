@@ -36,7 +36,7 @@ class ProfileImportService
         $currentContent = Resume::query()->where('user_id', $user->id)->where('language', $source['language'])->value('content');
         unset($source['content']);
         $source['source_stale'] = ! is_string($currentContent) || ! hash_equals($source['fingerprint'], hash('sha256', $currentContent));
-        $stale = $state['version'] !== $proposal->base_version;
+        $stale = $proposal->status === 'pending' && $state['version'] !== $proposal->base_version;
 
         return [
             'id' => (string) $proposal->id, 'status' => $proposal->status,

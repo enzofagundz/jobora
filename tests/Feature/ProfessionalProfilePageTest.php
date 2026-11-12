@@ -109,3 +109,12 @@ it('shows preference validation errors on the field', function () {
         ->call('save')
         ->assertHasErrors(['preferences.0']);
 });
+
+it('preserves zero in competency lists when saving the profile', function () {
+    Livewire::test(ProfessionalProfilePage::class)
+        ->fillForm(['competencies' => [['value' => '0']]])
+        ->call('saveDraft')
+        ->assertNotified('Rascunho salvo');
+
+    expect(app(ProfessionalProfileService::class)->get(auth()->user())['draft']['competencies'])->toBe(['0']);
+});

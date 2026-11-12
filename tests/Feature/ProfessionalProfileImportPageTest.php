@@ -6,6 +6,7 @@ use App\Models\AiOperation;
 use App\Models\ProfileImportProposal;
 use App\Models\Resume;
 use App\Models\User;
+use App\Services\ProfessionalProfileConflictException;
 use App\Services\ProfessionalProfileService;
 use App\Services\ProfileImportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -85,7 +86,9 @@ it('requests extraction, refreshes proposal, and confirms reviewed facts', funct
         ->call('requestImportConfirmation')
         ->assertSet('showImportConfirmation', true)
         ->call('confirmProfileImport')
-        ->assertSet('importProposal.status', 'confirmed');
+        ->assertSet('importProposal.status', 'confirmed')
+        ->set('importProposal.stale', true)
+        ->assertDontSee('Proposta desatualizada');
 
     $proposalId = $page->get('importProposal.id');
     $replay = app(ProfileImportService::class)->confirm($this->owner, $proposalId, 2, ['source' => 'filament']);
@@ -109,8 +112,24 @@ it('rejects stale proposal and keeps edits made while import is pending', functi
         ->assertNotified('Esta proposta ficou desatualizada');
 
     $page->call('rejectProfileImport')
-        ->assertSet('importProposal.status', 'rejected');
+        ->assertSet('importProposal.status', 'rejected')
+        ->set('importProposal.stale', true)
+        ->assertDontSee('Proposta desatualizada');
     expect(app(ProfileImportService::class)->get($this->owner, (string) $proposal->id)['status'])->toBe('rejected');
+});
+
+it('refreshes and notifies when proposal rejection loses a concurrency race', function () {
+    $page = Livewire::test(ProfessionalProfilePage::class)->call('requestProfileImport');
+    $proposal = pendingProfileImportForPage();
+    $page->call('refreshProfileImport');
+
+    $imports = Mockery::mock(ProfileImportService::class, [$this->profiles])->makePartial();
+    $imports->shouldReceive('reject')->once()->andThrow(new ProfessionalProfileConflictException);
+    $this->app->instance(ProfileImportService::class, $imports);
+
+    $page->call('rejectProfileImport')
+        ->assertSet('importProposal.id', (string) $proposal->id)
+        ->assertNotified('Proposta desatualizada');
 });
 
 it('does not request extraction from unsaved profile edits', function () {
@@ -171,4 +190,20 @@ it('offers retry for a failed extraction and reuses owned operation', function (
     $page->call('retryProfileImport')
         ->assertSet('importOperation.status', 'queued')
         ->assertSet('importOperation.id', $operationId);
+});
+
+it('hides retry when profile version changed after failed extraction', function () {
+    $page = Livewire::test(ProfessionalProfilePage::class)->call('requestProfileImport');
+    Http::fake(['*' => Http::response([
+        'choices' => [['message' => ['content' => 'not valid json'], 'finish_reason' => 'stop']],
+    ])]);
+    Artisan::call('queue:work', ['connection' => 'database', '--once' => true, '--sleep' => 0, '--tries' => 3]);
+
+    $this->profiles->saveDraft($this->owner, [
+        'experiences' => [], 'education' => [], 'competencies' => ['Changed'], 'preferences' => ['Remote'], 'restrictions' => [], 'compensation_expectation' => null,
+    ], 2);
+
+    $page->call('refreshProfileImport')
+        ->assertSet('importOperation.retry_allowed', false)
+        ->assertDontSee('Tentar novamente');
 });

@@ -61,7 +61,7 @@
                 @if ($importProposal['source']['source_stale'])
                     <x-filament::badge color="warning">Currículo de origem mudou desde a extração</x-filament::badge>
                 @endif
-                @if ($importProposal['stale'])
+                @if ($importProposal['status'] === 'pending' && $importProposal['stale'])
                     <div class="rounded-lg border border-warning-300 bg-warning-50 p-4 text-sm text-warning-800 dark:border-warning-400/20 dark:bg-warning-400/10 dark:text-warning-200">
                         <p class="font-semibold">Proposta desatualizada</p>
                         <p>O perfil mudou desde a solicitação. Rejeite esta proposta e solicite uma nova extração.</p>
