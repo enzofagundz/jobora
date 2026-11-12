@@ -211,6 +211,7 @@ it('separates V2 readiness from legacy posting status in the postings list', fun
         ->assertSee('Pronta')
         ->assertSee('Fluxo legado')
         ->assertSee('Status legado')
+        ->assertDontSee('Arquivada')
         ->assertCanSeeTableRecords([$ready, $legacy]);
 });
 

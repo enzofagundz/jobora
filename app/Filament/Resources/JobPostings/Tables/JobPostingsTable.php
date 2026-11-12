@@ -92,7 +92,6 @@ class JobPostingsTable
                     ->options([
                         'ready' => 'Pronta',
                         'needs_review' => 'Precisa de revisão',
-                        'archived' => 'Arquivada',
                     ]),
                 Filter::make('collected_at')
                     ->label('Período de coleta')
