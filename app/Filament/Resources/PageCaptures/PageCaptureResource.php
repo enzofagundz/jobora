@@ -8,7 +8,9 @@ use App\Filament\Resources\PageCaptures\Pages\ManagePageCaptures;
 use App\Models\AiOperation;
 use App\Models\OpportunitySource;
 use App\Models\PageCapture;
+use App\Models\PublicationClefResult;
 use App\Models\PublicationObservation;
+use App\Models\PublicationTriageResult;
 use BackedEnum;
 use Filament\Actions\ViewAction;
 use Filament\Infolists\Components\RepeatableEntry;
@@ -198,50 +200,51 @@ class PageCaptureResource extends Resource
     /** @return list<array{source: string, external_id: ?string, content: ?string, url: ?string, observed_at: string, content_version: int, clef_status: string, triage_status: string, opportunities: list<string>}> */
     private static function publicationRows(PageCapture $capture): array
     {
-        return $capture->observations()
+        $observations = $capture->observations()
             ->whereHas('publication', fn (Builder $query): Builder => $query->where('user_id', auth()->id()))
             ->with(['publication' => function (BelongsTo $relation): void {
                 $relation->where('user_id', auth()->id());
             }])
-            ->get()
-            ->map(function (PublicationObservation $observation): ?array {
-                $publication = $observation->publication;
-                if ($publication === null) {
-                    return null;
-                }
+            ->get();
+        $publicationIds = $observations->pluck('publication.id')->filter()->unique()->values();
+        $clefResults = PublicationClefResult::query()->whereIn('publication_id', $publicationIds)->orderByDesc('id')->get()
+            ->unique(fn ($result): string => $result->publication_id.':'.$result->content_version)
+            ->keyBy(fn ($result): string => $result->publication_id.':'.$result->content_version);
+        $triageResults = PublicationTriageResult::query()->whereIn('publication_id', $publicationIds)->orderByDesc('id')->get()
+            ->unique(fn ($result): string => $result->publication_id.':'.$result->content_version)
+            ->keyBy(fn ($result): string => $result->publication_id.':'.$result->content_version);
+        $opportunities = OpportunitySource::query()->whereIn('publication_id', $publicationIds)
+            ->whereHas('jobPosting', fn (Builder $query): Builder => $query->where('user_id', auth()->id()))
+            ->with(['jobPosting' => function (BelongsTo $relation): void {
+                $relation->where('user_id', auth()->id());
+            }])->get()->groupBy(fn (OpportunitySource $source): string => $source->publication_id.':'.$source->publication_content_version);
 
-                $clef = $publication->clefResults()
-                    ->where('content_version', $observation->content_version)
-                    ->latest('id')
-                    ->first();
-                $triage = $publication->triageResults()
-                    ->where('content_version', $observation->content_version)
-                    ->latest('id')
-                    ->first();
-                $opportunities = $publication->opportunitySources()
-                    ->where('publication_content_version', $observation->content_version)
-                    ->whereHas('jobPosting', fn (Builder $query): Builder => $query->where('user_id', auth()->id()))
-                    ->with(['jobPosting' => function (BelongsTo $relation): void {
-                        $relation->where('user_id', auth()->id());
-                    }])
-                    ->get()
+        return $observations->map(function (PublicationObservation $observation) use ($clefResults, $triageResults, $opportunities): ?array {
+            $publication = $observation->publication;
+            if ($publication === null) {
+                return null;
+            }
+
+            $key = $publication->getKey().':'.$observation->content_version;
+            $clef = $clefResults->get($key);
+            $triage = $triageResults->get($key);
+
+            return [
+                'source' => $publication->source,
+                'external_id' => $publication->external_id,
+                'content' => $observation->content,
+                'url' => Str::sanitizeUrl($publication->url),
+                'observed_at' => $observation->observed_at?->format('d/m/Y H:i') ?? '—',
+                'content_version' => $observation->content_version,
+                'clef_status' => JobPostingResource::clefLabel($clef?->status) ?? 'Não processada nesta versão',
+                'triage_status' => JobPostingResource::triageLabel($triage?->status) ?? 'Não processada nesta versão',
+                'opportunities' => $opportunities->get($key, collect())
                     ->map(fn (OpportunitySource $source): ?string => $source->jobPosting?->role)
                     ->filter()
                     ->values()
-                    ->all();
-
-                return [
-                    'source' => $publication->source,
-                    'external_id' => $publication->external_id,
-                    'content' => $observation->content,
-                    'url' => Str::sanitizeUrl($publication->url),
-                    'observed_at' => $observation->observed_at?->format('d/m/Y H:i') ?? '—',
-                    'content_version' => $observation->content_version,
-                    'clef_status' => JobPostingResource::clefLabel($clef?->status) ?? 'Não processada nesta versão',
-                    'triage_status' => JobPostingResource::triageLabel($triage?->status) ?? 'Não processada nesta versão',
-                    'opportunities' => $opportunities,
-                ];
-            })
+                    ->all(),
+            ];
+        })
             ->filter()
             ->values()
             ->all();

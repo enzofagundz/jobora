@@ -22,6 +22,7 @@ use App\Models\PublicationTriageResult;
 use App\Models\User;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Livewire\Livewire;
 
@@ -143,6 +144,38 @@ it('shows only publication decisions and opportunities matching observed content
     expect($secondModal)->toContain('Engenheira versão 2')
         ->and($secondModal)->toContain('Barrada')
         ->and($secondModal)->toContain('Concluída');
+});
+
+it('batches publication result lookups for captures with many observations', function () {
+    $owner = User::factory()->create();
+    $capture = PageCapture::factory()->for($owner, 'user')->create();
+    foreach (range(1, 6) as $index) {
+        $content = "Observed publication {$index}";
+        $publication = Publication::factory()->for($owner, 'user')->create();
+        PublicationObservation::factory()->for($capture, 'pageCapture')->for($publication)->create([
+            'content_version' => 1,
+            'content' => $content,
+            'content_hash' => hash('sha256', $content),
+        ]);
+    }
+
+    $queries = [];
+    DB::listen(function ($query) use (&$queries): void {
+        if (str_contains($query->sql, 'publication_clef_results')
+            || str_contains($query->sql, 'publication_triage_results')
+            || str_contains($query->sql, 'opportunity_sources')) {
+            $queries[] = [$query->sql, count($query->bindings)];
+        }
+    });
+
+    $modal = Livewire::actingAs($owner)->test(ManagePageCaptures::class)
+        ->mountTableAction('view', $capture)
+        ->getMountedActionModalHtml();
+
+    expect($modal)->toContain('Observed publication 6')
+        ->and(collect($queries)->contains(fn (array $query): bool => str_contains($query[0], 'publication_clef_results') && $query[1] >= 6))->toBeTrue()
+        ->and(collect($queries)->contains(fn (array $query): bool => str_contains($query[0], 'publication_triage_results') && $query[1] >= 6))->toBeTrue()
+        ->and(collect($queries)->contains(fn (array $query): bool => str_contains($query[0], 'opportunity_sources') && $query[1] >= 6))->toBeTrue();
 });
 
 it('lists only own safe AI operation metadata and hides private snapshots', function () {
