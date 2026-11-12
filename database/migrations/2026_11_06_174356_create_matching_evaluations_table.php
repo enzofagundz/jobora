@@ -25,9 +25,9 @@ return new class extends Migration
             $table->string('schema_version', 100);
             $table->string('provider', 100);
             $table->string('model', 100);
-            $table->text('frozen');
-            $table->text('result');
-            $table->text('provenance_warnings');
+            $table->longText('frozen');
+            $table->longText('result');
+            $table->longText('provenance_warnings');
             $table->unsignedInteger('prompt_tokens')->nullable();
             $table->unsignedInteger('completion_tokens')->nullable();
             $table->timestamps();
