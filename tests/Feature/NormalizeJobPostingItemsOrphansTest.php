@@ -14,9 +14,16 @@ function createOrphanItem(): JobPostingItem
     $driver = $connection->getDriverName();
 
     if ($driver === 'pgsql') {
+        $previous = $connection->selectOne('SHOW session_replication_role')->session_replication_role;
         $connection->unprepared('SET session_replication_role = replica');
-    } else {
+    } elseif ($driver === 'sqlite') {
+        $previous = (int) $connection->selectOne('PRAGMA defer_foreign_keys')->defer_foreign_keys;
         $connection->unprepared('PRAGMA defer_foreign_keys = ON');
+    } elseif (in_array($driver, ['mysql', 'mariadb'], true)) {
+        $previous = (int) $connection->selectOne('SELECT @@SESSION.FOREIGN_KEY_CHECKS AS enabled')->enabled;
+        $connection->unprepared('SET SESSION FOREIGN_KEY_CHECKS = 0');
+    } else {
+        test()->markTestSkipped('Driver não suportado para criar itens órfãos: '.$driver);
     }
 
     try {
@@ -29,9 +36,11 @@ function createOrphanItem(): JobPostingItem
         ]);
     } finally {
         if ($driver === 'pgsql') {
-            $connection->unprepared('SET session_replication_role = origin');
+            $connection->unprepared("SET session_replication_role = '{$previous}'");
+        } elseif ($driver === 'sqlite') {
+            $connection->unprepared('PRAGMA defer_foreign_keys = '.$previous);
         } else {
-            $connection->unprepared('PRAGMA defer_foreign_keys = OFF');
+            $connection->unprepared('SET SESSION FOREIGN_KEY_CHECKS = '.$previous);
         }
     }
 

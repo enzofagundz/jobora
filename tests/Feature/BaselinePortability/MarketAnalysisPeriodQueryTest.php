@@ -46,7 +46,14 @@ it('agrupa série mensal por mês e nome', function () {
 it('gera buckets de calendário com chave e label por período', function (AnalysisPeriod $period, string $date, string $key, string $label) {
     baselinePortabilityPosting($this->user, Carbon::parse($date));
 
-    $buckets = app(MarketAnalysisService::class)->periodBuckets($this->user, $period);
+    $locale = Carbon::getLocale();
+
+    try {
+        Carbon::setLocale('pt_BR');
+        $buckets = app(MarketAnalysisService::class)->periodBuckets($this->user, $period);
+    } finally {
+        Carbon::setLocale($locale);
+    }
 
     expect($buckets)->toHaveCount(1)
         ->and($buckets[0]['key'])->toBe($key)

@@ -86,6 +86,9 @@ it('rejects redirect uris with userinfo or host spoofing variants', function (st
     'credentials' => ['http://user:pass@127.0.0.1:9998/cb'],
     'fragment' => ['http://127.0.0.1:9998/cb#fragment'],
     'invalid port' => ['http://127.0.0.1:99999/cb'],
+    'backslash' => ['http://127.0.0.1/cb\\evil'],
+    'traversal' => ['http://127.0.0.1/../callback'],
+    'control character' => ["http://127.0.0.1/cb\nother"],
 ]);
 
 it('accepts loopback redirect uris with dynamic ports and hosts', function (string $redirect) {
@@ -118,3 +121,37 @@ it('protects the consent page from framing', function () {
     expect($response->headers->get('X-Frame-Options'))->toBe('DENY')
         ->and((string) $response->headers->get('Content-Security-Policy'))->toContain("frame-ancestors 'none'");
 });
+
+it('honors configured redirect domains and custom schemes', function (array $domains, array $schemes, string $redirect, bool $allowed) {
+    config(['mcp.redirect_domains' => $domains, 'mcp.custom_schemes' => $schemes]);
+
+    $response = $this->postJson('/oauth/register', [
+        'client_name' => 'Configured client',
+        'redirect_uris' => [$redirect],
+    ])->assertStatus($allowed ? 201 : 400);
+
+    if ($allowed) {
+        $response->assertJsonPath('redirect_uris.0', $redirect);
+    } else {
+        $response->assertJsonPath('error', 'invalid_redirect_uri');
+    }
+})->with([
+    'remote origin' => [['https://client.example'], [], 'https://client.example/callback', true],
+    'remote explicit port' => [['https://client.example:8443'], [], 'https://client.example:8443/callback', true],
+    'remote wrong port' => [['https://client.example'], [], 'https://client.example:8443/callback', false],
+    'remote suffix spoof' => [['https://client.example'], [], 'https://client.example.evil/callback', false],
+    'remote userinfo spoof' => [['https://client.example'], [], 'https://client.example@evil.example/callback', false],
+    'remote credentials' => [['https://client.example'], [], 'https://user:pass@client.example/callback', false],
+    'remote fragment' => [['https://client.example'], [], 'https://client.example/callback#token', false],
+    'remote wrong scheme' => [['https://client.example'], [], 'http://client.example/callback', false],
+    'loopback removed' => [[], [], 'http://127.0.0.1:9999/callback', false],
+    'loopback host not configured' => [['http://localhost'], [], 'http://127.0.0.1:9999/callback', false],
+    'wildcard explicit opt in' => [['*'], [], 'https://other.example/callback', true],
+    'wildcard does not allow custom schemes' => [['*'], [], 'cursor://client/callback', false],
+    'custom scheme' => [[], ['cursor'], 'cursor://client/callback', true],
+    'custom scheme host only' => [[], ['cursor'], 'cursor://callback', true],
+    'custom scheme not configured' => [[], [], 'cursor://client/callback', false],
+    'custom scheme fragment' => [[], ['cursor'], 'cursor://client/callback#token', false],
+    'custom scheme credentials' => [[], ['cursor'], 'cursor://user:pass@client/callback', false],
+    'custom scheme missing host' => [[], ['cursor'], 'cursor:/callback', false],
+]);
