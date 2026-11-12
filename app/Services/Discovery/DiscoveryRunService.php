@@ -193,13 +193,14 @@ class DiscoveryRunService
                 ]);
             }
 
+            $occurredAt = $occurredAt->copy()->startOfSecond();
             $existing = DiscoveryRunEvent::query()
                 ->where('discovery_run_id', $run->id)
                 ->where('event_key', $validated['event_key'])
                 ->first();
 
             if ($existing !== null) {
-                if ($existing->discovery_run_id !== $run->id || ! $this->samePayload($existing, $validated, $outcome, $occurredAt)) {
+                if (! $this->samePayload($existing, $validated, $outcome, $occurredAt)) {
                     throw new DiscoveryRunConflictException('A chave do evento já foi usada com outro conteúdo.');
                 }
 
@@ -224,9 +225,7 @@ class DiscoveryRunService
                     ->where('event_key', $validated['event_key'])
                     ->first();
 
-                if ($existing !== null
-                    && $existing->discovery_run_id === $run->id
-                    && $this->samePayload($existing, $validated, $outcome, $occurredAt)) {
+                if ($existing !== null && $this->samePayload($existing, $validated, $outcome, $occurredAt)) {
                     return $existing;
                 }
 

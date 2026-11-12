@@ -1,8 +1,5 @@
 import { toText } from '@/utils/to-text';
 
-/** Casa qualquer subdomínio do Indeed na rota /jobs (filtro fino é o pathname). */
-export const INDEED_ROUTE = new MatchPattern('https://*.indeed.com/jobs*');
-
 export const OBSERVER_DEBOUNCE_MS = 400;
 const PANE_WAIT_TIMEOUT_MS = 12_000;
 const PANE_POLL_MS = 150;
@@ -34,7 +31,9 @@ interface PreviousPane {
 }
 
 export function isIndeedRoute(url: URL | Location): boolean {
-  return url.pathname.startsWith('/jobs');
+  return url.protocol === 'https:'
+    && ['br.indeed.com', 'www.indeed.com', 'indeed.com'].includes(url.hostname)
+    && url.pathname.startsWith('/jobs');
 }
 
 /** Card visível: âncora com data-jk e caixas de layout não vazias. */
@@ -97,22 +96,31 @@ export function indeedPaneMatches(
   previousDescriptionText: string | null = null,
   previousPane?: PreviousPane,
 ): boolean {
-  const candidates = [pane, ...pane.querySelectorAll('[data-jk]')];
-  for (const candidate of candidates) {
+  const ownJk = pane.getAttribute('data-jk')?.trim();
+  if (ownJk) return ownJk === jk;
+
+  let hasExplicitIdentity = false;
+  for (const candidate of pane.querySelectorAll('[data-jk]')) {
     const paneJk = candidate.getAttribute('data-jk')?.trim();
-    if (paneJk) return paneJk === jk;
+    if (paneJk === jk) return true;
+    if (paneJk) hasExplicitIdentity = true;
   }
 
   for (const link of pane.querySelectorAll<HTMLAnchorElement>('a[href*="jk="]')) {
     try {
       const paneJk = new URL(link.href, location.href).searchParams.get('jk');
-      if (paneJk) return paneJk === jk;
+      if (paneJk === jk && (!previousPane || previousVjk === jk ||
+        indeedDescriptionElement(pane)?.textContent.replace(/\s+/g, ' ').trim() !== previousDescriptionText ||
+        (indeedDescriptionElement(pane) !== previousPane.description && indeedPaneMetadata(pane) !== previousPane.metadata))) return true;
+      if (paneJk) hasExplicitIdentity = true;
     } catch {
       // Ignore malformed platform links and use selected-card identity below.
     }
   }
 
   const descriptionText = indeedDescriptionElement(pane)?.textContent.replace(/\s+/g, ' ').trim() ?? null;
+  if (hasExplicitIdentity) return false;
+
   return (
     new URLSearchParams(location.search).get('vjk') === jk &&
     (previousVjk === jk || (descriptionText !== null && descriptionText !== previousDescriptionText) ||

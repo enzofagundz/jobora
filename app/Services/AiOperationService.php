@@ -425,11 +425,11 @@ class AiOperationService
             ->orderByDesc('attempt')
             ->first();
 
-        if ($clefResult?->status === 'barred' && ! $bypassClef) {
+        if (config('triage.prefilter.enabled') && $clefResult?->status === 'barred' && ! $bypassClef) {
             throw new LogicException('A publicação não está elegível segundo a decisão Clef atual.');
         }
 
-        if ($clefResult?->status !== 'barred'
+        if (config('triage.prefilter.enabled') && $clefResult?->status !== 'barred'
             && $clefResult?->status !== 'eligible'
             && ! ($bypassClef && $clefResult?->status === 'inconclusive')) {
             throw new LogicException('A decisão Clef atual não permite solicitar triagem.');
@@ -459,8 +459,8 @@ class AiOperationService
                 'provider' => $provider,
                 'model' => $model,
                 'schema_version' => $schemaVersion,
-                'clef_result_id' => $clefResult->id,
-                'clef_status' => $clefResult->status,
+                'clef_result_id' => $clefResult?->id,
+                'clef_status' => $clefResult?->status,
                 'clef_bypassed' => $bypassClef,
                 'clef_bypass_reason' => $bypassClef ? trim((string) $reason) : null,
                 'requested_by' => $user->id,

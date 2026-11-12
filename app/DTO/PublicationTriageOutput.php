@@ -232,12 +232,20 @@ final class PublicationTriageOutput
             $reviewReasons[] = 'salary_range_inconsistent';
         }
 
-        foreach ($opportunity['application_methods'] as $method) {
+        foreach ($opportunity['application_methods'] as $index => $method) {
             if ($method['url'] !== null && (filter_var($method['url'], FILTER_VALIDATE_URL) === false
                 || ! in_array(strtolower((string) parse_url($method['url'], PHP_URL_SCHEME)), ['http', 'https'], true))) {
                 $reviewReasons[] = 'application_url_inconsistent';
+                unset($opportunity['application_methods'][$index]);
+            }
+
+            if ($method['email'] !== null && filter_var($method['email'], FILTER_VALIDATE_EMAIL) === false) {
+                $reviewReasons[] = 'unsupported_field_evidence';
+                unset($opportunity['application_methods'][$index]);
             }
         }
+
+        $opportunity['application_methods'] = array_values($opportunity['application_methods']);
 
         $opportunity['readiness'] = $reviewReasons === [] ? 'ready' : 'needs_review';
         $opportunity['review_reasons'] = array_values(array_unique($reviewReasons));
@@ -416,6 +424,11 @@ final class PublicationTriageOutput
                 $decimalDigits = strlen($token) - $lastSeparator - 1;
 
                 if ($decimalDigits === 3) {
+                    if (preg_match('/^\d{1,3}([.,])\d{3}(?:\1\d{3})*$/', $token) === 1
+                        && abs((float) str_replace(['.', ','], '', $token) - $value) < 0.000001) {
+                        return true;
+                    }
+
                     continue;
                 }
 
@@ -445,7 +458,11 @@ final class PublicationTriageOutput
             ApplicationMethodType::Whatsapp => self::quoteContainsAny($quotes, ['whatsapp']),
             ApplicationMethodType::Phone => self::quoteContainsAny($quotes, ['phone', 'telephone', 'telefone', 'ligue', 'call']),
             ApplicationMethodType::Form => self::quoteContainsAny($quotes, ['form', 'formulário', 'formulario']),
-            ApplicationMethodType::Other, null => false,
+            ApplicationMethodType::Other => self::quoteContains($quotes, (string) ($method['instructions'] ?? ''))
+                || self::quoteContains($quotes, (string) ($method['url'] ?? ''))
+                || self::quoteContains($quotes, (string) ($method['email'] ?? ''))
+                || self::quoteContains($quotes, (string) ($method['phone'] ?? '')),
+            null => false,
         };
     }
 

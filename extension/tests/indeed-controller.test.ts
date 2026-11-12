@@ -132,6 +132,69 @@ describe('indeed controller — integridade observer/SPA', () => {
     return { controller, deactivate: () => controller.deactivate() };
   }
 
+  it('captura cards adicionados após settle em outro envelope sem repetir lote anterior', async () => {
+    mountList(1);
+    const { deactivate } = await activateUntilDone();
+    await advance(3_000);
+    document.querySelector('.jobsearch-ResultsList')!.insertAdjacentHTML(
+      'beforeend',
+      '<a data-jk="jk-late"><h2><span title="Vaga tardia">Vaga tardia</span></h2></a>',
+    );
+    await advance(4_000);
+    const submissions = sendMessageMock.mock.calls
+      .map(([message]) => message as CaptureMessage)
+      .filter((message) => message.type === 'capture:submit-envelope');
+    expect(submissions).toHaveLength(2);
+    expect(sentJks()).toEqual(['jk1', 'jk-late']);
+    expect(submissions[0]!.envelope.capture.idempotency_key).not.toBe(submissions[1]!.envelope.capture.idempotency_key);
+    deactivate();
+  });
+
+  it('não reclica nem reenvia cards settled após reativar captura', async () => {
+    mountList(1);
+    const { controller, deactivate } = await activateUntilDone();
+    await advance(3_000);
+    deactivate();
+    const click = vi.spyOn(document.querySelector('a[data-jk]') as HTMLElement, 'click');
+    const activation = controller.activate(new ContentScriptContext('test-indeed-reactivation'));
+    await advance(3_000);
+    await activation;
+    await advance(3_000);
+    expect(click).not.toHaveBeenCalled();
+    expect(sentJks()).toEqual(['jk1']);
+    expect(sendMessageMock.mock.calls.filter(([message]) => (message as CaptureMessage).type === 'capture:submit-envelope')).toHaveLength(1);
+    deactivate();
+  });
+
+  it('não resolve nem envia initial_url de host Indeed não suportado', async () => {
+    mountList(1);
+    window.happyDOM.setURL('https://de.indeed.com/jobs?q=php');
+    const controller = createIndeedController();
+    await controller.activate(new ContentScriptContext('test-indeed-host'));
+    await advance(3_000);
+    expect(sendMessageMock).not.toHaveBeenCalled();
+    expect(controller.getCaptureState()).toMatchObject({ cards: 0, captured: false });
+    controller.deactivate();
+  });
+
+  it('cobertura volta a completa quando retry recupera detalhe antes de settle', async () => {
+    mountList(1);
+    document.removeEventListener('click', spaClickHandler, true);
+    const { controller, deactivate } = await activateUntilDone();
+    expect(controller.getCaptureState()).toMatchObject({ cards: 1, details: 0, captured: false });
+    document.addEventListener('click', spaClickHandler, true);
+    document.querySelector('a[data-jk]')!.setAttribute('href', '/viewjob?jk=jk1');
+    await advance(4_000);
+    const submitted = sendMessageMock.mock.calls
+      .map(([message]) => message as CaptureMessage)
+      .find((message) => message.type === 'capture:submit-envelope');
+    expect(submitted?.envelope.capture.coverage).toEqual({
+      status: 'complete', reason: null, blocks_expected: 2, blocks_captured: 2,
+    });
+    expect(controller.getCaptureState()).toMatchObject({ details: 1, coverage: 'complete' });
+    deactivate();
+  });
+
   it('11 cards → um envelope com cards e detalhes; recriação não duplica', async () => {
     mountList();
     const { controller, deactivate } = await activateUntilDone();
@@ -477,6 +540,62 @@ describe('indeed controller — integridade observer/SPA', () => {
     deactivate();
   });
 
+  it('captura painel já selecionado com permalink correto sem mudança de conteúdo', async () => {
+    mountList(1);
+    document.removeEventListener('click', spaClickHandler, true);
+    window.happyDOM.setURL(`${SEARCH_URL}&vjk=jk1`);
+    openPane('Vaga 1');
+    document.querySelector('#jobsearch-ViewjobPaneWrapper')!.insertAdjacentHTML(
+      'beforeend', '<a href="/viewjob?jk=jk1">Vaga atual</a>',
+    );
+    const { deactivate } = await activateUntilDone();
+    await advance(3_000);
+    const submitted = sendMessageMock.mock.calls
+      .map(([message]) => message as CaptureMessage)
+      .find((message) => message.type === 'capture:submit-envelope');
+    expect(submitted?.envelope.blocks.map((block) => [block.kind, block.platform_id])).toEqual([
+      ['card', 'jk1'], ['detail', 'jk1'],
+    ]);
+    expect(submitted?.envelope.capture.coverage).toMatchObject({
+      status: 'complete', reason: null, blocks_expected: 2, blocks_captured: 2,
+    });
+    deactivate();
+  });
+
+  it('link relacionado não associa painel antigo ao segundo card sem atualizar conteúdo', async () => {
+    mountList(2);
+    document.removeEventListener('click', spaClickHandler, true);
+    const staleRelatedPaneHandler = (event: Event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const jk = target?.closest('a[data-jk]')?.getAttribute('data-jk');
+      if (!jk) return;
+      window.happyDOM.setURL(`${SEARCH_URL}&vjk=${jk}`);
+      if (jk === 'jk1') {
+        openPane('Vaga 1');
+        document.querySelector('#jobsearch-ViewjobPaneWrapper')!.insertAdjacentHTML(
+          'beforeend', '<div data-jk="jk1"></div><a href="/viewjob?jk=jk2">Vaga relacionada</a>',
+        );
+      }
+    };
+    document.addEventListener('click', staleRelatedPaneHandler, true);
+    try {
+      const { deactivate } = await activateUntilDone();
+      await advance(3_000);
+      const submitted = sendMessageMock.mock.calls
+        .map(([message]) => message as CaptureMessage)
+        .find((message) => message.type === 'capture:submit-envelope');
+      expect(submitted?.envelope.blocks.map((block) => [block.kind, block.platform_id])).toEqual([
+        ['card', 'jk1'], ['detail', 'jk1'], ['card', 'jk2'],
+      ]);
+      expect(submitted?.envelope.capture.coverage).toMatchObject({
+        status: 'partial', reason: 'timeout', blocks_expected: 4, blocks_captured: 3,
+      });
+      deactivate();
+    } finally {
+      document.removeEventListener('click', staleRelatedPaneHandler, true);
+    }
+  });
+
   it('painel antigo sem jk não vira detalhe do card seguinte', async () => {
     mountList(2);
     document.removeEventListener('click', spaClickHandler, true);
@@ -563,15 +682,22 @@ describe('indeed controller — integridade observer/SPA', () => {
     });
     const handler = createCaptureMessageHandler(createCaptureQueue(store), contexts);
     const bodies: CaptureEnvelope[] = [];
-    let fetchCalls = 0;
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
-      if (String(_url).endsWith('/extension/auth/validate')) {
-        const token = (init?.headers as Record<string, string> | undefined)?.Authorization;
-        return new Response(JSON.stringify({ valid: true, owner_user_id: token === 'Bearer token-indeed-b' ? 2 : 1 }), { status: 200 });
+    let captureCalls = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const pathname = new URL(String(url)).pathname;
+      if (pathname === '/api/extension/auth/validate') {
+        const token = new Headers(init?.headers).get('Authorization');
+        return new Response(JSON.stringify({ owner_user_id: token === 'Bearer token-indeed-a' ? 1 : 2 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
       }
-      fetchCalls++;
+      expect(pathname).toBe('/api/page-captures');
+      expect(init?.method).toBe('POST');
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer token-indeed-a');
+      captureCalls++;
       bodies.push(JSON.parse((init?.body as string) ?? '{}') as CaptureEnvelope);
-      if (fetchCalls === 1) throw new TypeError('offline depois do persist');
+      if (captureCalls === 1) throw new TypeError('offline depois do persist');
       return new Response(JSON.stringify({ id: 31, replay: true, coverage: 'complete' }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -597,10 +723,13 @@ describe('indeed controller — integridade observer/SPA', () => {
 
     const { controller, deactivate } = await activateUntilDone();
     await advance(3_000);
-    await vi.waitFor(() => {
-      expect(controller.getCaptureState()).toMatchObject({ captured: false, pending: false });
-      expect(store.records.size).toBe(1);
-    });
+    const submissionIndex = sendMessageMock.mock.calls.findIndex(
+      ([message]) => (message as CaptureMessage).type === 'capture:submit-envelope',
+    );
+    expect(submissionIndex).toBeGreaterThanOrEqual(0);
+    await sendMessageMock.mock.results[submissionIndex]!.value;
+    expect(controller.getCaptureState()).toMatchObject({ captured: false, pending: false });
+    expect(store.records.size).toBe(1);
     const queued = [...store.records.values()][0]!;
     expect(queued.envelope.capture).toMatchObject({
       source: 'indeed',
@@ -610,14 +739,14 @@ describe('indeed controller — integridade observer/SPA', () => {
 
     await apiToken.setValue('token-indeed-b');
     await handler({ type: 'capture:queue-drain' });
-    expect(fetchCalls).toBe(1);
+    expect(captureCalls).toBe(1);
     expect(store.records.size).toBe(1);
 
     await apiToken.setValue('token-indeed-a');
     const restarted = createCaptureMessageHandler(createCaptureQueue(store), contexts);
     const drain = await restarted({ type: 'capture:queue-drain' });
     expect(drain).toMatchObject({ ok: true, drain: { captured: 1 } });
-    expect(fetchCalls).toBe(2);
+    expect(captureCalls).toBe(2);
     expect(store.records.size).toBe(0);
     expect(bodies[0]!.capture.idempotency_key).toBe(bodies[1]!.capture.idempotency_key);
     expect(bodies[1]!.capture.execution_id).toBe('exec-indeed-test');

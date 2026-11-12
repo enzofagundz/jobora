@@ -50,7 +50,7 @@ interface CaptureAttempt {
   pending: boolean;
   captured: boolean;
   coverage: 'complete' | 'partial' | null;
-  detailFailure: boolean;
+  skippedClaim: boolean;
 }
 
 export function createIndeedController(): IndeedController {
@@ -103,19 +103,20 @@ export function createIndeedController(): IndeedController {
 
     const jk = element.getAttribute('data-jk')?.trim();
     if (!jk) {
-      current.detailFailure = true;
       session.markInvalidElement(element);
       session.counters.errors++;
       return;
     }
 
     if (!current.builder.hasCard(jk)) {
+      if (!session.claim(jobIdentity(jk))) {
+        current.skippedClaim = true;
+        return;
+      }
       current.builder.addCard(jk, element);
-      session.claim(jobIdentity(jk));
     }
     if (current.builder.hasDetail(jk)) return;
     if (!element.isConnected) {
-      current.detailFailure = true;
       session.counters.errors++;
       return;
     }
@@ -135,7 +136,6 @@ export function createIndeedController(): IndeedController {
     try {
       (element as HTMLElement).click();
     } catch {
-      current.detailFailure = true;
       session.counters.errors++;
       return;
     }
@@ -150,7 +150,6 @@ export function createIndeedController(): IndeedController {
     );
     if (!isGenerationActive(generation) || attempt !== current) return;
     if (!paneReady) {
-      current.detailFailure = true;
       session.counters.errors++;
       return;
     }
@@ -165,7 +164,6 @@ export function createIndeedController(): IndeedController {
       !description ||
       !indeedPaneMatches(pane, jk, previousVjk, previousDescriptionText, previousPaneSnapshot)
     ) {
-      current.detailFailure = true;
       session.counters.errors++;
       return;
     }
@@ -188,9 +186,23 @@ export function createIndeedController(): IndeedController {
     }
     scanRunning = true;
     const generation = lifecycleGeneration;
-    const current = attempt;
+    let current = attempt;
     try {
       if (!current || !current.resolved || current.blocked || !isGenerationActive(generation)) return;
+      if (current.finalized) {
+        const previousBuilder = current.builder;
+        pendingElements = pendingElements.filter((element) => {
+          const jk = element.getAttribute('data-jk')?.trim();
+          if (jk && !previousBuilder.hasCard(jk)) return true;
+          pendingSet.delete(element);
+          return false;
+        });
+        if (pendingElements.length === 0) return;
+        current = newAttempt();
+        attempt = current;
+        await resolveAttempt(current, generation);
+        if (!isGenerationActive(generation) || attempt !== current || current.blocked) return;
+      }
       session.counters.phase = 'processing';
 
       while (pendingElements.length > 0) {
@@ -281,7 +293,9 @@ export function createIndeedController(): IndeedController {
 
     const blocks = current.builder.blocks();
     const cards = blocks.filter((block) => block.kind === 'card');
-    const coverageReason = reason ?? (current.detailFailure ? 'timeout' : cards.length === 0 ? 'no_content' : null);
+    if (cards.length === 0 && current.skippedClaim) return;
+    const missingDetail = cards.some((card) => !current.builder.hasDetail(card.platform_id));
+    const coverageReason = reason ?? (missingDetail ? 'timeout' : cards.length === 0 ? 'no_content' : null);
     const finalUrl = isIndeedRoute(location) ? location.href : current.initialUrl;
     if (!current.credentialContext) {
       session.counters.phase = 'error';
@@ -347,11 +361,12 @@ export function createIndeedController(): IndeedController {
       pending: false,
       captured: false,
       coverage: null,
-      detailFailure: false,
+      skippedClaim: false,
     };
   }
 
   async function activate(ctx: ContentScriptContext): Promise<void> {
+    if (!isIndeedRoute(location)) return;
     const generation = lifecycleGeneration;
     context = ctx;
     pendingElements = [];

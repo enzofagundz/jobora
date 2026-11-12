@@ -15,6 +15,7 @@ use App\Models\JobPostingItem;
 use App\Models\OpportunitySource;
 use App\Models\PublicationTriageResult;
 use App\Models\User;
+use App\Support\Ai\AiRequestGate;
 use Closure;
 use Illuminate\Support\Facades\DB;
 use Laravel\Ai\Ai;
@@ -22,7 +23,10 @@ use LogicException;
 
 final class PublicationTriageProcessor
 {
-    public function __construct(private readonly PublicationTriageAgent $agent) {}
+    public function __construct(
+        private readonly PublicationTriageAgent $agent,
+        private readonly ?AiRequestGate $gate = null,
+    ) {}
 
     public function process(
         User $user,
@@ -44,14 +48,21 @@ final class PublicationTriageProcessor
             $gateway = new PublicationTriageGoGateway(app('events'));
             Ai::textProvider('opencode_go')->useTextGateway($gateway);
         }
-        $response = $this->agent->prompt(
+        $gate = $this->gate ?? new AiRequestGate;
+        $response = $gate->run((string) $snapshot['provider'], (string) $snapshot['model'], fn () => $this->agent->prompt(
             $prompt,
             provider: (string) $snapshot['provider'],
             model: (string) $snapshot['model'],
             timeout: $gateway === null ? null : 45,
-        );
-        $promptTokens = $gateway === null ? $response->usage->promptTokens : $gateway->promptTokens;
-        $completionTokens = $gateway === null ? $response->usage->completionTokens : $gateway->completionTokens;
+        ));
+        $usage = $response->usage ?? null;
+        $promptTokens = $gateway === null ? $usage?->promptTokens : $gateway->promptTokens;
+        $completionTokens = $gateway === null ? $usage?->completionTokens : $gateway->completionTokens;
+
+        if ($gateway === null && $response->raw !== null) {
+            $promptTokens = is_int($response->raw->json('usage.prompt_tokens')) ? $response->raw->json('usage.prompt_tokens') : null;
+            $completionTokens = is_int($response->raw->json('usage.completion_tokens')) ? $response->raw->json('usage.completion_tokens') : null;
+        }
 
         try {
             if ($gateway !== null) {
@@ -127,7 +138,7 @@ final class PublicationTriageProcessor
                         'review_reasons' => $opportunity['review_reasons'],
                     ]);
 
-                    foreach ($opportunity['requirements'] as $requirement) {
+                    foreach (array_unique($opportunity['requirements']) as $requirement) {
                         JobPostingItem::query()->create([
                             'job_posting_id' => $posting->id,
                             'category' => ConceptCategory::Requirement,
@@ -136,7 +147,7 @@ final class PublicationTriageProcessor
                         ]);
                     }
 
-                    foreach ($opportunity['technologies'] as $technology) {
+                    foreach (array_unique($opportunity['technologies']) as $technology) {
                         JobPostingItem::query()->create([
                             'job_posting_id' => $posting->id,
                             'category' => ConceptCategory::Skill,
@@ -145,6 +156,8 @@ final class PublicationTriageProcessor
                         ]);
                     }
 
+                    $seenMethods = [];
+
                     foreach ($opportunity['application_methods'] as $method) {
                         $methodData = ApplicationMethodData::fromArray($method);
 
@@ -152,11 +165,19 @@ final class PublicationTriageProcessor
                             continue;
                         }
 
+                        $dedupKey = $methodData->dedupKey();
+
+                        if (isset($seenMethods[$dedupKey])) {
+                            continue;
+                        }
+
+                        $seenMethods[$dedupKey] = true;
+
                         ApplicationMethod::query()->create([
                             'job_posting_id' => $posting->id,
                             ...$methodData->toArray(),
                             'source' => ItemSource::Ai,
-                            'dedup_key' => $methodData->dedupKey(),
+                            'dedup_key' => $dedupKey,
                         ]);
                     }
 

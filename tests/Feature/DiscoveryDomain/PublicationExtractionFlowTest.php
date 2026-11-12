@@ -1085,7 +1085,7 @@ it('keeps recovering stuck operations when the capture disk raises on exists', f
 
     $operation->forceFill([
         'status' => AiOperationStatus::Running,
-        'attempt_token' => 'stale-attempt-token',
+        'attempt_token' => (string) Str::uuid(),
         'attempts' => 1,
         'last_attempt_started_at' => now()->subMinutes(10),
     ])->save();

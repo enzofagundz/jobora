@@ -124,7 +124,10 @@ export function createIndeedJobsBuilder(idempotencyKey: string) {
 }
 
 export function jobPermalink(jk: string): string {
-  return `${location.origin}/viewjob?jk=${encodeURIComponent(jk)}`;
+  const host = ['br.indeed.com', 'www.indeed.com', 'indeed.com'].includes(location.hostname)
+    ? location.hostname
+    : 'www.indeed.com';
+  return `https://${host}/viewjob?jk=${encodeURIComponent(jk)}`;
 }
 
 export function jobIdentity(jk: string): string {

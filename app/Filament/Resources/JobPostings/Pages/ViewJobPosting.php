@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\JobPostings\Pages;
 
+use App\Enums\AiOperationStatus;
 use App\Enums\JobPostingStatus;
 use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Filament\Resources\JobPostings\Schemas\OpportunityReviewForm;
@@ -78,6 +79,8 @@ class ViewJobPosting extends ViewRecord
                             $data,
                         );
                     } catch (OpportunityReviewConflict $exception) {
+                        $this->record->refresh()->load(['sources.publication', 'reviewRevisions']);
+
                         Notification::make()
                             ->danger()
                             ->title('A oportunidade mudou')
@@ -173,7 +176,7 @@ class ViewJobPosting extends ViewRecord
                     $bypassClef = ! $retry && (bool) ($data['bypass_clef'] ?? false);
 
                     try {
-                        app(AiOperationService::class)->enqueuePublicationTriage(
+                        $operation = app(AiOperationService::class)->enqueuePublicationTriage(
                             auth()->user(),
                             $publication->id,
                             $publication->content_version,
@@ -190,11 +193,28 @@ class ViewJobPosting extends ViewRecord
                         return;
                     }
 
-                    Notification::make()
-                        ->info()
-                        ->title('Reavaliação solicitada')
-                        ->body('A triagem foi solicitada com o material persistido. O resultado aparece no diagnóstico da oportunidade.')
-                        ->send();
+                    match ($operation->status) {
+                        AiOperationStatus::Completed => Notification::make()
+                            ->success()
+                            ->title('Triagem já concluída')
+                            ->body('A triagem desta versão já foi concluída. Consulte o diagnóstico da oportunidade.')
+                            ->send(),
+                        AiOperationStatus::Queued => Notification::make()
+                            ->info()
+                            ->title('Triagem na fila')
+                            ->body('A triagem desta versão está na fila.')
+                            ->send(),
+                        AiOperationStatus::Running => Notification::make()
+                            ->info()
+                            ->title('Triagem em andamento')
+                            ->body('A triagem desta versão está em andamento.')
+                            ->send(),
+                        AiOperationStatus::Failed => Notification::make()
+                            ->warning()
+                            ->title('Última triagem falhou')
+                            ->body('Consulte o diagnóstico da oportunidade para ver o que aconteceu.')
+                            ->send(),
+                    };
                 }),
             Action::make('retry')
                 ->label('Tentar novamente')

@@ -175,6 +175,10 @@ class PublicationExtractionProcessor
 
     private function queueClef(Publication $publication, int $contentVersion): void
     {
+        if (! config('triage.prefilter.enabled')) {
+            return;
+        }
+
         $result = PublicationClefResult::query()->firstOrCreate(
             [
                 'publication_id' => $publication->id,

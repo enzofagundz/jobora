@@ -28,11 +28,11 @@ class ClassifyPublicationWithClef implements ShouldBeUnique, ShouldQueueAfterCom
 
     public ?string $leaseToken = null;
 
-    public function __construct(public int $resultId) {}
+    public function __construct(public int $resultId, public ?string $recoveryToken = null) {}
 
     public function uniqueId(): string
     {
-        return 'publication-clef-result:'.$this->resultId;
+        return 'publication-clef-result:'.$this->resultId.':'.($this->recoveryToken ?? 'initial');
     }
 
     public function uniqueFor(): int
@@ -58,6 +58,10 @@ class ClassifyPublicationWithClef implements ShouldBeUnique, ShouldQueueAfterCom
 
     public function handle(JobPrefilter $prefilter, PrefilterPolicy $policy): void
     {
+        if (! config('triage.prefilter.enabled')) {
+            return;
+        }
+
         $this->leaseToken = (string) Str::uuid();
         $result = DB::transaction(function () use ($prefilter): ?PublicationClefResult {
             $result = PublicationClefResult::query()->whereKey($this->resultId)->lockForUpdate()->first();
