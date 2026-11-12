@@ -395,6 +395,10 @@ class ApplicationPage extends Page implements HasTable
         }
 
         $operationIds = array_values(array_filter($this->preparationResult['operation_ids'] ?? [], 'is_int'));
+        $this->preparationQuestionLabels = collect($this->preparationResult['snapshot']['questions'] ?? [])
+            ->filter(fn (array $question): bool => filled($question['id'] ?? null) && filled($question['question'] ?? null))
+            ->mapWithKeys(fn (array $question): array => [$question['id'] => $question['question']])
+            ->all();
         $this->preparationOperations = AiOperation::query()->where('user_id', $user->id)->whereKey($operationIds)->get()
             ->filter(fn (AiOperation $operation): bool => $operation->operation_type === AiOperationType::ResumeTranslation
                 ? $operation->target_type === 'user' && (int) $operation->target_id === $user->id

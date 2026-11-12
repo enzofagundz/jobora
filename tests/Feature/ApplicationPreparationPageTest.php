@@ -275,3 +275,24 @@ it('renders unavailable artifacts instead of failing on an HTTP deployment', fun
         ->assertSee('Artefato indisponível')
         ->assertDontSee('Baixar currículo adaptado');
 });
+
+it('restores pending question labels from persisted snapshots on mount and polling', function () {
+    Livewire::test(ApplicationPage::class, ['record' => $this->posting->id])
+        ->set('destinationApplicationMethodId', $this->method->id)
+        ->set('preparationData.questions', [[
+            'question' => 'Qual habilidade você usou?', 'answer' => 'Liderei uma equipe por cinco anos.',
+            'support' => [['source' => 'profile', 'path' => 'competencies.0', 'quote' => 'PHP']],
+        ]])
+        ->call('prepareApplicationMaterials')
+        ->assertSet('preparationResult.state', 'pending_information');
+
+    $question = ApplicationPreparation::query()->sole()->snapshot['questions'][0];
+    $page = Livewire::test(ApplicationPage::class, ['record' => $this->posting->id])
+        ->assertSet('preparationQuestionLabels', [$question['id'] => 'Qual habilidade você usou?'])
+        ->assertSee('Qual habilidade você usou?')
+        ->assertDontSee('Pergunta '.$question['id']);
+    $page->set('preparationQuestionLabels', [])
+        ->call('refreshApplicationPreparation')
+        ->assertSet('preparationQuestionLabels', [$question['id'] => 'Qual habilidade você usou?'])
+        ->assertSee('Qual habilidade você usou?');
+});
