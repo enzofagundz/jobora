@@ -23,6 +23,7 @@ use Laravel\Passport\Passport;
 use Livewire\Livewire;
 use Spatie\LaravelPdf\Facades\Pdf;
 use Spatie\LaravelPdf\FakePdfBuilder;
+use Tests\DisposableHomologationDatabase;
 use Tests\Feature\AgentIntegrations\AgentIntegrationTestHelpers as Helpers;
 
 trait JoboraV2FlowDatabase
@@ -31,11 +32,7 @@ trait JoboraV2FlowDatabase
 
     protected function beforeRefreshingDatabase(): void
     {
-        if (! app()->environment('testing') || config('database.default') !== 'sqlite'
-            || ! str_starts_with((string) config('database.connections.sqlite.database'), '/tmp/opencode/')
-            || filled(config('database.connections.sqlite.url'))) {
-            throw new RuntimeException('Execute somente em testing com SQLite descartável sob /tmp/opencode/.');
-        }
+        DisposableHomologationDatabase::assertSafe();
         $previousStoragePath = app()->storagePath();
         $previousKeyPath = Passport::$keyPath;
         $this->beforeApplicationDestroyed(function () use ($previousStoragePath, $previousKeyPath): void {
