@@ -17,6 +17,8 @@ import { countPosts, runJumpToEnd } from './jump';
 import { createLinkedInPublicationsBuilder } from './envelope';
 
 const CAPTURE_SETTLE_MS = 1500;
+const CONTEXT_RETRY_MS = 2000;
+const CONTEXT_MAX_ATTEMPTS = 3;
 
 export interface LinkedInCaptureState {
   captured: boolean;
@@ -50,7 +52,13 @@ interface CaptureAttempt {
   coverage: 'complete' | 'partial' | null;
   identityFailure: boolean;
   occurrenceIdentities: WeakMap<Element, { signature: string; identity: string }>;
+  /** Assinatura → identidades de ocorrência na ordem de criação. */
+  occurrencePool: Map<string, string[]>;
+  /** Identidade de ocorrência → elemento vivo que a representa. */
+  occurrenceBindings: Map<string, Element>;
   nextOccurrenceId: number;
+  /** Tentativas de obter contexto de credencial sem descartar o builder. */
+  contextAttempts: number;
 }
 
 /** Uma instância por aba; activate/deactivate por rota SPA. */
@@ -62,6 +70,7 @@ export function createLinkedInController(
   let observer: MutationObserver | null = null;
   let debounceTimer: number | undefined;
   let finalizeTimer: number | undefined;
+  let contextTimer: number | undefined;
   let scanRunning = false;
   let rescanQueued = false;
   let panelVisible = true;
@@ -157,12 +166,7 @@ export function createLinkedInController(
         occurrenceIdentityToEnrich = occurrence.identity;
       }
     } else {
-      if (occurrence?.signature === signature) {
-        identity = occurrence.identity;
-      } else {
-        identity = `${current.idempotencyKey}:occurrence:${++current.nextOccurrenceId}`;
-        current.occurrenceIdentities.set(el, { signature, identity });
-      }
+      identity = occurrenceIdentity(current, signature, el);
     }
     if (!isGenerationActive(generation) || attempt !== current) return;
 
@@ -182,6 +186,35 @@ export function createLinkedInController(
     current.occurrenceIdentities.set(el, { signature, identity });
 
     if (!jumpState.active) scheduleFinalize();
+  }
+
+  /**
+   * Post sem identidade forte não pode virar duas publicações quando o DOM
+   * virtualizado o re-renderiza em outro elemento: a ocorrência é reancorada.
+   */
+  function occurrenceIdentity(
+    current: CaptureAttempt,
+    signature: string,
+    el: Element,
+  ): string {
+    const known = current.occurrenceIdentities.get(el);
+    if (known?.signature === signature) return known.identity;
+
+    const pool = current.occurrencePool.get(signature) ?? [];
+    const reusable = pool.find((identity) => {
+      const bound = current.occurrenceBindings.get(identity);
+      return bound === undefined || !bound.isConnected;
+    });
+
+    const identity =
+      reusable ?? `${current.idempotencyKey}:occurrence:${++current.nextOccurrenceId}`;
+
+    if (reusable === undefined) current.occurrencePool.set(signature, [...pool, identity]);
+
+    current.occurrenceBindings.set(identity, el);
+    current.occurrenceIdentities.set(el, { signature, identity });
+
+    return identity;
   }
 
   /** Lote sequencial; callback concorrente apenas enfileira um rescan. */
@@ -217,12 +250,18 @@ export function createLinkedInController(
   }
 
   function scheduleScan(records?: MutationRecord[]): void {
+    const pendingBefore = pendingElements.length;
     if (records) {
       for (const record of records) {
         for (const node of Array.from(record.addedNodes)) enqueueMutationNode(node);
         // LinkedIn virtualiza a lista: o card removido ainda existe na memória.
         for (const node of Array.from(record.removedNodes)) enqueueMutationNode(node);
       }
+    }
+    // Lote que ainda pode crescer nunca finaliza antes de ser processado.
+    if (pendingElements.length > pendingBefore) {
+      clearTimeout(finalizeTimer);
+      if (attempt) attempt.contextAttempts = 0;
     }
     clearTimeout(debounceTimer);
     debounceTimer = window.setTimeout(() => void processNewPosts(), OBSERVER_DEBOUNCE_MS);
@@ -281,6 +320,14 @@ export function createLinkedInController(
     reason: CaptureCoverageReason | null,
   ): Promise<void> {
     if (!current || current.finalized || current.blocked) return;
+
+    if (!current.credentialContext) {
+      // Sem contexto o envio é impossível: preserva o builder e tenta de novo.
+      session.counters.phase = 'error';
+      scheduleContextRetry(current, reason);
+      return;
+    }
+
     current.finalized = true;
     clearTimeout(finalizeTimer);
 
@@ -289,10 +336,6 @@ export function createLinkedInController(
       reason ??
       (current.identityFailure ? 'timeout' : blocks.length === 0 ? 'no_content' : null);
     const finalUrl = isLinkedInRoute(location) ? location.href : current.initialUrl;
-    if (!current.credentialContext) {
-      session.counters.phase = 'error';
-      return;
-    }
 
     const envelope = current.builder.toEnvelope({
       executionId: current.executionId,
@@ -364,10 +407,8 @@ export function createLinkedInController(
     if (!current || jumpAbort) return;
     if (!isGenerationActive(generation)) return;
     if (current.builder.size() === 0) {
-      void finalizeAttempt(
-        current,
-        current.identityFailure ? 'timeout' : 'no_content',
-      );
+      // O resultado da busca pode renderizar depois do primeiro scan.
+      scheduleFinalize(current.identityFailure ? 'timeout' : 'no_content');
       return;
     }
     clearTimeout(finalizeTimer);
@@ -410,6 +451,26 @@ export function createLinkedInController(
     }
   }
 
+  function scheduleContextRetry(
+    current: CaptureAttempt,
+    reason: CaptureCoverageReason | null,
+  ): void {
+    if (current.contextAttempts >= CONTEXT_MAX_ATTEMPTS) return;
+
+    current.contextAttempts++;
+    clearTimeout(contextTimer);
+    contextTimer = window.setTimeout(() => {
+      void (async () => {
+        if (attempt !== current || current.finalized || current.blocked) return;
+        if (!current.credentialContext) {
+          await resolveAttempt(current, current.generation);
+        }
+        if (attempt !== current || current.finalized || current.blocked) return;
+        await finalizeAttempt(current, reason);
+      })();
+    }, CONTEXT_RETRY_MS);
+  }
+
   function newAttempt(generation: number): CaptureAttempt {
     const idempotencyKey = `linkedin-publications-${Date.now().toString(36)}-${Math.random()
       .toString(36)
@@ -428,7 +489,10 @@ export function createLinkedInController(
       coverage: null,
       identityFailure: false,
       occurrenceIdentities: new WeakMap(),
+      occurrencePool: new Map(),
+      occurrenceBindings: new Map(),
       nextOccurrenceId: 0,
+      contextAttempts: 0,
     };
   }
 
@@ -524,6 +588,7 @@ export function createLinkedInController(
     cancelJump();
     clearPreInteractionListeners();
     clearTimeout(finalizeTimer);
+    clearTimeout(contextTimer);
     if (escListener) {
       window.removeEventListener('keydown', escListener, { capture: true });
       escListener = null;

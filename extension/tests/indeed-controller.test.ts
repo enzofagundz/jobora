@@ -565,6 +565,10 @@ describe('indeed controller — integridade observer/SPA', () => {
     const bodies: CaptureEnvelope[] = [];
     let fetchCalls = 0;
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      if (String(_url).endsWith('/extension/auth/validate')) {
+        const token = (init?.headers as Record<string, string> | undefined)?.Authorization;
+        return new Response(JSON.stringify({ valid: true, owner_user_id: token === 'Bearer token-indeed-b' ? 2 : 1 }), { status: 200 });
+      }
       fetchCalls++;
       bodies.push(JSON.parse((init?.body as string) ?? '{}') as CaptureEnvelope);
       if (fetchCalls === 1) throw new TypeError('offline depois do persist');

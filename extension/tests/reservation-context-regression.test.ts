@@ -274,6 +274,7 @@ describe('background reservation authority tied to trusted tab and frame', () =>
   it('does not inherit authority across credentials and preserves the original credential payload', async () => {
     const flow = authorityFixture();
     const old = await authorityContext(flow.handler);
+    flow.setOwner(5);
     await apiToken.setValue('different-controlled-credential');
     expect(await flow.handler({ type: 'capture:submit-envelope', context: old, envelope: authorityEnvelope() }, TAB_A)).toMatchObject({ ok: false, error: 'credential_changed' });
     const manual = await authorityContext(flow.handler, CHANGED_URL);

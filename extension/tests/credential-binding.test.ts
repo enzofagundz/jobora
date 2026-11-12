@@ -548,6 +548,88 @@ describe('contexto opaco de credencial', () => {
     expect(uploads).toHaveLength(1);
   });
 
+  it('troca de token do mesmo dono reaponta a fila e entrega a captura', async () => {
+    const { store, handler } = setup();
+    mockBackend({ upload: () => { throw new TypeError('offline'); } });
+
+    const resolved = await resolveContext(handler);
+    const captured = envelope('exec-1');
+    await handler({
+      type: 'capture:submit-envelope',
+      envelope: captured,
+      context: resolved.context!,
+    });
+    expect(store.records.size).toBe(1);
+    expect([...store.records.values()][0]!.ownerUserId).toBe(1);
+
+    await apiToken.setValue(TOKEN_A2);
+    vi.advanceTimersByTime(5_000);
+    vi.restoreAllMocks();
+    const { uploads } = mockBackend();
+
+    await handler.flush();
+
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0]!.token).toBe(TOKEN_A2);
+    expect(store.records.size).toBe(0);
+  });
+
+  it('captura pendente de token antigo do mesmo dono é entregue pelo token atual', async () => {
+    const { store, handler } = setup();
+    mockBackend({ upload: () => { throw new TypeError('offline'); } });
+
+    const resolved = await resolveContext(handler);
+    const captured = envelope('exec-1');
+    await handler({
+      type: 'capture:submit-envelope',
+      envelope: captured,
+      context: resolved.context!,
+    });
+    expect([...store.records.values()][0]!.state).toBe('pending');
+
+    await apiToken.setValue(TOKEN_A2);
+    vi.advanceTimersByTime(5_000);
+    vi.restoreAllMocks();
+    const { uploads } = mockBackend();
+
+    // Sem flush/retarget: o drain precisa julgar pelo dono, não pela fingerprint.
+    const drain = (await handler({ type: 'capture:queue-drain' })) as {
+      ok: true;
+      drain: { captured: number };
+    };
+
+    expect(drain.drain.captured).toBe(1);
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0]!.token).toBe(TOKEN_A2);
+    expect(store.records.size).toBe(0);
+  });
+
+  it('troca de token de outro dono bloqueia a captura antiga em vez de entregá-la', async () => {
+    const { store, handler } = setup();
+    mockBackend({ upload: () => { throw new TypeError('offline'); } });
+
+    const resolved = await resolveContext(handler);
+    await handler({
+      type: 'capture:submit-envelope',
+      envelope: envelope('exec-1'),
+      context: resolved.context!,
+    });
+    expect(store.records.size).toBe(1);
+
+    await apiToken.setValue(TOKEN_B);
+    vi.advanceTimersByTime(5_000);
+    vi.restoreAllMocks();
+    const { uploads } = mockBackend();
+
+    await handler.flush();
+
+    expect(uploads).toHaveLength(0);
+    const record = [...store.records.values()][0]!;
+    expect(record.ownerUserId).toBe(1);
+    expect(record.state).toBe('blocked');
+    expect(record.blockedReason).toBe('auth');
+  });
+
   it('validação falha ou credencial muda durante validação não rebinda nem envia', async () => {
     const { store, handler } = setup();
     const { uploads } = mockBackend({

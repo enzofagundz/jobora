@@ -27,14 +27,14 @@ export function createSessionOwnerCache(): OwnerCache {
     },
 
     async put(origin, credentialFingerprint, ownerUserId) {
+      const key = ownerCacheKey(origin, credentialFingerprint);
       const all = await OWNER_CACHE.getValue();
       const entries = Object.entries(all)
+        // Reescrever uma chave existente não pode consumir a vaga de outra.
+        .filter(([existing]) => existing !== key)
         .sort(([, a], [, b]) => a.validatedAt - b.validatedAt)
         .slice(-(MAX_OWNERS - 1));
-      entries.push([
-        ownerCacheKey(origin, credentialFingerprint),
-        { ownerUserId, validatedAt: Date.now() },
-      ]);
+      entries.push([key, { ownerUserId, validatedAt: Date.now() }]);
       await OWNER_CACHE.setValue(Object.fromEntries(entries));
     },
   };

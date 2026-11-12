@@ -52,6 +52,13 @@ export type SubmitEnvelope = (
   target: CaptureQueueTarget,
 ) => Promise<EnvelopeResult>;
 
+export interface CaptureQueueRetargetResult {
+  /** Registros reapontados para a credencial atual. */
+  moved: number;
+  /** Registros de outro dono, bloqueados para decisão explícita. */
+  blocked: number;
+}
+
 export interface CaptureQueue {
   enqueue(
     envelope: CaptureEnvelope,
@@ -61,6 +68,16 @@ export interface CaptureQueue {
     | { ok: false; error: 'conflict' | 'too_large' }
   >;
   get(id: string): Promise<CaptureQueueRecord | null>;
+  /**
+   * Troca de token/destino: registros do mesmo dono passam a pertencer à
+   * credencial atual; registros de outro dono ficam bloqueados e acionáveis.
+   * Sem `resolveOwner` nada é movido, porque o dono é a única garantia de que
+   * a captura não vai parar na conta errada.
+   */
+  retarget(
+    target: CaptureQueueTarget,
+    resolveOwner?: () => Promise<number | null>,
+  ): Promise<CaptureQueueRetargetResult>;
   drain(
     target: CaptureQueueTarget,
     submit: SubmitEnvelope,
@@ -128,11 +145,8 @@ export function createCaptureQueue(store: CaptureQueueStore): CaptureQueue {
     const due = records
       .filter(
         (record) =>
-          record.origin === target.origin &&
-          record.credentialFingerprint === target.credentialFingerprint &&
-          (record.ownerUserId === null ||
-            target.ownerUserId === null ||
-            record.ownerUserId === target.ownerUserId) &&
+          // Mesmo critério do status: quem aparece como pendente é entregável.
+          viewerMatches(record, target) &&
           record.state === 'pending' &&
           (force || record.nextAttemptAt <= now),
       )
@@ -197,12 +211,66 @@ export function createCaptureQueue(store: CaptureQueueStore): CaptureQueue {
     }
 
     const after = await store.getAll();
-    const targetRecords = after.filter(
+    const targetRecords = after.filter((record) => viewerMatches(record, target));
+    return toDrain(targetRecords, results);
+  }
+
+  async function retarget(
+    target: CaptureQueueTarget,
+    resolveOwner?: () => Promise<number | null>,
+  ): Promise<CaptureQueueRetargetResult> {
+    const stale = (await store.getAll()).filter(
       (record) =>
         record.origin === target.origin &&
-        record.credentialFingerprint === target.credentialFingerprint,
+        (record.credentialFingerprint !== target.credentialFingerprint ||
+          (record.state === 'blocked' && record.lastError === 'credential_changed')),
     );
-    return toDrain(targetRecords, results);
+    if (stale.length === 0) return { moved: 0, blocked: 0 };
+
+    const ownerUserId = target.ownerUserId ?? (await resolveOwner?.()) ?? null;
+    if (ownerUserId === null) return { moved: 0, blocked: 0 };
+
+    const current = target.ownerUserId === null ? { ...target, ownerUserId } : target;
+    let moved = 0;
+    let blocked = 0;
+
+    for (const record of stale) {
+      if (record.ownerUserId !== null && record.ownerUserId !== ownerUserId) {
+        await block(record, 'auth', { ok: false, error: 'credential_changed' });
+        blocked++;
+        continue;
+      }
+
+      const previousId = record.id;
+      record.credentialFingerprint = current.credentialFingerprint;
+      record.ownerUserId = ownerUserId;
+      record.id = queueId(current, record.envelope.capture.idempotency_key);
+
+      if (record.state === 'blocked' && record.lastError === 'credential_changed') {
+        record.state = 'pending';
+        delete record.blockedReason;
+        delete record.lastError;
+        delete record.lastStatus;
+        if (record.id === previousId) await store.put(record);
+      }
+
+      if (record.id === previousId) continue;
+
+      const duplicate = (await store.getAll()).some(
+        (other) => other.id === record.id && other.id !== previousId,
+      );
+      if (duplicate) {
+        // Mesma captura já enfileirada sob a credencial atual.
+        await store.delete(previousId);
+        moved++;
+        continue;
+      }
+
+      await store.replace(previousId, record);
+      moved++;
+    }
+
+    return { moved, blocked };
   }
 
   async function get(id: string): Promise<CaptureQueueRecord | null> {
@@ -283,7 +351,7 @@ export function createCaptureQueue(store: CaptureQueueStore): CaptureQueue {
     await store.put(record);
   }
 
-  return { enqueue, get, drain, status, resumeAuth, discard };
+  return { enqueue, get, retarget, drain, status, resumeAuth, discard };
 }
 
 function viewerMatches(record: CaptureQueueRecord, target: CaptureQueueTarget): boolean {

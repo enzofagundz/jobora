@@ -17,6 +17,7 @@ use App\Services\AiOperationService;
 use App\Services\CaptureTokenService;
 use App\Services\Discovery\CaptureBlockReader;
 use App\Services\Discovery\DiscoveryRunService;
+use App\Services\Discovery\DiscoverySourceUrl;
 use App\Services\Discovery\LinkedInJobsDecoder;
 use App\Services\Discovery\PublicationExtractionException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -46,7 +47,7 @@ function linkedInJobsRun(User $user): array
         'source' => 'linkedin',
         'surface' => 'linkedin_jobs',
         'url' => $url,
-        'canonical_url_hash' => hash('sha256', $url),
+        'canonical_url_hash' => app(DiscoverySourceUrl::class)->hash($url),
         'active' => true,
         'next_due_at' => now()->subMinute(),
     ]);
