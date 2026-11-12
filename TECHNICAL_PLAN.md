@@ -3,7 +3,21 @@
 > Documento de planejamento. Define a arquitetura alvo e a ordem de implementação.
 > Nenhuma decisão aqui substitui o PRD; o PRD é a fonte do produto, este documento é a fonte da implementação.
 
-## 1. Visão técnica
+## Atualização delimitada V2 (#37)
+
+Este plano conserva a arquitetura e as etapas históricas do MVP. As premissas abaixo de single-user, SQLite exclusivo, ausência de filas, foco principal no mercado e PDF apenas local não são restrições atuais. A integração remota HTTP/OAuth já existe, com identidade por proprietário e permissões por integração; stdio continua sendo uma superfície distinta. Consulte o [contrato MCP atual](MCP_SPEC.md#contrato-v2-vigente-37).
+
+O fluxo principal usa fontes e execuções de descoberta, `PageCapture`, publicações, triagem solicitada explicitamente, oportunidades revisadas, perfil confirmado e matching versionado. A extensão usa `/api/page-captures` com credencial individual. O endpoint V1 `/api/job-captures` está aposentado sem efeito; ingestão V2 não é substituição semântica de captura/triagem/promoção V1. `ready` V2 e `confirmed` V1 são estados distintos.
+
+O painel oferece Execuções, Capturas de página e Operações de IA como consultas somente leitura, limitadas ao proprietário. As rotas são `filament.admin.pages.discovery-runs`, `filament.admin.resources.page-captures.index` e `filament.admin.pages.ai-operations`. Mercado fica fora da navegação principal, com rotas históricas preservadas. Administração exige Gate explícito; autoelevação é bloqueada.
+
+`MarketAnalysisService`, normalização compartilhada, competências estratégicas e adequação por idioma permanecem. O perfil profissional confirmado orienta o matching V2; PT-BR continua referência da tradução. A retirada de superfícies de mercado não elimina esses serviços de domínio.
+
+O protocolo de envio separado do tracking reserva, consome autorização, recebe relato e permite reconciliação. O scope `applications:submit` não é concedido automaticamente. Só o primeiro consumo remoto autenticado, com aprovação vigente, autoriza execução externa; reserva, consulta e replay nunca autorizam. Revogar antes do consumo bloqueia; revogar depois não cancela navegador já autorizado. `unknown` bloqueia repetição até reconciliação; o proprietário pode reconciliar pela web mesmo com integração revogada. Hermes executa externamente, sem garantia de exactly-once. Downloads remotos usam artefatos privados, autenticados, com hash e TTL, não caminhos locais como contrato remoto.
+
+Backups não estão implantados; restore descartável e homologação real nas três superfícies fazem parte de #38, ainda pendente.
+
+## 1. Visão técnica (histórico V1)
 
 Aplicação Laravel 13 single-user com painel Filament. O usuário cadastra descrições de vagas (texto + link opcional de referência). As vagas são **fontes de dados**: um agente do Laravel AI SDK (provider opencode_zen, modelo `mimo-v2.5-free`) extrai dados estruturados da descrição; a sugestão passa por revisão humana; somente a versão confirmada é persistida como itens normalizados e passa a alimentar as análises agregadas — frequências por categoria, combinações recorrentes, evolução temporal e o posicionamento do currículo diante dessas tendências (aderências e lacunas).
 
@@ -365,4 +379,3 @@ Cada etapa termina com seus testes verdes antes de avançar. Dependências: etap
 
 - **Extração de texto de PDF/DOCX (entrada do currículo)**: biblioteca/abordagem não definida — decidir antes de habilitar esses formatos de entrada; não bloqueia o MVP (currículo em texto puro).
 - **Credenciais Cloudflare para o driver `cloudflare` do `spatie/laravel-pdf`**: conta/token do Cloudflare Browser Run e nomes das variáveis de ambiente (sem hardcode) — necessárias apenas para a etapa 16 com chamada real; testes usam `Pdf::fake()`.
-

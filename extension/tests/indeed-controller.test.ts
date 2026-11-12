@@ -1,10 +1,13 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { ContentScriptContext } from 'wxt/utils/content-script-context';
+import { nextTick } from 'vue';
 import type { CaptureEnvelope, CaptureMessage } from '@/types/capture';
 import { createIndeedController } from '@/sites/indeed/controller';
-import { createCaptureMessageHandler } from '@/api/capture-message-handler';
+import { extractJob } from '@/sites/indeed/extract';
+import { createTestCaptureMessageHandler as createCaptureMessageHandler } from './helpers/memory-credential-context';
 import { createCaptureQueue } from '@/utils/capture-queue';
 import { apiBaseUrl, apiToken, captureEnabled } from '@/utils/storage';
 import { createMemoryQueueStore } from './helpers/memory-queue-store';
@@ -146,6 +149,268 @@ describe('indeed controller — integridade observer/SPA', () => {
     deactivate();
   });
 
+  it.each(['capture:resolve-run', 'capture:submit-envelope'])('bloqueia e mostra reserva alterada em %s', async (failureType) => {
+    mountList(1);
+    const respond = sendMessageMock.getMockImplementation() as (raw: unknown) => Promise<unknown>;
+    sendMessageMock.mockImplementation(async (raw: unknown) =>
+      (raw as CaptureMessage).type === failureType
+        ? { ok: false, error: 'reservation_changed' }
+        : respond(raw),
+    );
+    const { controller } = await activateUntilDone();
+    try {
+      await advance(3_000);
+      await nextTick();
+      expect(controller.getCaptureState().captured).toBe(false);
+      const roots = Array.from(document.querySelectorAll('*')).map((element) => element.shadowRoot);
+      expect(roots.some((root) => root?.querySelector('[role="alert"]')?.textContent?.includes('Captura bloqueada para preservar a reserva.'))).toBe(true);
+      const count = sendMessageMock.mock.calls.length;
+      document.querySelector('.jobsearch-ResultsList')!.insertAdjacentHTML('beforeend', '<a data-jk="later"><h2>Outra vaga</h2></a>');
+      await advance(3_000);
+      expect(sendMessageMock).toHaveBeenCalledTimes(count);
+      expect(controller.getCaptureState().cards).toBe(failureType === 'capture:resolve-run' ? 0 : 1);
+    } finally {
+      controller.deactivate();
+    }
+  });
+
+  it('captura descrição factual no painel Job Post Details sem o marcador legado', async () => {
+    mountList(1);
+    const updatePane = (): void => {
+      document.querySelector('#jobsearch-ViewjobPaneWrapper')?.remove();
+      document.body.insertAdjacentHTML('beforeend', readFileSync('tests/fixtures/indeed-job-post-details.html', 'utf8'));
+    };
+    document.addEventListener('click', updatePane, true);
+    let controller: ReturnType<typeof createIndeedController> | undefined;
+    try {
+      ({ controller } = await activateUntilDone());
+      await vi.waitFor(() => {
+        expect(sendMessageMock.mock.calls.some(([raw]) =>
+          (raw as CaptureMessage).type === 'capture:submit-envelope',
+        )).toBe(true);
+      }, { timeout: 3_000 });
+      const message = sendMessageMock.mock.calls
+        .map(([raw]) => raw as CaptureMessage)
+        .find((raw): raw is Extract<CaptureMessage, { type: 'capture:submit-envelope' }> =>
+          raw.type === 'capture:submit-envelope',
+        );
+      expect(message?.envelope.blocks.map((block) => [block.kind, block.platform_id])).toEqual([
+        ['card', 'jk1'], ['detail', 'jk1'],
+      ]);
+      expect(message?.envelope.capture.coverage.status).toBe('complete');
+      expect(message?.envelope.capture.html).toContain('Descrição fictícia: desenvolver sistemas PHP com Laravel.');
+      expect(message?.envelope.capture.html).toContain('Desenvolvedor PHP fictício');
+      expect(message?.envelope.capture.html).toContain('Empresa Fictícia');
+      expect(message?.envelope.capture.html).not.toContain('Salário do painel');
+      expect(message?.envelope.capture.html).not.toContain('Benefício do painel');
+    } finally {
+      controller?.deactivate();
+      document.removeEventListener('click', updatePane, true);
+    }
+  });
+
+  it('captura painel moderno já selecionado no cold load sem perder metadados nem misturar o resumo', async () => {
+    document.removeEventListener('click', spaClickHandler, true);
+    mountList(1);
+    window.happyDOM.setURL(`${SEARCH_URL}&vjk=jk1`);
+    document.body.insertAdjacentHTML('beforeend', readFileSync('tests/fixtures/indeed-job-post-details.html', 'utf8'));
+    let controller: ReturnType<typeof createIndeedController> | undefined;
+    try {
+      const card = document.querySelector('a[data-jk="jk1"]')!;
+      const raw = await extractJob('jk1', 'Vaga 1', card);
+      expect(raw?.title).toBe('Desenvolvedor PHP fictício');
+      expect(raw?.company).toBe('Empresa Fictícia');
+      expect(raw?.description).toContain('Descrição fictícia: desenvolver sistemas PHP com Laravel.');
+      expect(raw?.description).toContain('Testes automatizados');
+      expect(raw?.description).not.toContain('Dados da vaga');
+      expect(raw?.description).not.toContain('Salário do painel');
+      expect(raw?.description).not.toContain('Benefício do painel');
+      expect(raw?.description).not.toContain('Desenvolvedor PHP fictício');
+      ({ controller } = await activateUntilDone());
+      expect(controller.getCaptureState()).toMatchObject({ cards: 1, details: 1 });
+      await vi.waitFor(() => {
+        expect(controller?.getCaptureState().captured).toBe(true);
+      }, { timeout: 3_000 });
+    } finally {
+      controller?.deactivate();
+    }
+  });
+
+  it.each(['empty', 'outside', 'missing_heading', 'wrong_jk', 'wrong_vjk'])(
+    'painel moderno %s não produz detalhe nem cobertura completa falsos',
+    async (scenario) => {
+      mountList(1);
+      const updatePane = (): void => {
+        document.querySelector('#jobsearch-ViewjobPaneWrapper')?.remove();
+        document.body.insertAdjacentHTML('beforeend', readFileSync('tests/fixtures/indeed-job-post-details.html', 'utf8'));
+        const pane = document.querySelector('#jobsearch-ViewjobPaneWrapper')!;
+        const description = pane.querySelector('.simple-job-description-html')!;
+        if (scenario === 'empty') description.textContent = ' ';
+        if (scenario === 'outside') document.body.append(description);
+        if (scenario === 'missing_heading') pane.querySelector('[data-testid="vj-job-description-heading"]')?.remove();
+        if (scenario === 'wrong_jk') pane.setAttribute('data-jk', 'other-job');
+        if (scenario === 'wrong_vjk') window.happyDOM.setURL(`${SEARCH_URL}&vjk=other-job`);
+      };
+      document.addEventListener('click', updatePane, true);
+      let controller: ReturnType<typeof createIndeedController> | undefined;
+      try {
+        ({ controller } = await activateUntilDone());
+        await vi.waitFor(() => {
+          expect(controller?.getCaptureState().captured).toBe(true);
+        }, { timeout: 3_000 });
+        expect(controller.getCaptureState()).toMatchObject({ cards: 1, details: 0, coverage: 'partial' });
+        const message = sendMessageMock.mock.calls
+          .map(([raw]) => raw as CaptureMessage)
+          .find((raw): raw is Extract<CaptureMessage, { type: 'capture:submit-envelope' }> =>
+            raw.type === 'capture:submit-envelope',
+          );
+        expect(message?.envelope.blocks.map((block) => block.kind)).toEqual(['card']);
+        expect(message?.envelope.capture.html).not.toContain('Descrição fictícia: desenvolver sistemas PHP com Laravel.');
+        expect(message?.envelope.capture.coverage).toMatchObject({ status: 'partial', reason: 'timeout' });
+      } finally {
+        controller?.deactivate();
+        document.removeEventListener('click', updatePane, true);
+      }
+    },
+  );
+
+  it('painel moderno não autoriza captura quando a resolução retorna outra fonte', async () => {
+    mountList(1);
+    document.body.insertAdjacentHTML('beforeend', readFileSync('tests/fixtures/indeed-job-post-details.html', 'utf8'));
+    sendMessageMock.mockImplementation(async () => ({
+      ok: true,
+      run: { executionId: 'wrong-source', source: 'linkedin', surface: 'linkedin_jobs', initialUrl: SEARCH_URL, expiresAt: null },
+      context: 'ctx-indeed-test',
+    }));
+    const { controller } = await activateUntilDone();
+    try {
+      expect(controller.getCaptureState()).toMatchObject({ captured: false, details: 0, executionId: null });
+      expect(sendMessageMock.mock.calls.some(([raw]) =>
+        (raw as CaptureMessage).type === 'capture:submit-envelope',
+      )).toBe(false);
+    } finally {
+      controller.deactivate();
+    }
+  });
+
+  it.each([true, false])('mantém correlação entre painéis modernos com descrição idêntica=%s', async (identicalDescription) => {
+    mountList(2);
+    const updatePane = (event: Event): void => {
+      const target = event.target instanceof Element ? event.target : null;
+      const jk = target?.closest('a[data-jk]')?.getAttribute('data-jk');
+      if (!jk) return;
+      document.querySelector('#jobsearch-ViewjobPaneWrapper')?.remove();
+      document.body.insertAdjacentHTML('beforeend', readFileSync('tests/fixtures/indeed-job-post-details.html', 'utf8'));
+      document.querySelector('[data-testid="vj-job-title"]')!.textContent = `Vaga fictícia ${jk}`;
+      document.querySelector('.simple-job-description-html')!.textContent = identicalDescription
+        ? 'Descrição fictícia compartilhada: PHP Laravel.'
+        : `Descrição fictícia exclusiva ${jk}: PHP Laravel.`;
+    };
+    document.addEventListener('click', updatePane, true);
+    let controller: ReturnType<typeof createIndeedController> | undefined;
+    try {
+      ({ controller } = await activateUntilDone());
+      await vi.waitFor(() => {
+        expect(controller?.getCaptureState().captured).toBe(true);
+      }, { timeout: 3_000 });
+      expect(controller.getCaptureState()).toMatchObject({ cards: 2, details: 2, coverage: 'complete' });
+      const message = sendMessageMock.mock.calls
+        .map(([raw]) => raw as CaptureMessage)
+        .find((raw): raw is Extract<CaptureMessage, { type: 'capture:submit-envelope' }> =>
+          raw.type === 'capture:submit-envelope',
+        );
+      const captured = document.createElement('main');
+      captured.innerHTML = message!.envelope.capture.html;
+      for (const [jk, other] of [['jk1', 'jk2'], ['jk2', 'jk1']]) {
+        const detail = captured.querySelector(`[data-kind="detail"][data-platform-id="${jk}"]`)!;
+        expect(detail.textContent).toContain(identicalDescription ? 'Descrição fictícia compartilhada' : `Descrição fictícia exclusiva ${jk}`);
+        expect(detail.textContent).toContain(`Vaga fictícia ${jk}`);
+        expect(detail.textContent).not.toContain(`exclusiva ${other}`);
+      }
+    } finally {
+      controller?.deactivate();
+      document.removeEventListener('click', updatePane, true);
+    }
+  });
+
+  it.each([true, false])(
+    'painel reutilizado espera a descrição de jk2, atualização posterior=%s',
+    async (updateDescription) => {
+      document.removeEventListener('click', spaClickHandler, true);
+      mountList(2);
+      let secondClicked = false;
+      const changeSelection = (event: Event): void => {
+        const target = event.target instanceof Element ? event.target : null;
+        const jk = target?.closest('a[data-jk]')?.getAttribute('data-jk');
+        if (!jk) return;
+        window.happyDOM.setURL(`${SEARCH_URL}&vjk=${jk}`);
+        if (jk === 'jk1') {
+          document.body.insertAdjacentHTML('beforeend', readFileSync('tests/fixtures/indeed-job-post-details.html', 'utf8'));
+          document.querySelector('.simple-job-description-html')!.textContent = 'Descrição exclusiva antiga jk1: PHP.';
+        }
+        document.querySelector('[data-testid="vj-job-title"]')!.textContent = `Vaga fictícia ${jk}`;
+        if (jk === 'jk2') {
+          document.querySelector('[data-testid="desktop-job-header"]')!.append(document.createTextNode('Carregando…'));
+          secondClicked = true;
+        }
+      };
+      document.addEventListener('click', changeSelection, true);
+      const controller = createIndeedController();
+      let activationCompleted = false;
+      const activation = controller.activate(new ContentScriptContext('test-indeed-stale-description')).then(() => {
+        activationCompleted = true;
+      });
+      try {
+        await vi.waitFor(() => expect(secondClicked).toBe(true), { timeout: 2_000 });
+        for (let poll = 0; poll < 3; poll++) {
+          await vi.advanceTimersToNextTimerAsync();
+          expect(controller.getCaptureState().details).toBe(1);
+        }
+        expect(sendMessageMock.mock.calls.some(([raw]) =>
+          (raw as CaptureMessage).type === 'capture:submit-envelope',
+        )).toBe(false);
+
+        if (updateDescription) {
+          document.querySelector('.simple-job-description-html')!.textContent = 'Descrição exclusiva nova jk2: Laravel.';
+        }
+        for (let tick = 0; tick < 200 && !activationCompleted; tick++) {
+          await vi.advanceTimersToNextTimerAsync();
+        }
+        expect(activationCompleted).toBe(true);
+        await activation;
+        await vi.waitFor(() => {
+          expect(controller.getCaptureState().captured).toBe(true);
+        }, { timeout: 3_000 });
+
+        const message = sendMessageMock.mock.calls
+          .map(([raw]) => raw as CaptureMessage)
+          .find((raw): raw is Extract<CaptureMessage, { type: 'capture:submit-envelope' }> =>
+            raw.type === 'capture:submit-envelope',
+          )!;
+        const captured = document.createElement('main');
+        captured.innerHTML = message.envelope.capture.html;
+        const first = captured.querySelector('[data-kind="detail"][data-platform-id="jk1"]');
+        const second = captured.querySelector('[data-kind="detail"][data-platform-id="jk2"]');
+        expect(first?.textContent).toContain('Descrição exclusiva antiga jk1');
+        if (updateDescription) {
+          expect(second?.textContent).toContain('Descrição exclusiva nova jk2');
+          expect(second?.textContent).not.toContain('Descrição exclusiva antiga jk1');
+          expect(message.envelope.capture.coverage.status).toBe('complete');
+          expect(message.envelope.blocks).toHaveLength(4);
+        } else {
+          expect(second).toBeNull();
+          expect(message.envelope.capture.coverage).toMatchObject({ status: 'partial', reason: 'timeout' });
+          expect(message.envelope.blocks).toHaveLength(3);
+        }
+      } finally {
+        controller.deactivate();
+        document.removeEventListener('click', changeSelection, true);
+        await vi.runOnlyPendingTimersAsync();
+        await activation;
+      }
+    },
+  );
+
   it('resolve execução e envia um envelope Indeed v1 com card e detalhe correlacionados', async () => {
     mountList(2);
     window.happyDOM.setURL(SEARCH_URL);
@@ -184,7 +449,7 @@ describe('indeed controller — integridade observer/SPA', () => {
       'capture:resolve-run',
       'capture:submit-envelope',
     ]);
-    expect(sendMessageMock.mock.calls.some(([message]) => (message as CaptureMessage).type === 'capture:submit')).toBe(false);
+    expect(sendMessageMock.mock.calls.map(([message]) => (message as CaptureMessage).type)).not.toContain('capture:submit');
     expect(submissions).toHaveLength(1);
     const envelope: CaptureEnvelope = submissions[0]!.envelope;
     expect(envelope).toMatchObject({
@@ -328,11 +593,10 @@ describe('indeed controller — integridade observer/SPA', () => {
 
     const { controller, deactivate } = await activateUntilDone();
     await advance(3_000);
-    for (let index = 0; index < 100 && (controller.getCaptureState().pending || store.records.size === 0); index++) {
-      await advance(50);
-    }
-    expect(controller.getCaptureState()).toMatchObject({ captured: false, pending: false });
-    expect(store.records.size).toBe(1);
+    await vi.waitFor(() => {
+      expect(controller.getCaptureState()).toMatchObject({ captured: false, pending: false });
+      expect(store.records.size).toBe(1);
+    });
     const queued = [...store.records.values()][0]!;
     expect(queued.envelope.capture).toMatchObject({
       source: 'indeed',

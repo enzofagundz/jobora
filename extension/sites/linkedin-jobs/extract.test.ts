@@ -31,6 +31,31 @@ describe('LinkedIn Jobs extração (fixture real)', () => {
     expect(isLinkedInJobsRoute(new URL('https://www.linkedin.com/feed/'))).toBe(false);
   });
 
+  it('recognizes the redirected search-results route without accepting unrelated job paths or origins', () => {
+    const redirected = 'https://www.linkedin.com/jobs/search-results?skipRedirect=true&currentJobId=4486639255&keywords=Laravel&f_WT=2&f_SAL=f_SA_id_225001%3A272001&infoNotice=ai-job-search&f_TPR=r86400';
+    expect(isLinkedInJobsRoute(new URL(redirected))).toBe(true);
+    window.happyDOM.setURL(redirected);
+    expect(isLinkedInJobsRoute(window.location)).toBe(true);
+    expect(isLinkedInJobsRoute(new URL('https://www.linkedin.com/jobs/search-results/'))).toBe(true);
+    for (const url of [
+      'https://www.linkedin.com/jobs/search-results-extra?keywords=Laravel',
+      'https://www.linkedin.com/jobs/search-results/other',
+      'https://www.linkedin.com/jobs/collections/recommended/',
+      'https://www.linkedin.com/jobs/view/4486639255/',
+      'https://linkedin.com/jobs/search-results?keywords=Laravel',
+      'https://other.example/jobs/search-results?keywords=Laravel',
+      'http://www.linkedin.com/jobs/search-results?keywords=Laravel',
+    ]) expect(isLinkedInJobsRoute(new URL(url))).toBe(false);
+    const frozen = new URL(frozenSearchUrl());
+    expect(frozen.pathname).toBe('/jobs/search-results');
+    expect(frozen.searchParams.has('currentJobId')).toBe(false);
+    expect(frozen.searchParams.get('f_SAL')).toBe('f_SA_id_225001:272001');
+    expect(frozen.searchParams.get('f_TPR')).toBe('r86400');
+    expect(frozen.searchParams.get('f_WT')).toBe('2');
+    expect(frozen.searchParams.get('skipRedirect')).toBe('true');
+    expect(frozen.searchParams.get('infoNotice')).toBe('ai-job-search');
+  });
+
   it('isJobCard detecta cards com data-job-id ou data-occludable-job-id', () => {
     const cards = Array.from(document.querySelectorAll('li[data-occludable-job-id]'));
     expect(cards.filter(isJobCard)).toHaveLength(4);

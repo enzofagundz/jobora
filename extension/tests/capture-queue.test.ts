@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import type { CaptureEnvelope, EnvelopeResult } from '@/types/capture';
-import { createCaptureMessageHandler } from '@/api/capture-message-handler';
+import { createTestCaptureMessageHandler as createCaptureMessageHandler } from './helpers/memory-credential-context';
 import {
   CAPTURE_ENVELOPE_MAX_BYTES,
   createCaptureQueue,

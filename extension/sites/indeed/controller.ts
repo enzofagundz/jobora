@@ -1,9 +1,10 @@
-import { createApp, type App as VueApp } from 'vue';
+import { createApp, ref, type App as VueApp } from 'vue';
 import type { ContentScriptContext, ShadowRootContentScriptUi } from '#imports';
 import CapturePanel from '@/components/CapturePanel.vue';
 import { createCaptureSession, type CaptureSession } from '@/utils/capture-session';
 import type {
   CaptureCoverageReason,
+  CaptureErrorKind,
   EnvelopeResult,
   ResolveRunResult,
 } from '@/types/capture';
@@ -13,7 +14,9 @@ import {
   frozenSearchUrl,
   isCard,
   isIndeedRoute,
+  indeedDescriptionElement,
   indeedPaneMatches,
+  indeedPaneMetadata,
   waitForPane,
 } from './extract';
 import { createIndeedJobsBuilder, jobIdentity } from './envelope';
@@ -52,6 +55,7 @@ interface CaptureAttempt {
 
 export function createIndeedController(): IndeedController {
   const session: CaptureSession = createCaptureSession();
+  const panelError = ref<CaptureErrorKind | null>(null);
   let observer: MutationObserver | null = null;
   let debounceTimer: number | undefined;
   let finalizeTimer: number | undefined;
@@ -121,7 +125,13 @@ export function createIndeedController(): IndeedController {
       || null;
     const previousVjk = new URLSearchParams(location.search).get('vjk');
     const previousPane = document.querySelector('#jobsearch-ViewjobPaneWrapper');
-    const previousPaneHtml = previousPane?.innerHTML ?? null;
+    const previousDescriptionText = previousPane
+      ? indeedDescriptionElement(previousPane)?.textContent.replace(/\s+/g, ' ').trim() ?? null
+      : null;
+    const previousPaneSnapshot = previousPane ? {
+      description: indeedDescriptionElement(previousPane),
+      metadata: indeedPaneMetadata(previousPane),
+    } : undefined;
     try {
       (element as HTMLElement).click();
     } catch {
@@ -135,8 +145,8 @@ export function createIndeedController(): IndeedController {
       isGenerationActive,
       jk,
       previousVjk,
-      previousPane,
-      previousPaneHtml,
+      previousDescriptionText,
+      previousPaneSnapshot,
     );
     if (!isGenerationActive(generation) || attempt !== current) return;
     if (!paneReady) {
@@ -148,17 +158,27 @@ export function createIndeedController(): IndeedController {
     const raw = await extractJob(jk, title, element);
     if (!isGenerationActive(generation) || attempt !== current) return;
     const pane = document.querySelector('#jobsearch-ViewjobPaneWrapper');
+    const description = pane ? indeedDescriptionElement(pane) : null;
     if (
       !raw?.description ||
       !pane ||
-      !indeedPaneMatches(pane, jk, previousVjk, previousPane, previousPaneHtml)
+      !description ||
+      !indeedPaneMatches(pane, jk, previousVjk, previousDescriptionText, previousPaneSnapshot)
     ) {
       current.detailFailure = true;
       session.counters.errors++;
       return;
     }
 
-    current.builder.addDetail(jk, pane);
+    const detail = document.createElement('section');
+    for (const [index, value] of [raw.title, raw.company, raw.location].entries()) {
+      if (!value) continue;
+      const metadata = document.createElement(index === 0 ? 'h1' : 'p');
+      metadata.textContent = value;
+      detail.append(metadata);
+    }
+    detail.append(description.cloneNode(true));
+    current.builder.addDetail(jk, detail);
   }
 
   async function processNewCards(): Promise<void> {
@@ -228,7 +248,8 @@ export function createIndeedController(): IndeedController {
       if (!isGenerationActive(generation) || attempt !== current) return;
       if (response?.context) current.credentialContext = response.context;
       if (response && response.ok === false) {
-        if (['auth', 'invalid', 'conflict', 'not_found', 'ambiguous'].includes(response.error)) {
+        panelError.value = response.error;
+        if (['auth', 'invalid', 'conflict', 'not_found', 'ambiguous', 'reservation_changed'].includes(response.error)) {
           current.blocked = true;
           session.counters.phase = 'error';
         }
@@ -283,6 +304,8 @@ export function createIndeedController(): IndeedController {
         context: current.credentialContext,
       })) as EnvelopeResult | undefined;
       if (!result || result.ok !== true) {
+        if (attempt === current) panelError.value = result?.error ?? 'network';
+        if (result?.error === 'reservation_changed') current.blocked = true;
         for (const card of cards) {
           session.applyResult(jobIdentity(card.platform_id), result ?? { ok: false, error: 'network' });
         }
@@ -335,6 +358,7 @@ export function createIndeedController(): IndeedController {
     pendingSet.clear();
     const current = newAttempt();
     attempt = current;
+    panelError.value = null;
 
     ui = await createShadowRootUi(ctx, {
       name: 'vagas-capture-panel',
@@ -345,6 +369,7 @@ export function createIndeedController(): IndeedController {
         const panelApp = createApp(CapturePanel, {
           siteLabel: 'Jobora Job Capture',
           counters: session.counters,
+          error: panelError,
           visible: panelVisible,
           'onUpdate:visible': (value: boolean) => {
             panelVisible = value;

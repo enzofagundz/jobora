@@ -9,6 +9,11 @@ use Illuminate\Contracts\Support\Htmlable;
 
 class TrendsChartWidget extends LineChartWidget
 {
+    public static function canView(): bool
+    {
+        return false;
+    }
+
     protected ?string $heading = 'Evolução mensal';
 
     public function getData(): array

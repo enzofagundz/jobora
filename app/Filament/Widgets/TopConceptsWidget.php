@@ -12,6 +12,11 @@ use Illuminate\Database\Eloquent\Model;
 
 class TopConceptsWidget extends TableWidget
 {
+    public static function canView(): bool
+    {
+        return false;
+    }
+
     protected static ?string $heading = 'Top 10 conceitos';
 
     protected int|string|array $columnSpan = 'full';

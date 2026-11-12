@@ -1,13 +1,10 @@
 <?php
 
+use App\Enums\AnalysisPeriod;
 use App\Enums\ResumeLanguage;
-use App\Mcp\Resources\MarketSnapshotResource;
-use App\Mcp\Servers\JoboraServer;
-use App\Mcp\Tools\Market\GetMarketComparisonTool;
-use App\Mcp\Tools\Market\GetMarketFrequenciesTool;
-use App\Mcp\Tools\Market\GetMarketPairsTool;
-use App\Mcp\Tools\Market\GetMarketTrendsTool;
 use App\Models\JobPosting;
+use App\Services\MarketAnalysisService;
+use App\Services\MarketComparisonService;
 use App\Services\ResumeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Feature\Mcp\McpTestHelpers;
@@ -24,17 +21,11 @@ it('devolve a frequência dos conceitos das vagas confirmadas', function () {
     $react = JobPosting::factory()->for($user, 'user')->confirmed()->create();
     McpTestHelpers::item($react, 'React');
 
-    JoboraServer::tool(GetMarketFrequenciesTool::class, [])
-        ->assertOk()
-        ->assertStructuredContent(fn ($json) => $json
-            ->where('ok', true)
-            ->where('data.total_confirmed', 3)
-            ->where('data.items.0.name', 'Python')
-            ->where('data.items.0.total', 2)
-            ->where('data.items.0.percent', 66.7)
-            ->where('data.items.1.name', 'React')
-            ->where('data.items.1.total', 1)
-            ->etc());
+    $market = app(MarketAnalysisService::class);
+    expect($market->totalConfirmed($user))->toBe(3);
+    $items = $market->relativeFrequencies($user);
+    expect($items[0])->toMatchArray(['name' => 'Python', 'total' => 2, 'percent' => 66.7]);
+    expect($items[1])->toMatchArray(['name' => 'React', 'total' => 1]);
 });
 
 it('devolve combinações recorrentes na mesma categoria', function () {
@@ -48,14 +39,7 @@ it('devolve combinações recorrentes na mesma categoria', function () {
     McpTestHelpers::item($second, 'PHP');
     McpTestHelpers::item($second, 'Laravel');
 
-    JoboraServer::tool(GetMarketPairsTool::class, [])
-        ->assertOk()
-        ->assertStructuredContent(fn ($json) => $json
-            ->where('ok', true)
-            ->where('data.items.0.name_a', 'Laravel')
-            ->where('data.items.0.name_b', 'PHP')
-            ->where('data.items.0.total', 2)
-            ->etc());
+    expect(app(MarketAnalysisService::class)->pairsByCategory($user)[0])->toMatchArray(['name_a' => 'Laravel', 'name_b' => 'PHP', 'total' => 2]);
 });
 
 it('compara o mercado com o currículo e aponta lacunas', function () {
@@ -67,16 +51,9 @@ it('compara o mercado com o currículo e aponta lacunas', function () {
         McpTestHelpers::item($posting, $name);
     }
 
-    JoboraServer::tool(GetMarketComparisonTool::class, [])
-        ->assertOk()
-        ->assertStructuredContent(fn ($json) => $json
-            ->where('ok', true)
-            ->where('data.table.0.name', 'Python')
-            ->where('data.table.0.present', true)
-            ->where('data.table.0.is_gap', false)
-            ->where('data.gaps.0.name', 'React')
-            ->where('data.gaps.0.total', 1)
-            ->etc());
+    $comparison = app(MarketComparisonService::class);
+    expect($comparison->table($user)[0])->toMatchArray(['name' => 'Python', 'present' => true, 'is_gap' => false]);
+    expect($comparison->gaps($user)[0])->toMatchArray(['name' => 'React', 'total' => 1]);
 });
 
 it('avisa dados insuficientes quando há menos de dois meses', function () {
@@ -84,12 +61,7 @@ it('avisa dados insuficientes quando há menos de dois meses', function () {
     $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create(['collected_at' => now()]);
     McpTestHelpers::item($posting, 'PHP');
 
-    JoboraServer::tool(GetMarketTrendsTool::class, ['period' => 'month'])
-        ->assertOk()
-        ->assertStructuredContent(fn ($json) => $json
-            ->where('ok', true)
-            ->where('data.insufficient_reason', 'insufficient')
-            ->etc());
+    expect(app(MarketAnalysisService::class)->periodInsufficientReason($user, AnalysisPeriod::Month))->toBe('insufficient');
 });
 
 it('devolve a série temporal com dois meses de dados', function () {
@@ -100,16 +72,12 @@ it('devolve a série temporal com dois meses de dados', function () {
     $lastMonth = JobPosting::factory()->for($user, 'user')->confirmed()->create(['collected_at' => now()->subMonthNoOverflow()]);
     McpTestHelpers::item($lastMonth, 'PHP');
 
-    JoboraServer::tool(GetMarketTrendsTool::class, ['period' => 'month'])
-        ->assertOk()
-        ->assertStructuredContent(fn ($json) => $json
-            ->where('ok', true)
-            ->where('data.insufficient_reason', null)
-            ->where('data.series.0.name', 'PHP')
-            ->etc());
+    $market = app(MarketAnalysisService::class);
+    expect($market->periodInsufficientReason($user, AnalysisPeriod::Month))->toBeNull();
+    expect($market->periodSeries($user, AnalysisPeriod::Month)[0]['name'])->toBe('PHP');
 });
 
-it('expõe um snapshot de mercado como resource', function () {
+it('preserva os dados compartilhados do antigo snapshot sem publicar resource', function () {
     $user = McpTestHelpers::user();
     app(ResumeService::class)->save($user, 'Currículo com Python.', ResumeLanguage::PtBr);
 
@@ -118,7 +86,6 @@ it('expõe um snapshot de mercado como resource', function () {
         McpTestHelpers::item($posting, $name);
     }
 
-    JoboraServer::resource(MarketSnapshotResource::class)
-        ->assertOk()
-        ->assertSee(['total_confirmed', 'React']);
+    expect(app(MarketAnalysisService::class)->totalConfirmed($user))->toBe(3);
+    expect(app(MarketComparisonService::class)->gaps($user)[0]['name'])->toBe('React');
 });

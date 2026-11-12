@@ -1,10 +1,10 @@
-import { createApp, reactive, type App as VueApp } from 'vue';
+import { createApp, reactive, ref, type App as VueApp } from 'vue';
 import type { ContentScriptContext, ShadowRootContentScriptUi } from '#imports';
 import CapturePanel from '@/components/CapturePanel.vue';
 import { createCaptureSession, type CaptureSession } from '@/utils/capture-session';
 import { deriveCaptureIdentity } from '@/utils/capture-identity';
 import { safeHref } from '@/utils/capture-dom';
-import type { CaptureCoverageReason, EnvelopeResult, ResolveRunResult } from '@/types/capture';
+import type { CaptureCoverageReason, CaptureErrorKind, EnvelopeResult, ResolveRunResult } from '@/types/capture';
 import {
   OBSERVER_DEBOUNCE_MS,
   buildPayload,
@@ -58,6 +58,7 @@ export function createLinkedInController(
   options: LinkedInControllerOptions = {},
 ): LinkedInController {
   const session: CaptureSession = createCaptureSession();
+  const panelError = ref<CaptureErrorKind | null>(null);
   let observer: MutationObserver | null = null;
   let debounceTimer: number | undefined;
   let finalizeTimer: number | undefined;
@@ -248,9 +249,11 @@ export function createLinkedInController(
       if (response?.context) current.credentialContext = response.context;
 
       if (response && response.ok === false) {
+        panelError.value = response.error;
         // Ambiguidade/auth invalida a correlação: não mistura execuções.
         if (
           response.error === 'conflict' ||
+          response.error === 'reservation_changed' ||
           response.error === 'auth' ||
           response.error === 'invalid'
         ) {
@@ -307,6 +310,8 @@ export function createLinkedInController(
       })) as EnvelopeResult | undefined;
 
       if (!result || result.ok !== true) {
+        if (attempt === current) panelError.value = result?.error ?? 'network';
+        if (result?.error === 'reservation_changed') current.blocked = true;
         for (const post of blocks) {
           session.applyResult(post.identity, result ?? { ok: false, error: 'network' });
         }
@@ -439,6 +444,7 @@ export function createLinkedInController(
 
     const current = newAttempt(generation);
     attempt = current;
+    panelError.value = null;
 
     // position modal → container fixo cobrindo a viewport; pointer-events none
     // deixa os cliques do site passarem (o painel religa em si).
@@ -451,6 +457,7 @@ export function createLinkedInController(
         const panelApp = createApp(CapturePanel, {
           siteLabel: 'Jobora Job Capture',
           counters: session.counters,
+          error: panelError,
           visible: panelVisible,
           'onUpdate:visible': (value: boolean) => {
             panelVisible = value;

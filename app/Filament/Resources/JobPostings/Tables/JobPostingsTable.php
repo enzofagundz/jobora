@@ -54,7 +54,7 @@ class JobPostingsTable
                     ->dateTime('d/m/Y')
                     ->sortable(),
                 TextColumn::make('status')
-                    ->label('Status')
+                    ->label('Status legado')
                     ->badge()
                     ->color(fn (JobPostingStatus $state): string => match ($state) {
                         JobPostingStatus::Pending => 'gray',
@@ -62,6 +62,15 @@ class JobPostingsTable
                         JobPostingStatus::Confirmed => 'success',
                         JobPostingStatus::Failed => 'danger',
                     })
+                    ->sortable(),
+                TextColumn::make('readiness')
+                    ->label('Prontidão V2')
+                    ->badge()
+                    ->state(fn (JobPosting $record): ?string => $record->readiness === null
+                        ? null
+                        : JobPostingResource::readinessLabel($record->readiness))
+                    ->color(fn (JobPosting $record): string => JobPostingResource::readinessColor($record->readiness))
+                    ->placeholder('Fluxo legado')
                     ->sortable(),
                 TextColumn::make('error_message')
                     ->label('Erro')
@@ -76,8 +85,14 @@ class JobPostingsTable
             ])
             ->filters([
                 SelectFilter::make('status')
-                    ->label('Status')
+                    ->label('Status legado')
                     ->options(JobPostingStatus::class),
+                SelectFilter::make('readiness')
+                    ->label('Prontidão V2')
+                    ->options([
+                        'ready' => 'Pronta',
+                        'needs_review' => 'Precisa de revisão',
+                    ]),
                 Filter::make('collected_at')
                     ->label('Período de coleta')
                     ->form([

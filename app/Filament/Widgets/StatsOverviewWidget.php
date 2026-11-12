@@ -3,7 +3,6 @@
 namespace App\Filament\Widgets;
 
 use App\Models\JobPosting;
-use App\Models\JobPostingItem;
 use Filament\Widgets\StatsOverviewWidget as BaseStatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 
@@ -14,17 +13,21 @@ class StatsOverviewWidget extends BaseStatsOverviewWidget
         $user = auth()->user();
 
         return [
-            Stat::make('Vagas', JobPosting::where('user_id', $user->id)->count())
-                ->description('total cadastradas'),
-            Stat::make('Confirmadas', JobPosting::query()->where('user_id', $user->id)->where('status', 'confirmed')->count())
-                ->description('compõem as análises')
+            Stat::make('Oportunidades', JobPosting::where('user_id', $user->id)->whereNotNull('readiness')->count())
+                ->description('estruturadas no Jobora V2'),
+            Stat::make('Oportunidades prontas', JobPosting::query()->where('user_id', $user->id)->where('readiness', 'ready')->count())
+                ->description('com prontidão V2 marcada como pronta')
                 ->color('success'),
-            Stat::make('Aguardando revisão', JobPosting::query()->where('user_id', $user->id)->where('status', 'needs_review')->count())
+            Stat::make('Precisam de revisão', JobPosting::query()->where('user_id', $user->id)->where(function ($query): void {
+                $query->where('readiness', 'needs_review')
+                    ->orWhere(function ($legacy): void {
+                        $legacy->whereNull('readiness')->where('status', 'needs_review');
+                    });
+            })->count())
                 ->color('warning'),
-            Stat::make('Falhas na análise', JobPosting::query()->where('user_id', $user->id)->where('status', 'failed')->count())
+            Stat::make('Falhas na análise', JobPosting::query()->where('user_id', $user->id)
+                ->whereNull('readiness')->where('status', 'failed')->count())
                 ->color('danger'),
-            Stat::make('Conceitos distintos', JobPostingItem::whereHas('jobPosting', fn ($q) => $q->where('user_id', $user->id)->where('status', 'confirmed'))->distinct()->count('name'))
-                ->description('na base confirmada'),
         ];
     }
 }

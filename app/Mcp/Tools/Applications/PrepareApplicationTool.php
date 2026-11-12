@@ -30,14 +30,14 @@ class PrepareApplicationTool extends JoboraTool
             'expected_opportunity_version' => $schema->integer()->description('Obrigatório para oportunidade V2.'),
             'expected_profile_confirmed_version' => $schema->integer()->required(),
             'language' => $schema->string()->enum(['pt-BR', 'en'])->default('pt-BR'),
-            'destination' => $schema->object()->properties([
+            'destination' => $schema->object([
                 'application_method_id' => $schema->integer(), 'type' => $schema->string(),
                 'platform' => $schema->string(), 'url' => $schema->string(), 'email' => $schema->string(),
                 'phone' => $schema->string(), 'instructions' => $schema->string(),
             ])->required(),
-            'questions' => $schema->array()->items($schema->object()->properties([
+            'questions' => $schema->array()->items($schema->object([
                 'id' => $schema->string()->required(), 'question' => $schema->string()->required(), 'answer' => $schema->string(),
-                'support' => $schema->array()->items($schema->object()->properties([
+                'support' => $schema->array()->items($schema->object([
                     'source' => $schema->string()->enum(['profile', 'resume'])->required(),
                     'path' => $schema->string()->required(), 'quote' => $schema->string()->required(),
                 ])),

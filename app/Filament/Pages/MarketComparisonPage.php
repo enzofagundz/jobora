@@ -21,6 +21,11 @@ use UnitEnum;
 
 class MarketComparisonPage extends Page implements HasSchemas, HasTable
 {
+    public static function shouldRegisterNavigation(): bool
+    {
+        return false;
+    }
+
     use InteractsWithSchemas;
     use InteractsWithTable;
 

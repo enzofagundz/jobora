@@ -2,6 +2,7 @@
 
 use App\Enums\AgentIntegrationScope;
 use App\Enums\DiscoveryRunStatus;
+use App\Models\AiOperation;
 use App\Models\DiscoveryRun;
 use App\Models\DiscoverySource;
 use App\Models\PageCapture;
@@ -107,6 +108,59 @@ beforeEach(function (): void {
     Queue::fake();
     Http::fake();
 });
+
+it('keeps empty-capture retry expiry independent of access callback order and all replay paths', function (bool $failureBefore) {
+    $this->freezeTime();
+    $user = User::factory()->create();
+    $token = discoveryAccessRegressionMcpToken($user);
+    $source = discoveryAccessRegressionSource($user, now());
+    $source->update(['frequency_minutes' => 1440]);
+    $call = function (string $tool, array $input) use ($token): array {
+        app('auth')->forgetGuards();
+        app('auth')->shouldUse('web');
+        $response = $this->withToken($token)->postJson('/mcp', IntegrationHelpers::toolCall($tool, $input))->assertOk();
+        $result = IntegrationHelpers::decodeToolResult($response->getContent());
+        expect($result['ok'])->toBeTrue();
+
+        return $result['data'];
+    };
+    $acquisition = $call('acquire_discovery_runs', ['idempotency_key' => 'empty-callback-order']);
+    $executionId = $acquisition['runs'][0]['execution_id'];
+    $run = DiscoveryRun::query()->where('execution_id', $executionId)->sole();
+    $this->travel(1)->minutes();
+    $failure = ['execution_id' => $executionId, 'event_key' => 'empty-access-failure', 'outcome' => 'failure', 'http_status' => 500,
+        'error' => 'Controlled failed page access', 'occurred_at' => now()->toIso8601String()];
+    if ($failureBefore) {
+        $call('report_discovery_access', $failure);
+    }
+    $payload = discoveryAccessRegressionEnvelope($executionId, now());
+    $payload['blocks'] = [];
+    $payload['capture']['coverage'] = ['status' => 'partial', 'reason' => 'no_content', 'blocks_expected' => 0, 'blocks_captured' => 0];
+    $payload['capture']['html'] = '<main data-capture-surface="linkedin_publications" data-capture-version="1"></main>';
+    $captureToken = app(CaptureTokenService::class)->issueToken($user);
+    app('auth')->forgetGuards();
+    app('auth')->shouldUse('web');
+    $this->withToken($captureToken)->postJson('/api/page-captures', $payload)->assertCreated();
+    if (! $failureBefore) {
+        $call('report_discovery_access', $failure);
+    }
+    $call('report_discovery_access', $failure);
+    $call('acquire_discovery_runs', ['idempotency_key' => 'empty-callback-order']);
+    $this->travel(1)->minutes();
+    app('auth')->forgetGuards();
+    app('auth')->shouldUse('web');
+    $this->withToken($captureToken)->postJson('/api/page-captures', $payload)->assertOk()->assertJsonPath('replay', true);
+    expect($run->refresh()->status)->toBe(DiscoveryRunStatus::Completed)
+        ->and($run->completion_status)->toBe('partial')
+        ->and($source->refresh()->next_due_at->equalTo($run->expires_at))->toBeTrue()
+        ->and($source->last_success_at)->toBeNull()
+        ->and($run->events()->count())->toBe(1)
+        ->and(PageCapture::query()->count())->toBe(1)
+        ->and(AiOperation::query()->count())->toBe(1);
+    expect($call('acquire_discovery_runs', ['idempotency_key' => 'empty-not-yet'])['runs'])->toBeEmpty();
+    $this->travelTo($run->expires_at);
+    expect($call('acquire_discovery_runs', ['idempotency_key' => 'empty-due-again'])['runs'])->toHaveCount(1);
+})->with([true, false]);
 
 it('records same-run access observed before expiry after durable capture completes the run', function (): void {
     $reservedAt = now()->copy()->setTime(13, 1, 47);

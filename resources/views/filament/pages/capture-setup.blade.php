@@ -6,8 +6,8 @@
                 1. Instale a extensão
             </x-slot:heading>
             <p class="text-sm">
-                Instale a extensão <strong>Jobora Job Capture</strong> no Chrome ou Firefox
-                carregando o build de produção do repositório <code>vagas-extension</code>.
+                Use a extensão Jobora compatível com o fluxo V2 e os domínios permitidos no seu navegador.
+                A extensão registra execuções, resolve acessos e envia capturas duráveis pela API deste Jobora.
             </p>
         </x-filament::section>
 
@@ -71,9 +71,8 @@
                 3. Cole no popup da extensão
             </x-slot:heading>
             <p class="text-sm">
-                Abra o popup da extensão, confirme que a URL da API é
-                <code>http://localhost:8000</code> (ou <code>http://127.0.0.1:8000</code>)
-                e cole o token no campo indicado.
+                Abra as configurações da extensão, informe <code>{{ url('/api') }}</code> como base da API
+                e cole sua credencial individual. Não compartilhe esse token: ele identifica sua conta.
             </p>
         </x-filament::section>
 
@@ -82,9 +81,9 @@
                 4. Valide e conecte
             </x-slot:heading>
             <p class="text-sm">
-                Clique em <strong>Salvar</strong>: a extensão valida o token na API e mostra
-                <em>Conectado</em> em caso de sucesso. Abra uma busca no LinkedIn ou Indeed
-                para começar a capturar — cada publicação aparece na listagem de capturas.
+                Salve a configuração. A extensão valida a credencial e envia cada captura como um envelope
+                vinculado à execução, com estado de ingestão, cobertura e prazo de retenção do HTML bruto.
+                Consulte execuções em <strong>Execuções de descoberta</strong> e capturas em <strong>Capturas</strong>.
             </p>
         </x-filament::section>
 

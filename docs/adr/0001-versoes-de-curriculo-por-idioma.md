@@ -1,10 +1,12 @@
 # 1. Versão de currículo por idioma e adequação por idioma
 
-- **Status:** aceito
+- **Status:** aceito; parcialmente superado pelo V2 (#37)
 - **Data:** 2026-10-14
 - **Glossário:** CONTEXT.md
 
 ## Contexto
+
+**Atualização V2 (#37):** a decisão de manter currículos e adequações por idioma continua válida. A afirmação de que o perfil é exclusivamente PT-BR (decisão 3) não define o matching V2: sua referência é o perfil profissional confirmado. PT-BR permanece referência da tradução e das leituras legadas de mercado. O texto abaixo preserva a decisão histórica, não exige remover EN, competências ou adequação.
 
 Cada usuário tem hoje um único currículo (`resumes`, linha única por usuário) e cada vaga tem uma única adequação (`resume_adaptations`, `unique(job_posting_id)`), substituída a cada regeneração. Candidaturas em inglês exigem um currículo em inglês e uma adaptação em inglês, sem destruir as versões PT-BR.
 

@@ -9,6 +9,7 @@ use App\Models\JobCapture;
 use App\Models\JobPosting;
 use App\Models\User;
 use App\Services\CaptureTokenService;
+use App\Services\JobCaptureService;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -61,6 +62,17 @@ function capturePayload(array $overrides = []): array
     ], $overrides);
 }
 
+/** @param array<string, mixed> $payload @return array{JobCapture, bool} */
+function storeHistoricCapture(array $payload): array
+{
+    $data = $payload;
+    $data['author_name'] = $payload['author']['name'] ?? null;
+    $data['author_profile_url'] = $payload['author']['profile_url'] ?? null;
+    unset($data['author']);
+
+    return app(JobCaptureService::class)->store($data, auth()->user());
+}
+
 it('rejeita sem token e com token errado', function () {
     $this->postJson('/api/job-captures', capturePayload())->assertStatus(401);
 
@@ -81,18 +93,12 @@ it('rejeita quando a credencial não está configurada', function () {
     $this->postJson('/api/job-captures', capturePayload())->assertStatus(401);
 });
 
-it('armazena payload completo com campos mapeados e responde 201', function () {
-    $response = $this->postJson('/api/job-captures', capturePayload(), captureHeaders());
-
-    $response->assertStatus(201)
-        ->assertJson(['duplicate' => false])
-        ->assertJsonPath('capture.dedup_key', 'ext:urn:li:activity:111')
-        ->assertJsonPath('capture.source', 'linkedin')
-        ->assertJsonPath('capture.author_name', 'Maria Silva')
-        ->assertJsonPath('capture.author_profile_url', 'https://www.linkedin.com/in/maria');
-
-    expect($response->json('capture.deleted_at'))->toBeNull()
-        ->and(array_key_exists('deleted_at', $response->json('capture') ?? []))->toBeFalse();
+it('preserva armazenamento e serialização do domínio histórico sem reabrir endpoint', function () {
+    [$stored, $duplicate] = storeHistoricCapture(capturePayload());
+    expect($duplicate)->toBeFalse();
+    expect($stored->dedup_key)->toBe('ext:urn:li:activity:111');
+    expect($stored->source)->toBe('linkedin');
+    expect($stored->toArray())->not->toHaveKey('deleted_at');
 
     $capture = JobCapture::query()->sole();
 
@@ -110,44 +116,39 @@ it('armazena payload completo com campos mapeados e responde 201', function () {
         ->and(JobCapture::onlyTrashed()->count())->toBe(0);
 });
 
-it('deduplica pelo external_id e responde 200 duplicate:true', function () {
-    $this->postJson('/api/job-captures', capturePayload(), captureHeaders())->assertStatus(201);
-
-    $this->postJson('/api/job-captures', capturePayload(), captureHeaders())
-        ->assertStatus(200)
-        ->assertJson(['duplicate' => true]);
+it('preserva deduplicação histórica pelo external_id', function () {
+    expect(storeHistoricCapture(capturePayload())[1])->toBeFalse();
+    expect(storeHistoricCapture(capturePayload())[1])->toBeTrue();
 
     expect(JobCapture::query()->count())->toBe(1);
 });
 
 it('deduplica pela url normalizada ignorando query de tracking', function () {
     $payload = capturePayload(['external_id' => null]);
-    $this->postJson('/api/job-captures', $payload, captureHeaders())->assertStatus(201);
+    expect(storeHistoricCapture($payload)[1])->toBeFalse();
 
-    $this->postJson('/api/job-captures', capturePayload([
+    [, $duplicate] = storeHistoricCapture(capturePayload([
         'external_id' => null,
         'url' => 'https://www.linkedin.com/feed/update/urn:li:activity:111?lipi=outra&trk=tracking',
-    ]), captureHeaders())
-        ->assertStatus(200)
-        ->assertJson(['duplicate' => true]);
+    ]));
+    expect($duplicate)->toBeTrue();
 
     expect(JobCapture::query()->count())->toBe(1);
 });
 
 it('deduplica pelo fingerprint composto quando não há external_id nem url', function () {
     $payload = capturePayload(['external_id' => null, 'url' => null]);
-    $this->postJson('/api/job-captures', $payload, captureHeaders())->assertStatus(201);
+    expect(storeHistoricCapture($payload)[1])->toBeFalse();
 
     // Mesmo post com whitespace/caixa diferentes e captured_at/search_url novos.
-    $this->postJson('/api/job-captures', capturePayload([
+    [, $duplicate] = storeHistoricCapture(capturePayload([
         'external_id' => null,
         'url' => null,
         'description' => '  VAGA   para Desenvolvedor PHP com Laravel e PostgreSQL.  ',
         'captured_at' => '2026-08-19T18:30:00Z',
         'search_url' => 'https://www.linkedin.com/search/results/content/?keywords=outro',
-    ]), captureHeaders())
-        ->assertStatus(200)
-        ->assertJson(['duplicate' => true]);
+    ]));
+    expect($duplicate)->toBeTrue();
 
     expect(JobCapture::query()->count())->toBe(1)
         ->and(JobCapture::query()->sole()->dedup_key)->toStartWith('fingerprint:');
@@ -155,46 +156,45 @@ it('deduplica pelo fingerprint composto quando não há external_id nem url', fu
 
 it('nao deduplica por descricao isolada: campos estaveis diferentes criam duas linhas', function () {
     $payload = capturePayload(['external_id' => null, 'url' => null]);
-    $this->postJson('/api/job-captures', $payload, captureHeaders())->assertStatus(201);
+    expect(storeHistoricCapture($payload)[1])->toBeFalse();
 
-    $this->postJson('/api/job-captures', capturePayload([
+    [, $duplicate] = storeHistoricCapture(capturePayload([
         'external_id' => null,
         'url' => null,
         'company' => 'Acme',
-    ]), captureHeaders())->assertStatus(201);
+    ]));
+    expect($duplicate)->toBeFalse();
 
     expect(JobCapture::query()->count())->toBe(2);
 });
 
-it('tres posts identicos produzem uma linha e respostas 201/200/200', function () {
-    foreach ([201, 200, 200] as $expectedStatus) {
-        $this->postJson('/api/job-captures', capturePayload(), captureHeaders())
-            ->assertStatus($expectedStatus);
+it('tres armazenamentos históricos identicos produzem uma linha e sinalizam replay', function () {
+    foreach ([false, true, true] as $expectedDuplicate) {
+        expect(storeHistoricCapture(capturePayload())[1])->toBe($expectedDuplicate);
     }
 
     expect(JobCapture::query()->count())->toBe(1);
 });
 
 it('mesmo external_id com descricao e url diferentes deixa uma linha', function () {
-    $this->postJson('/api/job-captures', capturePayload(), captureHeaders())->assertStatus(201);
+    expect(storeHistoricCapture(capturePayload())[1])->toBeFalse();
 
-    $this->postJson('/api/job-captures', capturePayload([
+    [, $duplicate] = storeHistoricCapture(capturePayload([
         'url' => 'https://www.linkedin.com/feed/update/outro',
         'description' => 'Texto completamente diferente.',
-    ]), captureHeaders())
-        ->assertStatus(200)
-        ->assertJson(['duplicate' => true]);
+    ]));
+    expect($duplicate)->toBeTrue();
 
     expect(JobCapture::query()->count())->toBe(1);
 });
 
-it('rejeita payload sem source e sem external_id/url/description', function () {
+it('aposenta também payload inválido sem voltar à validação V1', function () {
     $this->postJson('/api/job-captures', [
         'source' => null,
         'external_id' => null,
         'url' => null,
         'description' => null,
-    ], captureHeaders())->assertStatus(422);
+    ], captureHeaders())->assertStatus(410)->assertJsonPath('error', 'legacy_capture_retired');
 });
 
 it('responde ao preflight CORS do LinkedIn', function () {
@@ -348,20 +348,14 @@ it('impede no banco dois registros com mesmo source e external_id', function () 
 
     expect(JobCapture::where('external_id', 'urn:li:activity:777')->count())->toBe(1);
 });
-it('deduplica POST idêntico: 201 depois 200 com mesmo id e uma linha', function () {
+it('preserva identidade histórica no primeiro armazenamento e no replay', function () {
     $payload = capturePayload(['external_id' => 'urn:li:activity:9001', 'url' => null]);
 
-    $first = $this->postJson('/api/job-captures', $payload, captureHeaders())
-        ->assertStatus(201)
-        ->assertJson(['duplicate' => false])
-        ->json('capture.id');
-
-    $second = $this->postJson('/api/job-captures', $payload, captureHeaders())
-        ->assertStatus(200)
-        ->assertJson(['duplicate' => true])
-        ->json('capture.id');
-
-    expect($second)->toBe($first)
+    [$first, $firstDuplicate] = storeHistoricCapture($payload);
+    [$second, $secondDuplicate] = storeHistoricCapture($payload);
+    expect($firstDuplicate)->toBeFalse();
+    expect($secondDuplicate)->toBeTrue();
+    expect($second->id)->toBe($first->id)
         ->and(JobCapture::query()->count())->toBe(1);
 });
 
@@ -369,19 +363,15 @@ it('deduplica cinco envios sequenciais do mesmo payload (e dez)', function () {
     $payload = capturePayload(['external_id' => null, 'url' => null, 'description' => 'Vaga para desenvolvedor PHP com Laravel — stress sequencial.']);
 
     $ids = [];
-    $statuses = [];
     $duplicates = [];
 
     for ($i = 0; $i < 5; $i++) {
-        $response = $this->postJson('/api/job-captures', $payload, captureHeaders());
-        $ids[] = $response->json('capture.id');
-        $statuses[] = $response->status();
-        $duplicates[] = $response->json('duplicate');
+        [$capture, $duplicate] = storeHistoricCapture($payload);
+        $ids[] = $capture->id;
+        $duplicates[] = $duplicate;
     }
 
-    expect($statuses[0])->toBe(201)
-        ->and($duplicates[0])->toBeFalse()
-        ->and(array_slice($statuses, 1))->each->toBe(200)
+    expect($duplicates[0])->toBeFalse()
         ->and(array_slice($duplicates, 1))->each->toBeTrue()
         ->and(array_unique($ids))->toHaveCount(1)
         ->and(JobCapture::query()->count())->toBe(1);
@@ -393,7 +383,7 @@ it('deduplica cinco envios sequenciais do mesmo payload (e dez)', function () {
     JobCapture::query()->delete();
     $ids10 = [];
     for ($i = 0; $i < 10; $i++) {
-        $ids10[] = $this->postJson('/api/job-captures', $payloadExt, captureHeaders())->json('capture.id');
+        $ids10[] = storeHistoricCapture($payloadExt)[0]->id;
     }
     expect(array_unique($ids10))->toHaveCount(1)
         ->and(JobCapture::query()->count())->toBe(1);
@@ -403,8 +393,12 @@ it('não deduplica payloads com identidade fingerprint diferente', function () {
     $a = capturePayload(['external_id' => null, 'url' => null, 'description' => 'Vaga A — desenvolvedor PHP Laravel Senior.']);
     $b = capturePayload(['external_id' => null, 'url' => null, 'description' => 'Vaga B — desenvolvedor Python FastAPI Senior, stack totalmente distinta.']);
 
-    $idA = $this->postJson('/api/job-captures', $a, captureHeaders())->assertStatus(201)->json('capture.id');
-    $idB = $this->postJson('/api/job-captures', $b, captureHeaders())->assertStatus(201)->json('capture.id');
+    [$captureA, $duplicateA] = storeHistoricCapture($a);
+    [$captureB, $duplicateB] = storeHistoricCapture($b);
+    $idA = $captureA->id;
+    $idB = $captureB->id;
+    expect($duplicateA)->toBeFalse();
+    expect($duplicateB)->toBeFalse();
 
     expect($idA)->not->toBe($idB)
         ->and(JobCapture::query()->count())->toBe(2);
@@ -416,8 +410,8 @@ it('não colapsa quando author_profile_url difere mesmo com descrição igual', 
     $a = capturePayload(array_merge($base, ['author' => ['name' => null, 'profile_url' => 'https://www.linkedin.com/in/autor-a']]));
     $b = capturePayload(array_merge($base, ['author' => ['name' => null, 'profile_url' => 'https://www.linkedin.com/in/autor-b']]));
 
-    $this->postJson('/api/job-captures', $a, captureHeaders())->assertStatus(201);
-    $this->postJson('/api/job-captures', $b, captureHeaders())->assertStatus(201);
+    expect(storeHistoricCapture($a)[1])->toBeFalse();
+    expect(storeHistoricCapture($b)[1])->toBeFalse();
 
     expect(JobCapture::query()->count())->toBe(2);
 });
@@ -446,16 +440,11 @@ it('deduplica captura linkedin sem identificadores ignorando author_name voláti
         'author' => ['name' => 'Ver perfil de Joana Luisa Araújo', 'profile_url' => $perfil],
     ]);
 
-    $idPrimeiro = $this->postJson('/api/job-captures', $primeiro, captureHeaders())
-        ->assertStatus(201)
-        ->assertJson(['duplicate' => false])
-        ->json('capture.id');
-
-    $respostaSegundo = $this->postJson('/api/job-captures', $segundo, captureHeaders())
-        ->assertStatus(200)
-        ->assertJson(['duplicate' => true]);
-
-    expect($respostaSegundo->json('capture.id'))->toBe($idPrimeiro)
+    [$primeiraCaptura, $primeiraDuplicada] = storeHistoricCapture($primeiro);
+    [$segundaCaptura, $segundaDuplicada] = storeHistoricCapture($segundo);
+    expect($primeiraDuplicada)->toBeFalse();
+    expect($segundaDuplicada)->toBeTrue();
+    expect($segundaCaptura->id)->toBe($primeiraCaptura->id)
         ->and(JobCapture::query()->count())->toBe(1)
         ->and(JobCapture::query()->sole()->author_profile_url)->toBe($perfil);
 });
@@ -464,8 +453,12 @@ it('deduplica fingerprint sufixo "... mais" ascii também', function () {
     $payloadA = capturePayload(['external_id' => null, 'url' => null, 'description' => 'Vaga Python Sênior — stack idêntica']);
     $payloadB = capturePayload(['external_id' => null, 'url' => null, 'description' => 'Vaga Python Sênior — stack idêntica... mais']);
 
-    $idA = $this->postJson('/api/job-captures', $payloadA, captureHeaders())->assertStatus(201)->json('capture.id');
-    $idB = $this->postJson('/api/job-captures', $payloadB, captureHeaders())->assertStatus(200)->json('capture.id');
+    [$first, $firstDuplicate] = storeHistoricCapture($payloadA);
+    [$second, $secondDuplicate] = storeHistoricCapture($payloadB);
+    $idA = $first->id;
+    $idB = $second->id;
+    expect($firstDuplicate)->toBeFalse();
+    expect($secondDuplicate)->toBeTrue();
 
     expect($idB)->toBe($idA)
         ->and(JobCapture::query()->count())->toBe(1);
@@ -500,11 +493,9 @@ it('compatibilidade histórica: reenvio reconhece linha content: legada sem cria
         'author' => ['name' => null, 'profile_url' => null],
     ]);
 
-    $response = $this->postJson('/api/job-captures', $payload, captureHeaders())
-        ->assertStatus(200)
-        ->assertJson(['duplicate' => true]);
-
-    expect($response->json('capture.id'))->toBe($legada->id)
+    [$stored, $duplicate] = storeHistoricCapture($payload);
+    expect($duplicate)->toBeTrue();
+    expect($stored->id)->toBe($legada->id)
         ->and(JobCapture::query()->count())->toBe(1);
 });
 
@@ -547,12 +538,11 @@ it('prioriza linha promovida na compatibilidade histórica fingerprint', functio
         'author' => ['name' => null, 'profile_url' => $perfil],
     ]);
 
-    $response = $this->postJson('/api/job-captures', $payload, captureHeaders())
-        ->assertStatus(200)
-        ->assertJson(['duplicate' => true]);
+    [$stored, $duplicate] = storeHistoricCapture($payload);
+    expect($duplicate)->toBeTrue();
 
     // Deve retornar a promovida, não a pendente, e não criar nova
-    expect($response->json('capture.id'))->toBe($antigaPromovida->id)
+    expect($stored->id)->toBe($antigaPromovida->id)
         ->and(JobCapture::query()->count())->toBe(2);
 });
 
@@ -561,14 +551,10 @@ it('prioriza linha promovida na compatibilidade histórica fingerprint', functio
 it('deduplica após exclusão por identidade (external_id, url e fingerprint)', function (array $overrides) {
     $payload = capturePayload($overrides);
 
-    $first = $this->postJson('/api/job-captures', $payload, captureHeaders())
-        ->assertStatus(201)
-        ->assertJson(['duplicate' => false]);
-
-    $firstId = $first->json('capture.id');
-
-    expect($first->json('capture.deleted_at'))->toBeNull()
-        ->and(array_key_exists('deleted_at', $first->json('capture') ?? []))->toBeFalse();
+    [$first, $firstDuplicate] = storeHistoricCapture($payload);
+    expect($firstDuplicate)->toBeFalse();
+    $firstId = $first->id;
+    expect($first->toArray())->not->toHaveKey('deleted_at');
 
     expect(JobCapture::query()->count())->toBe(1)
         ->and(JobCapture::withTrashed()->count())->toBe(1)
@@ -585,13 +571,10 @@ it('deduplica após exclusão por identidade (external_id, url e fingerprint)', 
         ->and(JobCapture::onlyTrashed()->sole()->deleted_at)->not->toBeNull()
         ->and(JobCapture::withTrashed()->sole()->id)->toBe($firstId);
 
-    $second = $this->postJson('/api/job-captures', $payload, captureHeaders())
-        ->assertStatus(200)
-        ->assertJson(['duplicate' => true]);
-
-    expect($second->json('capture.id'))->toBe($firstId)
-        ->and($second->json('capture.deleted_at'))->toBeNull()
-        ->and(array_key_exists('deleted_at', $second->json('capture') ?? []))->toBeFalse();
+    [$second, $secondDuplicate] = storeHistoricCapture($payload);
+    expect($secondDuplicate)->toBeTrue();
+    expect($second->id)->toBe($firstId);
+    expect($second->toArray())->not->toHaveKey('deleted_at');
 
     expect(JobCapture::query()->count())->toBe(0)
         ->and(JobCapture::withTrashed()->count())->toBe(1)
@@ -638,13 +621,10 @@ it('compatibilidade histórica soft-deleted content: reenvio reconhece linha leg
         'author' => ['name' => null, 'profile_url' => null],
     ]);
 
-    $response = $this->postJson('/api/job-captures', $payload, captureHeaders())
-        ->assertStatus(200)
-        ->assertJson(['duplicate' => true]);
-
-    expect($response->json('capture.id'))->toBe($legada->id)
-        ->and($response->json('capture.deleted_at'))->toBeNull()
-        ->and(array_key_exists('deleted_at', $response->json('capture') ?? []))->toBeFalse()
+    [$stored, $duplicate] = storeHistoricCapture($payload);
+    expect($duplicate)->toBeTrue();
+    expect($stored->toArray())->not->toHaveKey('deleted_at');
+    expect($stored->id)->toBe($legada->id)
         ->and(JobCapture::query()->count())->toBe(0)
         ->and(JobCapture::withTrashed()->count())->toBe(1)
         ->and(JobCapture::onlyTrashed()->count())->toBe(1);
@@ -654,11 +634,9 @@ it('captura B com identidade diferente após exclusão de A cria nova linha', fu
     $payloadA = capturePayload(['external_id' => 'urn:li:activity:soft-diff-A', 'url' => 'https://www.linkedin.com/feed/update/urn:li:activity:soft-diff-A', 'description' => 'Vaga A soft delete distinta.']);
     $payloadB = capturePayload(['external_id' => 'urn:li:activity:soft-diff-B', 'url' => 'https://www.linkedin.com/feed/update/urn:li:activity:soft-diff-B', 'description' => 'Vaga B soft delete distinta.']);
 
-    $first = $this->postJson('/api/job-captures', $payloadA, captureHeaders())
-        ->assertStatus(201)
-        ->assertJson(['duplicate' => false]);
-
-    $idA = $first->json('capture.id');
+    [$first, $firstDuplicate] = storeHistoricCapture($payloadA);
+    expect($firstDuplicate)->toBeFalse();
+    $idA = $first->id;
 
     $captureA = JobCapture::query()->sole();
 
@@ -669,11 +647,9 @@ it('captura B com identidade diferente após exclusão de A cria nova linha', fu
         ->and(JobCapture::withTrashed()->count())->toBe(1)
         ->and(JobCapture::onlyTrashed()->count())->toBe(1);
 
-    $second = $this->postJson('/api/job-captures', $payloadB, captureHeaders())
-        ->assertStatus(201)
-        ->assertJson(['duplicate' => false]);
-
-    $idB = $second->json('capture.id');
+    [$second, $secondDuplicate] = storeHistoricCapture($payloadB);
+    expect($secondDuplicate)->toBeFalse();
+    $idB = $second->id;
 
     expect($idB)->not->toBe($idA)
         ->and(JobCapture::query()->count())->toBe(1)

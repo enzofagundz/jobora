@@ -3,7 +3,9 @@
 namespace App\Services\Discovery;
 
 use App\Enums\DiscoveryRunStatus;
+use App\Enums\DiscoverySourceSurface;
 use App\Models\DiscoveryRun;
+use App\Models\DiscoverySource;
 use App\Models\PageCapture;
 use App\Models\User;
 use Carbon\CarbonInterface;
@@ -49,6 +51,7 @@ class CaptureIngestionService
 
         try {
             $pageCapture = DB::transaction(function () use ($user, $payload, $capture, $hash, $path, $run, $now): PageCapture {
+                User::query()->whereKey($user->id)->lockForUpdate()->firstOrFail();
                 $pageCapture = PageCapture::create([
                     'user_id' => $user->id,
                     'source' => $capture['source'],
@@ -86,6 +89,9 @@ class CaptureIngestionService
             }
 
             throw new CaptureConflictException('Captura concorrente em conflito.', 0, $exception);
+        } catch (CaptureConflictException $exception) {
+            $this->deleteObject($path);
+            throw $exception;
         }
 
         $this->extractions->requestSafely($pageCapture);
@@ -121,17 +127,22 @@ class CaptureIngestionService
             || $run->expires_at->lessThanOrEqualTo($now)
             || $run->page_capture_id !== null
             || $run->surface !== $capture['surface']
-            || $run->source->source !== $capture['source']
-            || $run->canonical_url_hash !== app(DiscoverySourceUrl::class)->hash((string) $capture['initial_url'])) {
+            || DiscoverySourceSurface::from($run->surface)->platform()->value !== $capture['source']
+            || ($run->surface === DiscoverySourceSurface::LinkedInJobs->value
+                ? ! app(DiscoverySourceUrl::class)->matchesObservation(DiscoverySourceSurface::LinkedInJobs, (string) $capture['initial_url'], $run->initial_url)
+                : $run->canonical_url_hash !== app(DiscoverySourceUrl::class)->hash((string) $capture['initial_url']))) {
             throw new CaptureConflictException('Execução inexistente, expirada, ambígua ou de outro usuário.');
         }
 
         return $run;
     }
 
+    /** @param array{status: string, reason: ?string, blocks_expected: ?int, blocks_captured: int} $coverage */
     private function completeRun(DiscoveryRun $run, PageCapture $pageCapture, array $coverage, CarbonInterface $now): void
     {
+        User::query()->whereKey($run->user_id)->lockForUpdate()->firstOrFail();
         $locked = DiscoveryRun::query()->whereKey($run->id)->lockForUpdate()->first();
+        $source = DiscoverySource::query()->where('user_id', $run->user_id)->whereKey($run->discovery_source_id)->lockForUpdate()->first();
 
         if ($locked === null
             || $locked->status !== DiscoveryRunStatus::Active
@@ -148,10 +159,13 @@ class CaptureIngestionService
             'active_key' => null,
         ])->save();
 
-        $source = $locked->source;
-        $source->forceFill([
-            'next_due_at' => $now->copy()->addMinutes($source->frequency_minutes),
-        ]);
+        if ($source === null || ! $source->active || $source->next_due_at === null || $source->canonical_url_hash !== $locked->canonical_url_hash || $source->surface !== $locked->surface) {
+            return;
+        }
+
+        $empty = $coverage['status'] === 'partial' && $coverage['reason'] === 'no_content' && $coverage['blocks_captured'] === 0;
+        $nextDue = $empty ? $locked->expires_at : $now->copy()->addMinutes($source->frequency_minutes);
+        $source->forceFill(['next_due_at' => $source->next_due_at->max($nextDue)]);
 
         if ($coverage['status'] === 'complete') {
             $source->forceFill(['last_success_at' => $now]);
