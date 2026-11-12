@@ -71,20 +71,17 @@ abstract class DiscoverySourceTool extends JoboraTool
             'work_mode', 'published_within_days', 'easy_apply',
         ];
 
-        if (array_intersect($keys, array_keys($request->all())) === []) {
-            return null;
+        $criteria = [];
+
+        foreach ($keys as $key) {
+            if (! array_key_exists($key, $validated)) {
+                continue;
+            }
+
+            $criteria[$key] = $key === 'easy_apply' ? (bool) $validated[$key] : $validated[$key];
         }
 
-        return [
-            'keywords' => $validated['keywords'] ?? [],
-            'excluded_terms' => $validated['excluded_terms'] ?? [],
-            'operator' => $validated['operator'] ?? null,
-            'seniority' => $validated['seniority'] ?? null,
-            'location' => $validated['location'] ?? null,
-            'work_mode' => $validated['work_mode'] ?? null,
-            'published_within_days' => $validated['published_within_days'] ?? null,
-            'easy_apply' => (bool) ($validated['easy_apply'] ?? false),
-        ];
+        return $criteria === [] ? null : $criteria;
     }
 
     /**
@@ -95,7 +92,7 @@ abstract class DiscoverySourceTool extends JoboraTool
         return [
             'keywords' => $schema->array()->description('Palavras-chave da busca.')->items($schema->string()),
             'excluded_terms' => $schema->array()->description('Termos excluídos.')->items($schema->string()),
-            'operator' => $schema->string()->description('Operador dos termos: all ou any.'),
+            'operator' => $schema->string()->description('Operador dos termos: and ou or (aceita all/any).'),
             'seniority' => $schema->string()->description('Senioridade: internship, junior, mid_level ou senior.'),
             'location' => $schema->string()->description('Localização da busca.'),
             'work_mode' => $schema->string()->description('Modalidade: any, remote, hybrid ou onsite.'),

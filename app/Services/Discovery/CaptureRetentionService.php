@@ -53,6 +53,15 @@ class CaptureRetentionService
         ]);
     }
 
+    private function reportObjectFailure(string $file, string $code, ?string $exception = null): void
+    {
+        Log::warning('Falha ao remover objeto órfão de captura.', [
+            'file' => $file,
+            'code' => $code,
+            'exception' => $exception,
+        ]);
+    }
+
     public function reconcileOrphans(?CarbonInterface $now = null): array
     {
         $now ??= now();
@@ -67,7 +76,18 @@ class CaptureRetentionService
             }
 
             if ($disk->lastModified($file) <= $now->copy()->subDay()->getTimestamp()) {
-                $disk->delete($file);
+                try {
+                    if (! $disk->delete($file)) {
+                        $this->reportObjectFailure($file, 'delete_failed');
+
+                        continue;
+                    }
+                } catch (\Throwable $exception) {
+                    $this->reportObjectFailure($file, 'delete_exception', $exception::class);
+
+                    continue;
+                }
+
                 $deletedObjects++;
             }
         }

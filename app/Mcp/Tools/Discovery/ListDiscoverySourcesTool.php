@@ -32,12 +32,12 @@ class ListDiscoverySourcesTool extends DiscoverySourceTool
             (int) ($validated['offset'] ?? 0),
         );
 
-        return $this->ok([
-            'items' => array_map(fn ($source): array => $this->present($source), $page->items()),
-            'total' => $page->total(),
-            'limit' => $page->perPage(),
-            'offset' => (int) ($validated['offset'] ?? 0),
-        ]);
+        return $this->listed(
+            array_map(fn ($source): array => $this->present($source), $page->items()),
+            $page->total(),
+            $page->perPage(),
+            (int) ($validated['offset'] ?? 0),
+        );
     }
 
     /**

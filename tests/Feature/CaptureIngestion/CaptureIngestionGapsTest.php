@@ -231,3 +231,41 @@ it('returns metadata without raw html through the read tool', function () {
         ->assertDontSee('data-block-id')
         ->assertDontSee('capture-envelopes');
 });
+
+it('returns 422 for an initial url that does not belong to the surface', function () {
+    $user = User::factory()->create();
+
+    gapPost($user, gapEnvelope($user, null, 'bad-url', captureOverrides: [
+        'initial_url' => 'https://example.com/jobs/search/?keywords=PHP',
+    ]))->assertStatus(422);
+});
+
+it('returns 422 when blocks_expected overflows the stored column', function () {
+    $user = User::factory()->create();
+
+    gapPost($user, gapEnvelope($user, null, 'overflow', captureOverrides: [
+        'coverage' => [
+            'status' => 'partial',
+            'reason' => 'cancelled',
+            'blocks_expected' => 4_294_967_296,
+            'blocks_captured' => 1,
+        ],
+    ]))->assertStatus(422);
+});
+
+it('completes the run when its source was soft deleted after the reservation', function () {
+    $user = User::factory()->create();
+    $source = DiscoverySource::factory()->for($user, 'user')->create([
+        'active' => true,
+        'next_due_at' => now()->subMinute(),
+    ]);
+    $run = app(DiscoveryRunService::class)->acquire($user, null, 'run')->first();
+    $payload = gapEnvelope($user, $run, 'deleted-source');
+
+    $source->delete();
+
+    gapPost($user, $payload)->assertStatus(201);
+
+    expect($run->refresh()->status)->toBe(DiscoveryRunStatus::Completed)
+        ->and(PageCapture::query()->count())->toBe(1);
+});

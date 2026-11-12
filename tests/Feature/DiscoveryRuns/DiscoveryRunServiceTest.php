@@ -254,3 +254,93 @@ it('acquires a batch and replays the exact batch without taking new sources', fu
         ->and(DiscoveryRun::query()->count())->toBe(2)
         ->and(DiscoveryRun::query()->where('discovery_source_id', $third->id)->exists())->toBeFalse();
 });
+
+it('returns the requested slice for pending offsets that are not page aligned', function () {
+    $user = User::factory()->create();
+
+    foreach (range(1, 5) as $index) {
+        dueSource($user, ['name' => 'Fonte '.$index, 'next_due_at' => now()->subMinutes(10 - $index)]);
+    }
+
+    $page = runService()->pending($user, 2, 1);
+
+    expect($page->total())->toBe(5)
+        ->and($page->items())->toHaveCount(2)
+        ->and($page->items()[0]->name)->toBe('Fonte 2')
+        ->and($page->items()[1]->name)->toBe('Fonte 3');
+});
+
+it('returns the requested slice for run offsets that are not page aligned', function () {
+    $user = User::factory()->create();
+    dueSource($user);
+    dueSource($user);
+    dueSource($user);
+
+    runService()->acquire($user, null, 'batch', limit: 3);
+
+    $page = runService()->paginateRuns($user, [], 2, 1);
+    $expected = DiscoveryRun::query()->orderByDesc('id')->pluck('id')->all();
+
+    expect($page->total())->toBe(3)
+        ->and($page->items())->toHaveCount(2)
+        ->and($page->items()[0]->id)->toBe($expected[1])
+        ->and($page->items()[1]->id)->toBe($expected[2]);
+});
+
+it('persists the expiry when a stale callback arrives after the deadline', function () {
+    $user = User::factory()->create();
+    dueSource($user);
+    $run = runService()->acquire($user, null, 'idem')->first();
+
+    expect(fn () => runService()->reportAccess($user, $run->execution_id, [
+        'event_key' => 'late',
+        'outcome' => 'failure',
+        'error' => 'tarde',
+    ], $run->expires_at->copy()->addMinute()))->toThrow(DiscoveryRunConflictException::class);
+
+    expect($run->refresh()->status)->toBe(DiscoveryRunStatus::Expired)
+        ->and($run->active_key)->toBeNull();
+});
+
+it('rejects an event key replayed with different error details', function () {
+    $user = User::factory()->create();
+    dueSource($user);
+    $run = runService()->acquire($user, null, 'idem')->first();
+
+    runService()->reportAccess($user, $run->execution_id, [
+        'event_key' => 'failure-1',
+        'outcome' => 'failure',
+        'error' => 'login exigido',
+        'details' => ['step' => 'auth'],
+    ]);
+
+    expect(fn () => runService()->reportAccess($user, $run->execution_id, [
+        'event_key' => 'failure-1',
+        'outcome' => 'failure',
+        'error' => 'captcha exigido',
+        'details' => ['step' => 'auth'],
+    ]))->toThrow(DiscoveryRunConflictException::class);
+});
+
+it('allows the same event key on different runs and users', function () {
+    $owner = User::factory()->create();
+    dueSource($owner);
+    dueSource($owner);
+    $runA = runService()->acquire($owner, null, 'batch', limit: 2)->first();
+    $runB = DiscoveryRun::query()->whereKeyNot($runA->id)->firstOrFail();
+
+    $payload = ['event_key' => 'access-1', 'outcome' => 'failure', 'error' => 'bloqueado'];
+
+    runService()->reportAccess($owner, $runA->execution_id, $payload);
+    runService()->reportAccess($owner, $runB->execution_id, $payload);
+
+    $intruder = User::factory()->create();
+    dueSource($intruder);
+    $runC = runService()->acquire($intruder, null, 'idem')->first();
+
+    runService()->reportAccess($intruder, $runC->execution_id, $payload);
+
+    expect($runA->events()->count())->toBe(1)
+        ->and($runB->events()->count())->toBe(1)
+        ->and($runC->events()->count())->toBe(1);
+});
