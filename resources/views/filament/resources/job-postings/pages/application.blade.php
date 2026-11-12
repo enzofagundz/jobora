@@ -487,6 +487,7 @@
                                                     'approval_expired' => 'expirou',
                                                     'preparation_stale' => 'preparação mudou ou foi substituída',
                                                     'artifacts_unavailable' => 'documentos expiraram ou foram revogados',
+                                                    'ats_permission_revoked' => 'permissão de otimização ATS foi revogada',
                                                     'binding_inactive' => 'vínculo Telegram não está ativo',
                                                     'integration_inactive' => 'integração não está ativa',
                                                     'account_inactive' => 'conta não está ativa',
@@ -537,7 +538,7 @@
                     @if ($this->submissionDetails['events'] ?? [])
                         <ul class="space-y-2 text-sm text-gray-600 dark:text-gray-300">
                             @foreach ($this->submissionDetails['events'] as $event)
-                                <li>{{ match ($event['kind']) { 'reconciled' => 'Reconciliação registrada', 'reported' => 'Resultado informado', 'reservation' => 'Reserva criada', 'consumed' => 'Execução autorizada', default => 'Atualização registrada' } }} · {{ $event['received_at'] }}</li>
+                                <li>{{ match ($event['kind']) { 'reconciled' => 'Reconciliação registrada', 'reported' => 'Resultado informado', 'reserved' => 'Reserva criada', 'expired' => 'Reserva expirada', 'consumed' => 'Execução autorizada', default => 'Atualização registrada' } }} · {{ $event['received_at'] }}</li>
                                 @if ($event['evidence'])
                                     <li class="break-words">Evidência: {{ $event['evidence']['kind'] }}@if ($event['evidence']['reference'] ?? null) · {{ $event['evidence']['reference'] }}@endif @if ($event['evidence']['details'] ?? null) · {{ $event['evidence']['details'] }}@endif</li>
                                 @endif

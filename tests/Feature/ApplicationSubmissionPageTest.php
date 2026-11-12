@@ -3,6 +3,7 @@
 use App\Enums\ResumeLanguage;
 use App\Filament\Resources\JobPostings\Pages\ApplicationPage;
 use App\Mcp\Support\AgentIntegrationContext;
+use App\Models\ApplicationPreparation;
 use App\Models\ApplicationSubmissionAttempt;
 use App\Models\JobPosting;
 use App\Models\ProfessionalProfile;
@@ -214,4 +215,23 @@ it('recovers reconciliation after concurrent revision changes without editing th
         ->call('reconcileSubmission')
         ->assertSet('submissionError', null)
         ->assertSet('submissionSummary.state', 'succeeded');
+});
+
+it('labels reservation and expiry events and revoked ATS permission explicitly', function () {
+    $attempt = submissionPageUnknown($this);
+    submissionPagePanel($this, $this->owner);
+    $reservation = ApplicationSubmissionAttempt::query()->findOrFail($attempt['attempt_id'])->events()->where('kind', 'reserved')->sole();
+    $expiry = $reservation->replicate();
+    $expiry->event_key = 'ui-expired';
+    $expiry->kind = 'expired';
+    $expiry->save();
+    $preparation = ApplicationPreparation::query()->findOrFail($this->prepared['preparation_id']);
+    ApplicationPreparation::withoutEvents(fn () => $preparation->update(['snapshot' => [...$preparation->snapshot, 'ats_consent' => true]]));
+    $this->owner->update(['can_use_ats_optimization' => false]);
+
+    Livewire::test(ApplicationPage::class, ['record' => $this->posting->id])
+        ->assertSee('Reserva criada')
+        ->assertSee('Reserva expirada')
+        ->assertSee('permissão de otimização ATS foi revogada')
+        ->assertDontSee('estado não pode ser validado');
 });
