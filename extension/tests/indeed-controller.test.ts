@@ -267,7 +267,7 @@ describe('indeed controller — integridade observer/SPA', () => {
     }
   });
 
-  it('mantém correlação entre dois painéis modernos substituídos na navegação SPA', async () => {
+  it.each([true, false])('mantém correlação entre painéis modernos com descrição idêntica=%s', async (identicalDescription) => {
     mountList(2);
     const updatePane = (event: Event): void => {
       const target = event.target instanceof Element ? event.target : null;
@@ -276,7 +276,9 @@ describe('indeed controller — integridade observer/SPA', () => {
       document.querySelector('#jobsearch-ViewjobPaneWrapper')?.remove();
       document.body.insertAdjacentHTML('beforeend', readFileSync('tests/fixtures/indeed-job-post-details.html', 'utf8'));
       document.querySelector('[data-testid="vj-job-title"]')!.textContent = `Vaga fictícia ${jk}`;
-      document.querySelector('.simple-job-description-html')!.textContent = `Descrição fictícia exclusiva ${jk}: PHP Laravel.`;
+      document.querySelector('.simple-job-description-html')!.textContent = identicalDescription
+        ? 'Descrição fictícia compartilhada: PHP Laravel.'
+        : `Descrição fictícia exclusiva ${jk}: PHP Laravel.`;
     };
     document.addEventListener('click', updatePane, true);
     let controller: ReturnType<typeof createIndeedController> | undefined;
@@ -295,7 +297,7 @@ describe('indeed controller — integridade observer/SPA', () => {
       captured.innerHTML = message!.envelope.capture.html;
       for (const [jk, other] of [['jk1', 'jk2'], ['jk2', 'jk1']]) {
         const detail = captured.querySelector(`[data-kind="detail"][data-platform-id="${jk}"]`)!;
-        expect(detail.textContent).toContain(`Descrição fictícia exclusiva ${jk}`);
+        expect(detail.textContent).toContain(identicalDescription ? 'Descrição fictícia compartilhada' : `Descrição fictícia exclusiva ${jk}`);
         expect(detail.textContent).toContain(`Vaga fictícia ${jk}`);
         expect(detail.textContent).not.toContain(`exclusiva ${other}`);
       }

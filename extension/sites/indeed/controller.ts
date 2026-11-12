@@ -15,6 +15,7 @@ import {
   isIndeedRoute,
   indeedDescriptionElement,
   indeedPaneMatches,
+  indeedPaneMetadata,
   waitForPane,
 } from './extract';
 import { createIndeedJobsBuilder, jobIdentity } from './envelope';
@@ -125,6 +126,10 @@ export function createIndeedController(): IndeedController {
     const previousDescriptionText = previousPane
       ? indeedDescriptionElement(previousPane)?.textContent.replace(/\s+/g, ' ').trim() ?? null
       : null;
+    const previousPaneSnapshot = previousPane ? {
+      description: indeedDescriptionElement(previousPane),
+      metadata: indeedPaneMetadata(previousPane),
+    } : undefined;
     try {
       (element as HTMLElement).click();
     } catch {
@@ -139,6 +144,7 @@ export function createIndeedController(): IndeedController {
       jk,
       previousVjk,
       previousDescriptionText,
+      previousPaneSnapshot,
     );
     if (!isGenerationActive(generation) || attempt !== current) return;
     if (!paneReady) {
@@ -155,7 +161,7 @@ export function createIndeedController(): IndeedController {
       !raw?.description ||
       !pane ||
       !description ||
-      !indeedPaneMatches(pane, jk, previousVjk, previousDescriptionText)
+      !indeedPaneMatches(pane, jk, previousVjk, previousDescriptionText, previousPaneSnapshot)
     ) {
       current.detailFailure = true;
       session.counters.errors++;

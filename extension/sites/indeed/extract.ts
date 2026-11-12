@@ -20,6 +20,19 @@ export function indeedDescriptionElement(pane: Element): Element | null {
   return heading?.parentElement?.querySelector(':scope > .simple-job-description-html') ?? null;
 }
 
+export function indeedPaneMetadata(pane: Element): string {
+  return JSON.stringify([
+    '[data-testid="jobsearch-JobInfoHeader-title"], [data-testid="vj-job-title"]',
+    '[data-testid="inlineHeader-companyName"], [data-testid="company-info-metadata"] a[role="link"]',
+    '[data-testid="inlineHeader-companyLocation"]',
+  ].map((selector) => pane.querySelector(selector)?.textContent.replace(/\s+/g, ' ').trim() ?? ''));
+}
+
+interface PreviousPane {
+  description: Element | null;
+  metadata: string;
+}
+
 export function isIndeedRoute(url: URL | Location): boolean {
   return url.pathname.startsWith('/jobs');
 }
@@ -41,6 +54,7 @@ export function waitForPane(
   jk: string,
   previousVjk: string | null,
   previousDescriptionText: string | null,
+  previousPane?: PreviousPane,
 ): Promise<boolean> {
   const { promise, resolve } = Promise.withResolvers<boolean>();
   const started = Date.now();
@@ -59,7 +73,7 @@ export function waitForPane(
     if (
       pane &&
       hasDescription &&
-      indeedPaneMatches(pane, jk, previousVjk, previousDescriptionText)
+      indeedPaneMatches(pane, jk, previousVjk, previousDescriptionText, previousPane)
     ) {
       clearInterval(timer);
       resolve(true);
@@ -81,6 +95,7 @@ export function indeedPaneMatches(
   jk: string,
   previousVjk: string | null = null,
   previousDescriptionText: string | null = null,
+  previousPane?: PreviousPane,
 ): boolean {
   const candidates = [pane, ...pane.querySelectorAll('[data-jk]')];
   for (const candidate of candidates) {
@@ -100,7 +115,8 @@ export function indeedPaneMatches(
   const descriptionText = indeedDescriptionElement(pane)?.textContent.replace(/\s+/g, ' ').trim() ?? null;
   return (
     new URLSearchParams(location.search).get('vjk') === jk &&
-    (previousVjk === jk || (descriptionText !== null && descriptionText !== previousDescriptionText))
+    (previousVjk === jk || (descriptionText !== null && descriptionText !== previousDescriptionText) ||
+      (!!previousPane && indeedDescriptionElement(pane) !== previousPane.description && indeedPaneMetadata(pane) !== previousPane.metadata))
   );
 }
 
