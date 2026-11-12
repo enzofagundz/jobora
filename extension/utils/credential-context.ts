@@ -41,7 +41,19 @@ export function createSessionCredentialContextStore(): CredentialContextStore {
       const write = writes.then(async () => {
         const all = await SESSION_CONTEXTS.getValue();
         if (!(id in all) && Object.keys(all).length >= MAX_CONTEXTS) {
-          throw new Error('Capture context capacity reached');
+          for (const [key, binding] of Object.entries(all)) {
+            if (!binding.scopeKey || binding.blocked || key === context.scopeKey) continue;
+            const scope = all[binding.scopeKey];
+            if (!scope || scope.blocked) continue;
+            if (binding.executionId === null && scope.contextId && scope.contextId !== key) {
+              delete all[key];
+            } else if (binding.receipt?.ok && scope.contextId === key && binding.scopeKey !== id && binding.scopeKey !== context.scopeKey) {
+              delete all[key];
+              delete all[binding.scopeKey];
+            }
+            if (Object.keys(all).length < MAX_CONTEXTS) break;
+          }
+          if (Object.keys(all).length >= MAX_CONTEXTS) throw new Error('Capture context capacity reached');
         }
         await SESSION_CONTEXTS.setValue({ ...all, [id]: context });
       });

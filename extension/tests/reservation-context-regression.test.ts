@@ -407,6 +407,33 @@ describe('background reservation authority tied to trusted tab and frame', () =>
     expect((await flow.contexts.get(context))?.executionId).toBe(EXECUTION_ID);
   });
 
+  it('reclaims completed contexts at capacity without losing a live reservation', async () => {
+    const flow = authorityFixture();
+    const live = await authorityContext(flow.handler);
+    const binding = (await flow.contexts.get(live))!;
+    for (let index = 0; index < 49; index++) {
+      const id = `completed-${index}`;
+      const scopeKey = `completed-scope-${index}`;
+      await flow.contexts.put(scopeKey, { ...binding, contextId: id });
+      await flow.contexts.put(id, { ...binding, scopeKey, receipt: { ok: true } });
+    }
+    const manual = await authorityContext(flow.handler, CHANGED_URL, TAB_B);
+    expect(manual).toEqual(expect.any(String));
+    expect((await flow.contexts.get(live))?.executionId).toBe(EXECUTION_ID);
+    expect(await flow.handler({ type: 'capture:submit-envelope', context: live, envelope: authorityEnvelope() }, TAB_A)).toMatchObject({ ok: true });
+  });
+
+  it('reclaims superseded manual contexts across repeated resolves in one tab', async () => {
+    const flow = authorityFixture();
+    let previous: string | undefined;
+    for (let index = 0; index < 120; index++) {
+      const context = await authorityContext(flow.handler, CHANGED_URL);
+      expect(context).not.toBe(previous);
+      previous = context;
+    }
+    expect(await flow.handler({ type: 'capture:submit-envelope', context: previous, envelope: authorityEnvelope(null, CHANGED_URL) }, TAB_A)).toMatchObject({ ok: true });
+  });
+
   it('does not transfer reserved intent to another frame or API scope', async () => {
     const flow = authorityFixture();
     const reserved = await authorityContext(flow.handler);
