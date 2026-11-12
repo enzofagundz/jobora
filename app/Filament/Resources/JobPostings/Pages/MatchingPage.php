@@ -35,6 +35,8 @@ class MatchingPage extends ViewRecord
 
     public ?int $nextHistoryOffset = null;
 
+    public ?int $nextHistoryCursor = null;
+
     #[Locked]
     public ?int $expectedOpportunityVersion = null;
 
@@ -95,12 +97,17 @@ class MatchingPage extends ViewRecord
 
     public function showMoreHistory(): void
     {
-        if ($this->nextHistoryOffset === null) {
+        if ($this->nextHistoryCursor === null) {
             return;
         }
 
-        $this->historyOffset = $this->nextHistoryOffset;
-        $this->reloadEvaluationHistory();
+        $next = app(MatchingService::class)->forOpportunity(auth()->user(), (int) $this->record->getKey(), 10, beforeId: $this->nextHistoryCursor);
+        $items = collect($this->matchingData['history']['items'] ?? [])
+            ->concat($next['history']['items'] ?? [])
+            ->unique('id')->values()->all();
+        $this->matchingData['history']['items'] = $items;
+        $this->nextHistoryOffset = $next['history']['next_offset'];
+        $this->nextHistoryCursor = $next['history']['next_cursor'];
     }
 
     public function retryMatching(AiOperationService $operations, MatchingService $matching): void
@@ -213,6 +220,7 @@ class MatchingPage extends ViewRecord
         );
         $this->activeEvaluation = $this->matchingData['current'] ?? ($this->matchingData['history']['items'][0] ?? null);
         $this->nextHistoryOffset = $this->matchingData['history']['next_offset'];
+        $this->nextHistoryCursor = $this->matchingData['history']['next_cursor'];
     }
 
     private function findLatestOperation(): void
