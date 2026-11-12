@@ -10,7 +10,9 @@ use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
 use Laravel\Mcp\Server\Attributes\Description;
+use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 
+#[IsReadOnly]
 #[Description('Consulta avaliação privada ou resultado atual e histórico paginado da oportunidade. Nunca inicia matching.')]
 class GetMatchingTool extends JoboraTool
 {
