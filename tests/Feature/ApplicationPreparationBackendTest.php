@@ -74,6 +74,8 @@ it('holds an explicitly mandatory letter until generation is requested', functio
     'Envie currículo e carta de apresentação obrigatória.', 'Carta de apresentação requerida.',
     'Obrigatória a carta de apresentação.', 'É requerida uma carta de apresentação.',
     'Cover letter required.', 'Cover letter mandatory.', 'Required cover letter.', 'Mandatory: cover letter.',
+    'Cover letter: required.', 'Cover letter - required.', 'Cover letter (required).',
+    'Carta de apresentação: obrigatória.', 'Carta de apresentação - obrigatória.', 'Carta de apresentação (obrigatória).',
 ]);
 
 it('accepts the structured letter requirement and requires explicit generation consent', function () {
@@ -95,6 +97,7 @@ it('does not infer mandatory letters from negation or unknown instructions', fun
     'Carta de apresentação não obrigatória.', 'Não é obrigatória a carta de apresentação.',
     'Cover letter not required.', 'Cover letter is not mandatory.', 'No cover letter required.',
     'Not required: cover letter.', 'Not a mandatory cover letter.',
+    'Cover letter: not required.', 'Cover letter (not mandatory).', 'Carta de apresentação: não obrigatória.',
     'A cover letter would be nice.', 'Confira as regras no site.',
 ]);
 

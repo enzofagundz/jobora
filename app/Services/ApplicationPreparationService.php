@@ -321,16 +321,17 @@ class ApplicationPreparationService
         $instructions = mb_strtolower(preg_replace('/\s+/u', ' ', $instructions) ?? $instructions);
         $portugueseRequirement = '(?:obrigatória|requerida|exigida)';
         $englishRequirement = '(?:required|mandatory)';
-        $negations = '/(?:carta de apresentação\s+(?:(?:não\s+(?:é|será)\s+)|(?:(?:é|será)\s+)?não\s+)'.$portugueseRequirement
+        $separator = '(?:\s+|\s*[:\-–—(]\s*)';
+        $negations = '/(?:carta de apresentação'.$separator.'(?:(?:não\s+(?:é|será)\s+)|(?:(?:é|será)\s+)?não\s+)'.$portugueseRequirement
             .'|não\s+(?:(?:é|será)\s+)?'.$portugueseRequirement.'\s*[:\-]?\s*(?:(?:a|uma)\s+)?carta de apresentação'
-            .'|cover letter\s+(?:is\s+)?not\s+'.$englishRequirement
+            .'|cover letter'.$separator.'(?:is\s+)?not\s+'.$englishRequirement
             .'|not\s+(?:a\s+)?'.$englishRequirement.'\s*[:\-]?\s*(?:a\s+)?cover letter'
             .'|no\s+cover letter\s+(?:is\s+)?'.$englishRequirement.')/u';
         $instructions = preg_replace($negations, ' ', $instructions) ?? $instructions;
 
-        return preg_match('/(?<![\p{L}\p{M}\p{N}_])(?:carta de apresentação\s+(?:(?:é|será)\s+)?'.$portugueseRequirement
+        return preg_match('/(?<![\p{L}\p{M}\p{N}_])(?:carta de apresentação'.$separator.'(?:(?:é|será)\s+)?'.$portugueseRequirement
             .'|'.$portugueseRequirement.'\s*[:\-]?\s*(?:(?:a|uma)\s+)?carta de apresentação'
-            .'|cover letter\s+(?:is\s+)?'.$englishRequirement
+            .'|cover letter'.$separator.'(?:is\s+)?'.$englishRequirement
             .'|'.$englishRequirement.'\s*[:\-]?\s*(?:a\s+)?cover letter)(?![\p{L}\p{M}\p{N}_])/u', $instructions) === 1;
     }
 
