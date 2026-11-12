@@ -72,7 +72,7 @@ class ProfessionalProfilePage extends Page
     public function mount(ProfessionalProfileService $profiles, ProfileImportService $imports): void
     {
         $this->applyProfile($profiles->get(Auth::user()));
-        $this->refreshProfileImport($imports);
+        $this->refreshProfileImport($imports, $profiles);
     }
 
     public function form(Schema $schema): Schema
@@ -143,7 +143,7 @@ class ProfessionalProfilePage extends Page
         $this->showConfirmation = true;
     }
 
-    public function requestProfileImport(AiOperationService $operations, ProfileImportService $imports): void
+    public function requestProfileImport(AiOperationService $operations, ProfileImportService $imports, ProfessionalProfileService $profiles): void
     {
         if ($this->document() !== $this->persistedDraft) {
             Notification::make()->warning()->title('Salve o rascunho antes de importar')->body('A importação usa o perfil salvo como base. Suas alterações locais continuam no formulário.')->send();
@@ -156,7 +156,7 @@ class ProfessionalProfilePage extends Page
         try {
             $operation = $operations->enqueueProfileImport(Auth::user(), ResumeLanguage::from($this->importLanguage), $this->version, ['source' => 'filament']);
             $this->importOperationId = $operation->id;
-            $this->refreshProfileImport($imports);
+            $this->refreshProfileImport($imports, $profiles);
             Notification::make()->success()->title('Importação solicitada')->body('Atualize o estado para acompanhar a proposta.')->send();
         } catch (ProfessionalProfileConflictException) {
             Notification::make()->danger()->title('Perfil alterado em outra sessão')->body('Recarregue a página antes de solicitar uma nova importação.')->send();
@@ -165,9 +165,10 @@ class ProfessionalProfilePage extends Page
         }
     }
 
-    public function refreshProfileImport(ProfileImportService $imports): void
+    public function refreshProfileImport(ProfileImportService $imports, ProfessionalProfileService $profiles): void
     {
         $user = Auth::user();
+        $this->version = $profiles->get($user)['version'];
         $operation = $this->importOperationId === null
             ? $this->latestImportOperation($user)
             : AiOperation::query()->where('user_id', $user->id)->whereKey($this->importOperationId)
@@ -187,14 +188,16 @@ class ProfessionalProfilePage extends Page
             'status' => $operation->status?->value,
             'attempts' => $operation->attempts,
             'failure_code' => $operation->failure_code,
-            'retry_allowed' => $operation->status?->value === 'failed' && $operation->attempts < 3 && $operation->failure_code !== 'authorization_revoked',
+            'base_version' => $operation->input_snapshot['base_version'] ?? null,
+            'retry_allowed' => $operation->status?->value === 'failed' && $operation->attempts < 3 && $operation->failure_code !== 'authorization_revoked'
+                && ($operation->input_snapshot['base_version'] ?? null) === $this->version,
         ];
         $this->importProposal = $proposal === null ? null : $imports->get($user, (string) $proposal->id);
     }
 
-    public function retryProfileImport(AiOperationService $operations, ProfileImportService $imports): void
+    public function retryProfileImport(AiOperationService $operations, ProfileImportService $imports, ProfessionalProfileService $profiles): void
     {
-        $this->refreshProfileImport($imports);
+        $this->refreshProfileImport($imports, $profiles);
 
         if (! ($this->importOperation['retry_allowed'] ?? false)) {
             return;
@@ -213,16 +216,19 @@ class ProfessionalProfilePage extends Page
         try {
             $operation = $operations->enqueueProfileImport(Auth::user(), $language, $this->version, ['source' => 'filament'], retry: true);
             $this->importOperationId = $operation->id;
-            $this->refreshProfileImport($imports);
+            $this->refreshProfileImport($imports, $profiles);
             Notification::make()->success()->title('Nova tentativa solicitada')->send();
+        } catch (ProfessionalProfileConflictException) {
+            $this->refreshProfileImport($imports, $profiles);
+            Notification::make()->warning()->title('Não foi possível tentar novamente')->body('O perfil mudou. Atualize a página antes de tentar novamente.')->send();
         } catch (LogicException $exception) {
             Notification::make()->warning()->title('Não foi possível tentar novamente')->body($exception->getMessage())->send();
         }
     }
 
-    public function requestImportConfirmation(ProfileImportService $imports): void
+    public function requestImportConfirmation(ProfileImportService $imports, ProfessionalProfileService $profiles): void
     {
-        $this->refreshProfileImport($imports);
+        $this->refreshProfileImport($imports, $profiles);
 
         if (! in_array('confirm', $this->importProposal['allowed_actions'] ?? [], true)) {
             Notification::make()->warning()->title(($this->importProposal['stale'] ?? false) ? 'Esta proposta ficou desatualizada' : 'Proposta indisponível')->body('Solicite uma nova importação para revisar a versão atual do perfil.')->send();
@@ -239,10 +245,10 @@ class ProfessionalProfilePage extends Page
         $this->showImportConfirmation = true;
     }
 
-    public function confirmProfileImport(ProfileImportService $imports): void
+    public function confirmProfileImport(ProfileImportService $imports, ProfessionalProfileService $profiles): void
     {
         $this->showImportConfirmation = false;
-        $this->refreshProfileImport($imports);
+        $this->refreshProfileImport($imports, $profiles);
 
         if (! in_array('confirm', $this->importProposal['allowed_actions'] ?? [], true) || $this->document() !== $this->persistedDraft) {
             $title = ($this->importProposal['stale'] ?? false)
@@ -261,21 +267,26 @@ class ProfessionalProfilePage extends Page
             }
             Notification::make()->success()->title('Proposta confirmada')->send();
         } catch (ProfessionalProfileConflictException) {
-            $this->refreshProfileImport($imports);
+            $this->refreshProfileImport($imports, $profiles);
             Notification::make()->warning()->title('Proposta desatualizada')->body('Atualize a proposta antes de decidir.')->send();
         }
     }
 
-    public function rejectProfileImport(ProfileImportService $imports): void
+    public function rejectProfileImport(ProfileImportService $imports, ProfessionalProfileService $profiles): void
     {
-        $this->refreshProfileImport($imports);
+        $this->refreshProfileImport($imports, $profiles);
 
         if (! in_array('reject', $this->importProposal['allowed_actions'] ?? [], true)) {
             return;
         }
 
-        $this->importProposal = $imports->reject(Auth::user(), $this->importProposal['id'], ['source' => 'filament']);
-        Notification::make()->success()->title('Proposta rejeitada')->send();
+        try {
+            $this->importProposal = $imports->reject(Auth::user(), $this->importProposal['id'], ['source' => 'filament']);
+            Notification::make()->success()->title('Proposta rejeitada')->send();
+        } catch (ProfessionalProfileConflictException) {
+            $this->refreshProfileImport($imports, $profiles);
+            Notification::make()->warning()->title('Proposta desatualizada')->body('Atualize a proposta antes de decidir.')->send();
+        }
     }
 
     private function latestImportOperation(User $user): ?AiOperation
@@ -306,7 +317,7 @@ class ProfessionalProfilePage extends Page
         $data = $this->form->getState();
 
         foreach (['competencies', 'preferences', 'restrictions'] as $field) {
-            $data[$field] = array_values(array_filter(array_column($data[$field] ?? [], 'value')));
+            $data[$field] = array_values(array_filter(array_column($data[$field] ?? [], 'value'), static fn (?string $value): bool => $value !== null && $value !== ''));
         }
 
         return $data;

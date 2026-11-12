@@ -11,7 +11,7 @@ return new class extends Migration
         Schema::create('application_submission_attempts', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('application_id')->index()->constrained();
+            $table->foreignId('application_id')->index()->constrained()->cascadeOnDelete();
             $table->foreignId('integration_id')->index()->constrained('agent_integrations');
             $table->foreignUuid('approval_id')->index()->constrained('application_approvals');
             $table->foreignUuid('preparation_id')->index()->constrained('application_preparations');
@@ -20,7 +20,7 @@ return new class extends Migration
             $table->char('request_hash', 64);
             $table->string('state', 20);
             $table->unsignedInteger('revision')->default(1);
-            $table->foreignId('active_application_id')->nullable()->unique()->constrained('applications');
+            $table->foreignId('active_application_id')->nullable()->unique()->constrained('applications')->cascadeOnDelete();
             $table->foreignUuid('consumed_approval_id')->nullable()->unique()->constrained('application_approvals');
             $table->timestamp('reserved_at', 6);
             $table->timestamp('reservation_expires_at', 6);

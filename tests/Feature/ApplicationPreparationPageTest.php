@@ -20,6 +20,8 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
+use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 use Spatie\LaravelPdf\Facades\Pdf;
 use Spatie\LaravelPdf\FakePdfBuilder;
@@ -240,5 +242,88 @@ it('requires confirmed profile and rejects destination ids from another opportun
         ->set('destinationApplicationMethodId', $foreignMethod->id)
         ->call('prepareApplicationMaterials')
         ->assertNotified('Não foi possível preparar o material');
+    $this->assertDatabaseCount('application_preparations', 0);
+});
+
+it('notifies owners with no profile or an unconfirmed draft before preparation', function (bool $missing) {
+    if ($missing) {
+        $this->owner->professionalProfile()->delete();
+    } else {
+        $this->owner->professionalProfile()->update(['confirmed_version' => 0, 'confirmed_snapshot' => null]);
+    }
+
+    Livewire::test(ApplicationPage::class, ['record' => $this->posting->id])
+        ->set('destinationApplicationMethodId', $this->method->id)
+        ->call('prepareApplicationMaterials')
+        ->assertNotified('Não foi possível preparar o material')
+        ->assertHasNoErrors();
+
+    $this->assertDatabaseCount('application_preparations', 0);
+    $this->assertDatabaseCount('ai_operations', 0);
+})->with([true, false]);
+
+it('renders unavailable artifacts instead of failing on an HTTP deployment', function () {
+    Livewire::test(ApplicationPage::class, ['record' => $this->posting->id])
+        ->set('destinationApplicationMethodId', $this->method->id)
+        ->call('prepareApplicationMaterials')
+        ->assertSet('preparationResult.state', 'awaiting_approval');
+    URL::forceScheme('http');
+    URL::forceRootUrl('http://localhost');
+
+    Livewire::test(ApplicationPage::class, ['record' => $this->posting->id])
+        ->assertSuccessful()
+        ->assertSee('Material congelado')
+        ->assertSee('Artefato indisponível')
+        ->assertDontSee('Baixar currículo adaptado');
+});
+
+it('restores pending question labels from persisted snapshots on mount and polling', function () {
+    Livewire::test(ApplicationPage::class, ['record' => $this->posting->id])
+        ->set('destinationApplicationMethodId', $this->method->id)
+        ->set('preparationData.questions', [[
+            'question' => 'Qual habilidade você usou?', 'answer' => 'Liderei uma equipe por cinco anos.',
+            'support' => [['source' => 'profile', 'path' => 'competencies.0', 'quote' => 'PHP']],
+        ]])
+        ->call('prepareApplicationMaterials')
+        ->assertSet('preparationResult.state', 'pending_information');
+
+    $question = ApplicationPreparation::query()->sole()->snapshot['questions'][0];
+    $page = Livewire::test(ApplicationPage::class, ['record' => $this->posting->id])
+        ->assertSet('preparationQuestionLabels', [$question['id'] => 'Qual habilidade você usou?'])
+        ->assertSee('Qual habilidade você usou?')
+        ->assertDontSee('Pergunta '.$question['id']);
+    $page->set('preparationQuestionLabels', [])
+        ->call('refreshApplicationPreparation')
+        ->assertSet('preparationQuestionLabels', [$question['id'] => 'Qual habilidade você usou?'])
+        ->assertSee('Qual habilidade você usou?');
+});
+
+it('notifies preparation form validation failures without creating materials', function () {
+    Livewire::test(ApplicationPage::class, ['record' => $this->posting->id])
+        ->set('destinationApplicationMethodId', $this->method->id)
+        ->set('preparationData.questions', [[
+            'question' => 'Qual habilidade você usou?', 'answer' => 'PHP',
+            'support' => [['source' => 'profile', 'path' => 'competencies.0', 'quote' => '']],
+        ]])
+        ->call('prepareApplicationMaterials')
+        ->assertNotified('Não foi possível preparar o material');
+
+    $this->assertDatabaseCount('application_preparations', 0);
+    $this->assertDatabaseCount('document_artifacts', 0);
+});
+
+it('notifies validation failures returned by the preparation service', function () {
+    $this->mock(ApplicationPreparationService::class, function ($mock): void {
+        $mock->shouldReceive('prepare')->once()->andThrow(ValidationException::withMessages([
+            'input.questions.0.support.0.source' => 'Origem inválida.',
+        ]));
+    });
+
+    Livewire::test(ApplicationPage::class, ['record' => $this->posting->id])
+        ->set('destinationApplicationMethodId', $this->method->id)
+        ->call('prepareApplicationMaterials')
+        ->assertNotified('Não foi possível preparar o material')
+        ->assertHasNoErrors();
+
     $this->assertDatabaseCount('application_preparations', 0);
 });

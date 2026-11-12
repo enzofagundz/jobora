@@ -142,6 +142,73 @@ it('does not consume when a frozen artifact disappears after reservation', funct
     $this->assertDatabaseHas('application_submission_attempts', ['id' => $reserved['attempt_id'], 'consumed_at' => null, 'revision' => 1]);
 });
 
+it('bounds approval history pages and validates pagination inputs', function () {
+    approvalLink($this);
+    for ($message = 2; $message <= 4; $message++) {
+        expect(approvalCall($this, 'record_application_approval', [...$this->approvalInput, 'message_id' => (string) $message])['ok'])->toBeTrue();
+    }
+    $input = ['preparation_id' => $this->prepared['preparation_id'], 'limit' => 2];
+    $first = approvalCall($this, 'get_application_approval', $input)['data'];
+    expect($first)->toMatchArray(['total' => 3, 'limit' => 2, 'offset' => 0, 'next_offset' => 2]);
+    expect($first['approvals'])->toHaveCount(2);
+    $second = approvalCall($this, 'get_application_approval', [...$input, 'offset' => 2])['data'];
+    expect($second['approvals'])->toHaveCount(1);
+    expect($second['next_offset'])->toBeNull();
+    expect(array_intersect(array_column($first['approvals'], 'id'), array_column($second['approvals'], 'id')))->toBe([]);
+    foreach ([['limit' => 0], ['limit' => 101], ['offset' => -1]] as $invalid) {
+        expect(approvalCall($this, 'get_application_approval', [...$input, ...$invalid])['error']['code'])->toBe('validation');
+    }
+});
+
+it('batches approval validation queries within each history read only', function () {
+    approvalLink($this);
+    $ids = [];
+    for ($message = 2; $message <= 7; $message++) {
+        $result = approvalCall($this, 'record_application_approval', [...$this->approvalInput, 'message_id' => (string) $message]);
+        expect($result['ok'])->toBeTrue();
+        $ids[] = $result['data']['id'];
+    }
+    ApplicationApproval::query()->findOrFail($ids[5])->update(['revoked_at' => now()]);
+    approvalPanel($this);
+    $service = app(ApplicationApprovalService::class);
+    $counts = [];
+    foreach ([1, 6] as $limit) {
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+        try {
+            $page = $service->forPreparation($this->owner, $this->prepared['preparation_id'], $limit);
+            $counts[] = count(DB::getQueryLog());
+        } finally {
+            DB::disableQueryLog();
+            DB::flushQueryLog();
+        }
+        expect($page['approvals'])->toHaveCount($limit);
+    }
+    expect($counts[1])->toBe($counts[0]);
+    expect(array_column($page['approvals'], 'status'))->toContain('active', 'revoked');
+
+    $this->resume->update(['content' => 'Changed resume']);
+    $this->integration->update(['revoked_at' => now()]);
+    $freshPage = $service->forPreparation($this->owner, $this->prepared['preparation_id'], 6);
+    foreach ($freshPage['approvals'] as $approval) {
+        expect($approval['reasons'])->toContain('preparation_stale', 'integration_inactive');
+    }
+    expect($service->invalidReasons($this->owner, ApplicationApproval::query()->findOrFail($ids[0])))
+        ->toContain('preparation_stale', 'integration_inactive');
+});
+
+it('replays approval timestamps expressed with equivalent timezone offsets', function () {
+    approvalLink($this);
+    $first = approvalCall($this, 'record_application_approval', $this->approvalInput);
+    expect($first['ok'])->toBeTrue();
+    foreach (['approved_at', 'expires_at'] as $field) {
+        $this->approvalInput[$field] = CarbonImmutable::parse($this->approvalInput[$field])
+            ->setTimezone('America/Sao_Paulo')->format('Y-m-d\TH:i:s.uP');
+    }
+    expect(approvalCall($this, 'record_application_approval', $this->approvalInput)['data'])->toBe($first['data']);
+    $this->assertDatabaseCount('application_approvals', 1);
+});
+
 function submissionReserved(object $test): array
 {
     $test->integration->update(['scopes' => ['approvals:write', 'applications:submit', 'applications:read', 'applications:write']]);

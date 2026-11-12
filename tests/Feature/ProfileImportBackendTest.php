@@ -5,6 +5,7 @@ use App\Models\AiOperation;
 use App\Models\ProfileImportProposal;
 use App\Models\Resume;
 use App\Models\User;
+use App\Services\AiOperationService;
 use App\Services\ProfessionalProfileService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
@@ -73,6 +74,51 @@ function importProposal(object $test, string $language = 'pt-BR'): array
 
     return importCall($test, 'get_ai_operation', ['id' => $request['data']['operation_id']])['data'];
 }
+
+it('round trips proposal ciphertext larger than mysql text capacity through its upgrade', function () {
+    $id = importProposal($this)['profile_import_proposal_id'];
+    $proposal = ProfileImportProposal::findOrFail($id);
+    $payload = ['content' => str_repeat('Perfil profissional ', 6000)];
+    $columns = ['source', 'base_document', 'candidate', 'evidence', 'decision_result'];
+    $proposal->forceFill(array_fill_keys($columns, $payload))->save();
+    (require database_path('migrations/2026_11_11_190012_widen_profile_import_proposal_payloads.php'))->up();
+    $proposal->refresh();
+
+    foreach ($columns as $column) {
+        expect($proposal->$column)->toBe($payload)
+            ->and(strlen($proposal->getRawOriginal($column)))->toBeGreaterThan(65535);
+    }
+});
+
+it('persists exactly one terminal notification for an invalid profile import', function () {
+    $request = importCall($this, 'request_profile_import', ['expected_version' => 2]);
+    importProvider('invalid');
+    importWork();
+    $operation = AiOperation::findOrFail($request['data']['operation_id']);
+
+    expect($operation->notified_at)->not->toBeNull()
+        ->and($this->owner->notifications()->count())->toBe(1)
+        ->and($this->owner->notifications()->sole()->data['title'])->toBe('Falha na importação do currículo');
+
+    $attemptToken = $operation->attempt_token;
+    app(AiOperationService::class)->process($operation->id, $operation->run_token, $attemptToken);
+    expect($this->owner->notifications()->count())->toBe(1);
+    Http::assertSentCount(1);
+});
+
+it('disallows retry when the profile version changes or its matching profile disappears', function () {
+    $request = importCall($this, 'request_profile_import', ['expected_version' => 2]);
+    importProvider('invalid');
+    importWork();
+    $arguments = ['id' => $request['data']['operation_id']];
+    expect(importCall($this, 'get_ai_operation', $arguments)['data']['retry_allowed'])->toBeTrue();
+
+    app(ProfessionalProfileService::class)->saveDraft($this->owner, $this->base['draft'], 2);
+    expect(importCall($this, 'get_ai_operation', $arguments)['data']['retry_allowed'])->toBeFalse();
+
+    $this->owner->professionalProfile()->delete();
+    expect(importCall($this, 'get_ai_operation', $arguments)['data']['retry_allowed'])->toBeFalse();
+});
 
 it('extracts visible legacy HTML text and retains the raw source fingerprint', function () {
     $raw = '<p class="PHP">R&amp;D</p>';
@@ -269,6 +315,17 @@ it('rejects once without changing any professional data and denies the opposite 
         ->and(app(ProfessionalProfileService::class)->get($this->owner))->toEqual($this->base);
 });
 
+it('does not mark decided proposals stale after profile changes', function (string $decision) {
+    $id = importProposal($this)['profile_import_proposal_id'];
+    importCall($this, $decision.'_profile_import', ['id' => $id, ...($decision === 'confirm' ? ['expected_version' => 2, 'confirm' => true] : [])]);
+    $service = app(ProfessionalProfileService::class);
+    $state = $service->get($this->owner);
+    $service->saveDraft($this->owner, $state['draft'], $state['version']);
+    $proposal = importCall($this, 'get_profile_import', ['id' => $id])['data'];
+
+    expect($proposal['stale'])->toBeFalse()->and($proposal['allowed_actions'])->toBe([]);
+})->with(['confirm', 'reject']);
+
 it('requires a fresh proposal after a draft or preference edit without automatic rebase', function (bool $preferences) {
     $id = importProposal($this)['profile_import_proposal_id'];
     $service = app(ProfessionalProfileService::class);
@@ -385,10 +442,12 @@ it('bounds explicit retries while reusing the original encrypted snapshot and fe
     importProvider('invalid');
     importWork();
     $this->resume->update(['content' => 'Changed after failed extraction']);
+    importWork();
     for ($attempt = 2; $attempt <= 3; $attempt++) {
         $request = importCall($this, 'request_profile_import', ['expected_version' => 2, 'retry' => true]);
         expect($request['data']['operation_id'] ?? null)->toBe($operation->id);
         expect($operation->refresh()->input_snapshot)->toBe($originalSnapshot);
+        importWork();
         importWork();
     }
     expect($operation->refresh()->attempts)->toBe(3)

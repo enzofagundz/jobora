@@ -331,6 +331,19 @@ class ApplicationPage extends Page implements HasTable
         }
 
         $profile = app(ProfessionalProfileService::class)->get($user);
+        if (($profile['confirmed_snapshot'] ?? null) === null || (int) ($profile['confirmed_version'] ?? 0) < 1) {
+            Notification::make()->danger()->title('Não foi possível preparar o material')->body('Confirme seu perfil antes de preparar o material.')->send();
+
+            return;
+        }
+        try {
+            $questions = $this->preparationQuestions();
+        } catch (ValidationException) {
+            Notification::make()->danger()->title('Não foi possível preparar o material')->body('Revise as perguntas e os trechos de apoio.')->send();
+
+            return;
+        }
+
         $input = [
             'job_posting_id' => $posting->id,
             'expected_profile_confirmed_version' => $profile['confirmed_version'],
@@ -339,7 +352,7 @@ class ApplicationPage extends Page implements HasTable
             'cover_letter_requested' => $this->preparationCoverLetterRequested,
             'translate_missing' => $language === ResumeLanguage::En && $this->preparationTranslateMissing,
             'ats_consent' => $this->preparationAtsConsent,
-            'questions' => $this->preparationQuestions(),
+            'questions' => $questions,
         ];
 
         if ($posting->isStructuredOpportunity()) {
@@ -355,7 +368,7 @@ class ApplicationPage extends Page implements HasTable
                 default => Notification::make()->success()->title('Material preparado'),
             };
             $notification->send();
-        } catch (AuthorizationException|LogicException|ModelNotFoundException) {
+        } catch (AuthorizationException|LogicException|ModelNotFoundException|ValidationException) {
             Notification::make()->danger()->title('Não foi possível preparar o material')->body('Confira se perfil, vaga e destino ainda estão válidos.')->send();
         }
     }
@@ -390,6 +403,10 @@ class ApplicationPage extends Page implements HasTable
         }
 
         $operationIds = array_values(array_filter($this->preparationResult['operation_ids'] ?? [], 'is_int'));
+        $this->preparationQuestionLabels = collect($this->preparationResult['snapshot']['questions'] ?? [])
+            ->filter(fn (array $question): bool => filled($question['id'] ?? null) && filled($question['question'] ?? null))
+            ->mapWithKeys(fn (array $question): array => [$question['id'] => $question['question']])
+            ->all();
         $this->preparationOperations = AiOperation::query()->where('user_id', $user->id)->whereKey($operationIds)->get()
             ->filter(fn (AiOperation $operation): bool => $operation->operation_type === AiOperationType::ResumeTranslation
                 ? $operation->target_type === 'user' && (int) $operation->target_id === $user->id
@@ -519,7 +536,7 @@ class ApplicationPage extends Page implements HasTable
             }
 
             return $documents->deliver(auth()->user(), $artifact, session: true)['download_url'];
-        } catch (ModelNotFoundException) {
+        } catch (ModelNotFoundException|LogicException) {
             return null;
         } catch (HttpExceptionInterface $exception) {
             if (in_array($exception->getStatusCode(), [403, 410], true)) {
@@ -666,12 +683,21 @@ class ApplicationPage extends Page implements HasTable
         $this->submissionDetails = null;
 
         if ($this->submissionSummary === null) {
+            $this->reconciliationRequest = null;
+
             return;
         }
 
         try {
             $this->submissionDetails = $submissions->get(auth()->user(), $this->submissionSummary['attempt_id']);
         } catch (AuthorizationException) {
+        }
+
+        if ($this->reconciliationRequest !== null
+            && ($this->reconciliationRequest['attempt_id'] !== (string) $this->submissionSummary['attempt_id']
+                || ($this->reconciliationRequest['accepted_revision'] ?? $this->reconciliationRequest['expected_revision']) !== (int) $this->submissionSummary['revision'])) {
+            $this->reconciliationRequest = null;
+            $this->reconciliationEventKey = (string) Str::uuid();
         }
 
         if ($this->reconciliationEventKey === null) {
@@ -735,9 +761,16 @@ class ApplicationPage extends Page implements HasTable
             ]);
             $this->submissionError = null;
             $this->refreshSubmissionStatus($submissions);
+            if ($request['form']['outcome'] === 'unknown' && $this->submissionSummary !== null) {
+                $request['accepted_revision'] = (int) $this->submissionSummary['revision'];
+                $this->reconciliationRequest = $request;
+                $this->reconciliationEventKey = $request['event_key'];
+            }
         } catch (AuthorizationException|ModelNotFoundException) {
             $this->submissionError = 'Não foi possível reconciliar esta tentativa.';
         } catch (ValidationException|ToolException) {
+            $this->reconciliationRequest = null;
+            $this->reconciliationEventKey = (string) Str::uuid();
             $this->submissionError = 'O estado mudou ou as evidências não permitem resolver a tentativa. Atualize o estado.';
         }
     }

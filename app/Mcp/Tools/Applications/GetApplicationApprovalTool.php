@@ -18,13 +18,16 @@ class GetApplicationApprovalTool extends JoboraTool
 {
     protected function execute(Request $request): Response|ResponseFactory
     {
-        $input = Validator::validate(['input' => $request->all()], ['input' => ['required', 'array:preparation_id'], 'input.preparation_id' => ['required', 'uuid']])['input'];
+        $input = Validator::validate(['input' => $request->all()], [
+            'input' => ['required', 'array:preparation_id,limit,offset'], 'input.preparation_id' => ['required', 'uuid'],
+            'input.limit' => ['sometimes', 'integer', 'min:1', 'max:100'], 'input.offset' => ['sometimes', 'integer', 'min:0'],
+        ])['input'];
 
-        return $this->ok(app(ApplicationApprovalService::class)->forPreparation($this->user(), $input['preparation_id']));
+        return $this->ok(app(ApplicationApprovalService::class)->forPreparation($this->user(), $input['preparation_id'], $input['limit'] ?? 20, $input['offset'] ?? 0));
     }
 
     public function schema(JsonSchema $schema): array
     {
-        return ['preparation_id' => $schema->string()->required()];
+        return ['preparation_id' => $schema->string()->required(), 'limit' => $schema->integer(), 'offset' => $schema->integer()];
     }
 }

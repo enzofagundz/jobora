@@ -12,9 +12,9 @@ return new class extends Migration
             $table->id();
             $table->foreignId('user_id')->unique()->constrained()->cascadeOnDelete();
             $table->unsignedInteger('version')->default(0);
-            $table->text('draft');
+            $table->longText('draft');
             $table->unsignedInteger('confirmed_version')->default(0);
-            $table->text('confirmed_snapshot')->nullable();
+            $table->longText('confirmed_snapshot')->nullable();
             $table->timestamp('confirmed_at')->nullable();
             $table->text('confirmed_actor')->nullable();
             $table->timestamps();

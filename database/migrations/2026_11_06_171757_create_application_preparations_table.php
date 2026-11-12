@@ -15,7 +15,7 @@ return new class extends Migration
             $table->string('language', 5);
             $table->string('schema_version');
             $table->string('state');
-            $table->text('snapshot');
+            $table->longText('snapshot');
             $table->text('pending');
             $table->text('source_versions');
             $table->char('source_hash', 64);

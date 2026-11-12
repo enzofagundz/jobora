@@ -13,6 +13,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Livewire;
 
@@ -248,4 +249,69 @@ it('renders four criterion states, missing source warning and escaped free expla
         ->assertSee('Perfil confirmado v4')
         ->assertSee('Proveniência incompleta')
         ->assertDontSeeHtml('<b>Justificativa livre</b>');
+});
+
+function matchingUiHistory(object $test, int $count): array
+{
+    $case = matchingUiCases()[0];
+    matchingUiSetup($test, $case);
+    Livewire::test(MatchingPage::class, ['record' => $test->posting->id])->call('requestMatching');
+    matchingUiFakeProvider($case);
+    matchingUiRunWorker();
+    $evaluation = MatchingEvaluation::query()->sole();
+    for ($index = 1; $index < $count; $index++) {
+        $copy = $evaluation->replicate();
+        $copy->input_fingerprint = hash('sha256', 'history-'.$index);
+        $copy->attempt_token = (string) Str::uuid();
+        $copy->save();
+    }
+
+    return MatchingEvaluation::query()->latest('id')->pluck('id')->all();
+}
+
+it('appends earlier evaluations without losing displayed history', function () {
+    $ids = matchingUiHistory($this, 23);
+    $page = Livewire::test(MatchingPage::class, ['record' => $this->posting->id]);
+    expect(array_column($page->get('matchingData.history.items'), 'id'))->toBe(array_slice($ids, 0, 10));
+
+    $page->call('showMoreHistory');
+    expect(array_column($page->get('matchingData.history.items'), 'id'))->toBe(array_slice($ids, 0, 20));
+    $page->call('showMoreHistory')->assertSet('nextHistoryCursor', null);
+    expect(array_column($page->get('matchingData.history.items'), 'id'))->toBe($ids);
+    $page->call('showMoreHistory');
+    expect(array_column($page->get('matchingData.history.items'), 'id'))->toBe($ids);
+});
+
+it('disables requesting terminal operations and reports their actual state', function (string $status) {
+    matchingUiSetup($this, matchingUiCases()[0]);
+    $operation = app(AiOperationService::class)->enqueueMatching(
+        $this->owner, $this->posting->id, 3, 4, 'matching-v1', ['source' => 'filament'],
+    );
+    $operation->update(['status' => $status, 'completed_at' => now()]);
+    $page = Livewire::test(MatchingPage::class, ['record' => $this->posting->id]);
+    $html = $page->html();
+    preg_match('/<button\b[^>]*wire:click="requestMatching"[^>]*>/s', $html, $button);
+    expect($button[0] ?? '')->toContain('disabled');
+
+    $page->call('requestMatching')->assertNotified('Avaliação já finalizada');
+    $this->assertDatabaseCount('ai_operations', 1);
+    Http::assertNothingSent();
+})->with(['completed', 'failed']);
+
+it('keeps history cursor stable across new evaluations and stops at an exact page boundary', function () {
+    $ids = matchingUiHistory($this, 20);
+    $page = Livewire::test(MatchingPage::class, ['record' => $this->posting->id]);
+    $newEvaluation = MatchingEvaluation::query()->first()->replicate();
+    $newEvaluation->input_fingerprint = hash('sha256', 'concurrent-history');
+    $newEvaluation->attempt_token = (string) Str::uuid();
+    $newEvaluation->save();
+
+    $page->call('showMoreHistory')
+        ->assertSet('nextHistoryCursor', null)
+        ->assertDontSee('Carregar avaliações anteriores');
+    expect(array_column($page->get('matchingData.history.items'), 'id'))->toBe($ids);
+
+    $offsetPage = app(MatchingService::class)->forOpportunity($this->owner, $this->posting->id, 10, 10);
+    expect(array_column($offsetPage['history']['items'], 'id'))->toBe(array_slice([$newEvaluation->id, ...$ids], 10, 10))
+        ->and($offsetPage['history']['next_offset'])->toBe(20);
 });

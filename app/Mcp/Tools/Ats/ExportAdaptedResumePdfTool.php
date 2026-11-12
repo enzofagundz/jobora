@@ -50,10 +50,10 @@ class ExportAdaptedResumePdfTool extends JoboraTool
         if ($artifact->requires_ats_authorization && ! ($input['ats_consent'] ?? false)) {
             throw ToolException::precondition('Confirme ats_consent=true para exportar o snapshot otimizado.');
         }
+        if ($artifact->revoked_at !== null || $artifact->expires_at->lte(now()) || ! Storage::disk('local')->exists($artifact->path)) {
+            throw ToolException::precondition('O artefato expirou, foi revogado ou não está disponível. Prepare uma nova versão.');
+        }
         if (app()->bound(AgentIntegrationContext::class)) {
-            if ($artifact->revoked_at !== null || $artifact->expires_at->lte(now())) {
-                throw ToolException::precondition('O artefato expirou ou foi revogado. Prepare uma nova versão.');
-            }
 
             return $this->ok($artifacts->deliver($user, $artifact));
         }

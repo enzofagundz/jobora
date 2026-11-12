@@ -65,6 +65,9 @@ final class ApplicationTrackingService
         ?string $eventKey = null,
     ): ApplicationEvent {
         Validator::validate(['event_key' => $eventKey], ['event_key' => ['nullable', 'string', 'min:1', 'max:128']]);
+        $title = filled($title) ? mb_substr(trim($title), 0, 255) : $status->getLabel();
+        $notes = filled($notes) ? trim($notes) : null;
+        $contact = filled($contact) ? mb_substr(trim($contact), 0, 255) : null;
         $requestHash = $eventKey === null ? null : hash('sha256', json_encode([
             $status->value, $title, $notes, $contact, $occurredAt?->toISOString(),
         ], JSON_THROW_ON_ERROR));
@@ -85,12 +88,6 @@ final class ApplicationTrackingService
                     return $existing;
                 }
             }
-
-            $title = filled($title)
-                ? mb_substr(trim($title), 0, 255)
-                : $status->getLabel();
-            $notes = filled($notes) ? trim($notes) : null;
-            $contact = filled($contact) ? mb_substr(trim($contact), 0, 255) : null;
 
             $application->update([
                 'status' => $status,

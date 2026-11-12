@@ -12,7 +12,9 @@ use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
 use Laravel\Mcp\ResponseFactory;
 use Laravel\Mcp\Server\Attributes\Description;
+use Laravel\Mcp\Server\Tools\Annotations\IsOpenWorld;
 
+#[IsOpenWorld]
 #[Description('Solicita uma proposta revisável de perfil a partir de um snapshot do currículo. Não altera o perfil.')]
 class RequestProfileImportTool extends JoboraTool
 {

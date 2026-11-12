@@ -165,8 +165,8 @@ class MatchingService
         }
     }
 
-    /** @return array{opportunity_id: int, current: ?array, history: array{items: array, total: int, limit: int, offset: int, next_offset: ?int}} */
-    public function forOpportunity(User $user, int $opportunityId, int $limit = 20, int $offset = 0): array
+    /** @return array{opportunity_id: int, current: ?array, history: array{items: array, total: int, limit: int, offset: int, next_offset: ?int, next_cursor: ?int}} */
+    public function forOpportunity(User $user, int $opportunityId, int $limit = 20, int $offset = 0, ?int $beforeId = null): array
     {
         JobPosting::query()->where('user_id', $user->id)->findOrFail($opportunityId);
         $limit = max(1, min(100, $limit));
@@ -175,10 +175,14 @@ class MatchingService
         $query = MatchingEvaluation::query()->where('user_id', $user->id)->where('job_posting_id', $opportunityId);
         $total = (clone $query)->count();
         $current = $fingerprint === null ? null : (clone $query)->where('input_fingerprint', $fingerprint)->first();
-        $items = $query->latest('id')->offset($offset)->limit($limit)->get()->map(fn (MatchingEvaluation $evaluation): array => $this->present($evaluation, $fingerprint))->all();
+        $pageQuery = (clone $query)->when($beforeId !== null, fn ($builder) => $builder->where('id', '<', $beforeId))->latest('id')->offset($beforeId === null ? $offset : 0)->limit($limit + 1);
+        $rows = $pageQuery->get();
+        $page = $rows->take($limit);
+        $items = $page->map(fn (MatchingEvaluation $evaluation): array => $this->present($evaluation, $fingerprint))->all();
+        $nextCursor = $rows->count() > $limit ? (int) $page->last()->id : null;
 
         return ['opportunity_id' => $opportunityId, 'current' => $current === null ? null : $this->present($current, $fingerprint), 'history' => [
-            'items' => $items, 'total' => $total, 'limit' => $limit, 'offset' => $offset, 'next_offset' => $offset + $limit < $total ? $offset + $limit : null,
+            'items' => $items, 'total' => $total, 'limit' => $limit, 'offset' => $offset, 'next_offset' => $offset + $limit < $total ? $offset + $limit : null, 'next_cursor' => $nextCursor,
         ]];
     }
 

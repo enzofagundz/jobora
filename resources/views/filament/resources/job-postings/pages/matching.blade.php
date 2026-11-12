@@ -30,7 +30,7 @@
                     <x-filament::button
                         wire:click="requestMatching"
                         icon="heroicon-o-sparkles"
-                        :disabled="! $canRequest || ($operationState['status'] ?? null) === 'queued' || ($operationState['status'] ?? null) === 'running'"
+                        :disabled="! $canRequest || in_array($operationState['status'] ?? null, ['queued', 'running', 'completed', 'failed'], true)"
                     >Solicitar avaliação</x-filament::button>
                     <x-filament::button color="gray" wire:click="refreshMatching" icon="heroicon-o-arrow-path">Atualizar estado</x-filament::button>
                     <x-filament::link :href="\App\Filament\Resources\JobPostings\Pages\ViewJobPosting::getUrl(['record' => $this->record])">
@@ -161,7 +161,7 @@
                             </div>
                         </details>
                     @endforeach
-                    @if ($nextHistoryOffset !== null)
+                    @if ($nextHistoryCursor !== null)
                         <x-filament::button color="gray" wire:click="showMoreHistory">Carregar avaliações anteriores</x-filament::button>
                     @endif
                 </div>

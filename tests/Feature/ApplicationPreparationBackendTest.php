@@ -74,6 +74,8 @@ it('holds an explicitly mandatory letter until generation is requested', functio
     'Envie currículo e carta de apresentação obrigatória.', 'Carta de apresentação requerida.',
     'Obrigatória a carta de apresentação.', 'É requerida uma carta de apresentação.',
     'Cover letter required.', 'Cover letter mandatory.', 'Required cover letter.', 'Mandatory: cover letter.',
+    'Cover letter: required.', 'Cover letter - required.', 'Cover letter (required).',
+    'Carta de apresentação: obrigatória.', 'Carta de apresentação - obrigatória.', 'Carta de apresentação (obrigatória).',
 ]);
 
 it('accepts the structured letter requirement and requires explicit generation consent', function () {
@@ -95,6 +97,7 @@ it('does not infer mandatory letters from negation or unknown instructions', fun
     'Carta de apresentação não obrigatória.', 'Não é obrigatória a carta de apresentação.',
     'Cover letter not required.', 'Cover letter is not mandatory.', 'No cover letter required.',
     'Not required: cover letter.', 'Not a mandatory cover letter.',
+    'Cover letter: not required.', 'Cover letter (not mandatory).', 'Carta de apresentação: não obrigatória.',
     'A cover letter would be nice.', 'Confira as regras no site.',
 ]);
 
@@ -151,6 +154,22 @@ beforeEach(function () {
         'expected_profile_confirmed_version' => 2, 'destination' => ['type' => 'email', 'email' => 'jobs@example.com'],
     ];
 });
+
+it('discloses frozen personal data only under its corresponding read scope', function (?string $scope) {
+    $prepared = preparationCall($this, 'prepare_application', [...$this->input, 'cover_letter_requested' => true, 'questions' => [
+        ['id' => 'skill', 'question' => 'Skill?', 'answer' => 'PHP', 'support' => [['source' => 'profile', 'path' => 'competencies.0', 'quote' => 'PHP']]],
+    ]])['data'];
+    $this->integration->update(['scopes' => array_filter(['applications:read', $scope])]);
+    $result = preparationCall($this, 'get_application_preparation', ['id' => $prepared['preparation_id']]);
+    expect($result['ok'])->toBeTrue();
+    $snapshot = $result['data']['snapshot'];
+    expect(array_key_exists('resume', $snapshot))->toBe($scope === 'resume:read');
+    expect(array_key_exists('cover_letter', $snapshot))->toBe($scope === 'resume:read');
+    expect(array_key_exists('profile', $snapshot))->toBe($scope === 'profile:read');
+    expect(array_key_exists('adaptation', $snapshot))->toBe($scope === 'ats:read');
+    expect($snapshot['questions'][0]['answer'])->toBe($scope === 'profile:read' ? 'PHP' : null);
+    expect($snapshot)->not->toHaveKey('sources');
+})->with([null, 'resume:read', 'profile:read', 'ats:read']);
 
 it('accepts legacy confirmed opportunities and does not require legacy version', function () {
     $this->posting->update(['readiness' => null, 'status' => 'confirmed']);
@@ -383,7 +402,7 @@ it('delivers independent current artifacts and authenticated session links', fun
     app()->forgetInstance(AgentIntegrationContext::class);
     $delivery = app(DocumentArtifactService::class)->deliver($this->owner, DocumentArtifact::findOrFail($first['artifact_id']), session: true);
     app('auth')->forgetGuards();
-    $this->withHeader('Authorization', '')->actingAs($this->owner)->get($delivery['download_url'])->assertOk();
+    $this->withHeader('Authorization', '')->actingAs($this->owner, 'web')->get($delivery['download_url'])->assertOk();
 });
 
 it('never exports an ATS block without explicit consent and rechecks ATS authorization on download', function () {

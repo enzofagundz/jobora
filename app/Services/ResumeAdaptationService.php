@@ -88,7 +88,7 @@ class ResumeAdaptationService
 
         $language = ResumeLanguage::tryFrom((string) ($payload['language'] ?? '')) ?? ResumeLanguage::PtBr;
 
-        $sourceHash = app(ApplicationDocumentAccess::class)->sourceHash($user, $posting->fresh());
+        $sourceHash = $this->snapshots->resumeAdaptation($user, $posting->fresh(), $language)['fingerprint'];
 
         $started = microtime(true);
         $inputChars = 0;
@@ -154,7 +154,7 @@ class ResumeAdaptationService
 
             $persist = function () use ($sourceHash, $user, $fingerprint, $posting, $language, $prompt, $promptFingerprint, $result, $wasOptimized): ResumeAdaptation {
                 app(ApplicationDocumentAccess::class)->posting($user, $posting->fresh());
-                if ($sourceHash !== app(ApplicationDocumentAccess::class)->sourceHash($user, $posting->fresh())) {
+                if ($sourceHash !== $this->snapshots->resumeAdaptation($user, $posting->fresh(), $language)['fingerprint']) {
                     throw new \LogicException('As fontes mudaram durante a adequação.');
                 }
                 $adaptation = ResumeAdaptation::updateOrCreate(

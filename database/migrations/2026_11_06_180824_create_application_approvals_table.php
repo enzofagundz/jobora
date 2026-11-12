@@ -12,7 +12,7 @@ return new class extends Migration
             $table->uuid('id')->primary();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
             $table->foreignId('integration_id')->constrained('agent_integrations');
-            $table->foreignUuid('preparation_id')->constrained('application_preparations');
+            $table->foreignUuid('preparation_id')->constrained('application_preparations')->cascadeOnDelete();
             $table->foreignUuid('binding_id')->constrained('telegram_identity_bindings');
             $table->char('fingerprint', 64);
             $table->char('message_key', 64)->unique();

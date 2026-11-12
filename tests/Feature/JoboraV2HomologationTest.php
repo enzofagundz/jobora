@@ -231,7 +231,7 @@ it('homologates two private accounts from three capture surfaces through human a
         $actor = $flow['actor'];
         $posting = $flow['posting'];
         $profile = ['experiences' => [], 'education' => [], 'competencies' => ['PHP'], 'preferences' => [], 'restrictions' => [], 'compensation_expectation' => null];
-        flowData($this, $actor, 'save_professional_profile', ['profile' => $profile, 'expected_version' => 0]);
+        flowData($this, $actor, 'save_professional_profile', ['profile' => $profile, 'expected_version' => 0, 'confirm' => true]);
         flowData($this, $actor, 'confirm_professional_profile', ['expected_version' => 1, 'confirm' => true]);
         $adaptedResume = $actor['user']->name."\nPHP";
         flowData($this, $actor, 'save_resume', ['content' => $adaptedResume, 'language' => 'pt-BR', 'confirm' => true]);
