@@ -20,6 +20,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 use Livewire\Livewire;
 use Spatie\LaravelPdf\Facades\Pdf;
 use Spatie\LaravelPdf\FakePdfBuilder;
@@ -259,3 +260,18 @@ it('notifies owners with no profile or an unconfirmed draft before preparation',
     $this->assertDatabaseCount('application_preparations', 0);
     $this->assertDatabaseCount('ai_operations', 0);
 })->with([true, false]);
+
+it('renders unavailable artifacts instead of failing on an HTTP deployment', function () {
+    Livewire::test(ApplicationPage::class, ['record' => $this->posting->id])
+        ->set('destinationApplicationMethodId', $this->method->id)
+        ->call('prepareApplicationMaterials')
+        ->assertSet('preparationResult.state', 'awaiting_approval');
+    URL::forceScheme('http');
+    URL::forceRootUrl('http://localhost');
+
+    Livewire::test(ApplicationPage::class, ['record' => $this->posting->id])
+        ->assertSuccessful()
+        ->assertSee('Material congelado')
+        ->assertSee('Artefato indisponível')
+        ->assertDontSee('Baixar currículo adaptado');
+});

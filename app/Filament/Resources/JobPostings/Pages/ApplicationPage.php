@@ -524,7 +524,7 @@ class ApplicationPage extends Page implements HasTable
             }
 
             return $documents->deliver(auth()->user(), $artifact, session: true)['download_url'];
-        } catch (ModelNotFoundException) {
+        } catch (ModelNotFoundException|LogicException) {
             return null;
         } catch (HttpExceptionInterface $exception) {
             if (in_array($exception->getStatusCode(), [403, 410], true)) {
