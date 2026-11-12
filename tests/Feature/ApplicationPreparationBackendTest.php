@@ -155,6 +155,22 @@ beforeEach(function () {
     ];
 });
 
+it('discloses frozen personal data only under its corresponding read scope', function (?string $scope) {
+    $prepared = preparationCall($this, 'prepare_application', [...$this->input, 'cover_letter_requested' => true, 'questions' => [
+        ['id' => 'skill', 'question' => 'Skill?', 'answer' => 'PHP', 'support' => [['source' => 'profile', 'path' => 'competencies.0', 'quote' => 'PHP']]],
+    ]])['data'];
+    $this->integration->update(['scopes' => array_filter(['applications:read', $scope])]);
+    $result = preparationCall($this, 'get_application_preparation', ['id' => $prepared['preparation_id']]);
+    expect($result['ok'])->toBeTrue();
+    $snapshot = $result['data']['snapshot'];
+    expect(array_key_exists('resume', $snapshot))->toBe($scope === 'resume:read');
+    expect(array_key_exists('cover_letter', $snapshot))->toBe($scope === 'resume:read');
+    expect(array_key_exists('profile', $snapshot))->toBe($scope === 'profile:read');
+    expect(array_key_exists('adaptation', $snapshot))->toBe($scope === 'ats:read');
+    expect($snapshot['questions'][0]['answer'])->toBe($scope === 'profile:read' ? 'PHP' : null);
+    expect($snapshot)->not->toHaveKey('sources');
+})->with([null, 'resume:read', 'profile:read', 'ats:read']);
+
 it('accepts legacy confirmed opportunities and does not require legacy version', function () {
     $this->posting->update(['readiness' => null, 'status' => 'confirmed']);
     unset($this->input['expected_opportunity_version']);

@@ -6,6 +6,7 @@ use App\Enums\AgentIntegrationScope;
 use App\Enums\AiOperationType;
 use App\Enums\ApplicationMethodType;
 use App\Enums\ResumeLanguage;
+use App\Mcp\Support\AgentIntegrationContext;
 use App\Models\AiOperation;
 use App\Models\Application;
 use App\Models\ApplicationPreparation;
@@ -189,6 +190,31 @@ class ApplicationPreparationService
         $stale = ! $this->isCurrentForApproval($user, $preparation);
         $snapshot = $preparation->snapshot;
         unset($snapshot['sources']);
+        if (app()->bound(AgentIntegrationContext::class)) {
+            $context = app(AgentIntegrationContext::class);
+            $resumeReadable = $context->can(AgentIntegrationScope::ResumeRead);
+            $profileReadable = $context->can(AgentIntegrationScope::ProfileRead);
+            if (! $resumeReadable) {
+                unset($snapshot['resume'], $snapshot['cover_letter']);
+            }
+            if (! $profileReadable) {
+                unset($snapshot['profile']);
+            }
+            if (! $context->can(AgentIntegrationScope::AtsRead)) {
+                unset($snapshot['adaptation']);
+            }
+            foreach ($snapshot['questions'] as &$question) {
+                foreach ($question['support'] ?? [] as $support) {
+                    if (($support['source'] === 'resume' && ! $resumeReadable)
+                        || ($support['source'] === 'profile' && ! $profileReadable)) {
+                        $question['answer'] = null;
+                        $question['support'] = [];
+                        break;
+                    }
+                }
+            }
+            unset($question);
+        }
 
         return [...$this->result($preparation), 'snapshot' => $snapshot, 'stale' => $stale, 'current' => $current];
     }
