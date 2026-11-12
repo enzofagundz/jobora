@@ -235,7 +235,8 @@ export function createCaptureQueue(store: CaptureQueueStore): CaptureQueue {
     let blocked = 0;
 
     for (const record of stale) {
-      if (record.ownerUserId !== null && record.ownerUserId !== ownerUserId) {
+      if (record.ownerUserId === null) continue;
+      if (record.ownerUserId !== ownerUserId) {
         await block(record, 'auth', { ok: false, error: 'credential_changed' });
         blocked++;
         continue;

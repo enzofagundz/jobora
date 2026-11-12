@@ -6,6 +6,7 @@ import { createTestCaptureMessageHandler as createCaptureMessageHandler } from '
 import {
   CAPTURE_ENVELOPE_MAX_BYTES,
   createCaptureQueue,
+  credentialFingerprint,
 } from '@/utils/capture-queue';
 import { apiBaseUrl, apiToken, captureEnabled } from '@/utils/storage';
 import { lastApiStatus } from '@/utils/session-storage';
@@ -324,6 +325,55 @@ describe('fila durável de envelopes', () => {
 
     const bodies = submittedEnvelopes(fetchSpy);
     expect(bodies.every((body) => body.capture.idempotency_key === 'capture-key-switch')).toBe(true);
+  });
+
+  it('flush não adota dono de registro legado e somente a credencial original o envia', async () => {
+    const store = createMemoryQueueStore();
+    const queue = createCaptureQueue(store);
+    const original = {
+      origin: 'http://localhost:8000',
+      credentialFingerprint: await credentialFingerprint(TOKEN_A),
+      ownerUserId: null,
+    };
+    const captured = envelope('legacy-unknown-owner');
+    await queue.enqueue(captured, original);
+    const before = structuredClone([...store.records.values()][0]!);
+    const { handler } = createHandler(store);
+    const fetchSpy = mockFetch(async () => response(201));
+
+    await apiToken.setValue(TOKEN_B);
+    await handler.flush();
+    expect(fetchSpy.count()).toBe(0);
+    expect([...store.records.values()]).toEqual([before]);
+
+    await apiToken.setValue(TOKEN_A);
+    await handler.flush();
+    expect(fetchSpy.count()).toBe(1);
+    expect(submittedEnvelopes(fetchSpy)).toEqual([captured]);
+    expect(store.records.size).toBe(0);
+  });
+
+  it.each([true, false])('retarget exige dono conhecido igual, dono resolvido=%s', async (resolveOwner) => {
+    const store = createMemoryQueueStore();
+    const queue = createCaptureQueue(store);
+    const original = { origin: 'http://localhost:8000', credentialFingerprint: 'original', ownerUserId: 1 };
+    const current = { ...original, credentialFingerprint: 'rotated', ownerUserId: resolveOwner ? null : 1 };
+    const captured = envelope('same-owner-rotation');
+    await queue.enqueue(captured, original);
+    await queue.enqueue(envelope('other-owner'), { ...original, ownerUserId: 2 });
+    await queue.enqueue(envelope('unknown-owner'), { ...original, ownerUserId: null });
+
+    expect(await queue.retarget(current, async () => 1)).toEqual({ moved: 1, blocked: 1 });
+    const records = await store.getAll();
+    expect(records.find((record) => record.envelope.capture.idempotency_key === 'unknown-owner')).toMatchObject({
+      credentialFingerprint: 'original', ownerUserId: null, state: 'pending',
+    });
+    expect(records.find((record) => record.envelope.capture.idempotency_key === 'other-owner')).toMatchObject({
+      credentialFingerprint: 'original', ownerUserId: 2, state: 'blocked', lastError: 'credential_changed',
+    });
+    const submit = vi.fn(async () => ({ ok: true as const }));
+    expect(await queue.drain(current, submit)).toMatchObject({ captured: 1 });
+    expect(submit).toHaveBeenCalledExactlyOnceWith(captured, current);
   });
 
   it('quota explícita rejeita envelope acima de 12 MiB sem truncar', async () => {
