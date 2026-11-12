@@ -331,6 +331,11 @@ class ApplicationPage extends Page implements HasTable
         }
 
         $profile = app(ProfessionalProfileService::class)->get($user);
+        if (($profile['confirmed_snapshot'] ?? null) === null || (int) ($profile['confirmed_version'] ?? 0) < 1) {
+            Notification::make()->danger()->title('Não foi possível preparar o material')->body('Confirme seu perfil antes de preparar o material.')->send();
+
+            return;
+        }
         $input = [
             'job_posting_id' => $posting->id,
             'expected_profile_confirmed_version' => $profile['confirmed_version'],

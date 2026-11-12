@@ -242,3 +242,20 @@ it('requires confirmed profile and rejects destination ids from another opportun
         ->assertNotified('Não foi possível preparar o material');
     $this->assertDatabaseCount('application_preparations', 0);
 });
+
+it('notifies owners with no profile or an unconfirmed draft before preparation', function (bool $missing) {
+    if ($missing) {
+        $this->owner->professionalProfile()->delete();
+    } else {
+        $this->owner->professionalProfile()->update(['confirmed_version' => 0, 'confirmed_snapshot' => null]);
+    }
+
+    Livewire::test(ApplicationPage::class, ['record' => $this->posting->id])
+        ->set('destinationApplicationMethodId', $this->method->id)
+        ->call('prepareApplicationMaterials')
+        ->assertNotified('Não foi possível preparar o material')
+        ->assertHasNoErrors();
+
+    $this->assertDatabaseCount('application_preparations', 0);
+    $this->assertDatabaseCount('ai_operations', 0);
+})->with([true, false]);
