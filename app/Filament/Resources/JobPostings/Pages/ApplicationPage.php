@@ -671,12 +671,21 @@ class ApplicationPage extends Page implements HasTable
         $this->submissionDetails = null;
 
         if ($this->submissionSummary === null) {
+            $this->reconciliationRequest = null;
+
             return;
         }
 
         try {
             $this->submissionDetails = $submissions->get(auth()->user(), $this->submissionSummary['attempt_id']);
         } catch (AuthorizationException) {
+        }
+
+        if ($this->reconciliationRequest !== null
+            && ($this->reconciliationRequest['attempt_id'] !== (string) $this->submissionSummary['attempt_id']
+                || ($this->reconciliationRequest['accepted_revision'] ?? $this->reconciliationRequest['expected_revision']) !== (int) $this->submissionSummary['revision'])) {
+            $this->reconciliationRequest = null;
+            $this->reconciliationEventKey = (string) Str::uuid();
         }
 
         if ($this->reconciliationEventKey === null) {
@@ -740,9 +749,16 @@ class ApplicationPage extends Page implements HasTable
             ]);
             $this->submissionError = null;
             $this->refreshSubmissionStatus($submissions);
+            if ($request['form']['outcome'] === 'unknown' && $this->submissionSummary !== null) {
+                $request['accepted_revision'] = (int) $this->submissionSummary['revision'];
+                $this->reconciliationRequest = $request;
+                $this->reconciliationEventKey = $request['event_key'];
+            }
         } catch (AuthorizationException|ModelNotFoundException) {
             $this->submissionError = 'Não foi possível reconciliar esta tentativa.';
         } catch (ValidationException|ToolException) {
+            $this->reconciliationRequest = null;
+            $this->reconciliationEventKey = (string) Str::uuid();
             $this->submissionError = 'O estado mudou ou as evidências não permitem resolver a tentativa. Atualize o estado.';
         }
     }

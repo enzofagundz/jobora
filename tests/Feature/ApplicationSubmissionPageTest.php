@@ -11,6 +11,7 @@ use App\Models\ResumeAdaptation;
 use App\Models\User;
 use App\Services\AiInputSnapshotService;
 use App\Services\ApplicationPreparationService;
+use App\Services\ApplicationSubmissionService;
 use App\Services\TelegramIdentityService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -171,7 +172,9 @@ it('keeps unknown blocked and reuses reconciliation event key on retry', functio
         ->assertSet('submissionSummary.state', 'unknown')
         ->assertSet('submissionError', null);
     $eventKey = $page->get('reconciliationEventKey');
-    $page->call('reconcileSubmission')
+    $page->call('refreshSubmissionStatus')
+        ->assertSet('reconciliationEventKey', $eventKey)
+        ->call('reconcileSubmission')
         ->assertSet('submissionSummary.state', 'unknown')
         ->assertSet('submissionError', null)
         ->assertSet('reconciliationEventKey', $eventKey);
@@ -187,4 +190,28 @@ it('keeps unknown blocked and reuses reconciliation event key on retry', functio
     expect($attempt['blocked'])->toBeTrue()
         ->and(ApplicationSubmissionAttempt::query()->findOrFail($attempt['attempt_id'])->events()->where('event_key', $eventKey)->count())->toBe(1)
         ->and(ApplicationSubmissionAttempt::query()->findOrFail($attempt['attempt_id'])->state->value)->toBe('succeeded');
+});
+
+it('recovers reconciliation after concurrent revision changes without editing the form', function () {
+    $attempt = submissionPageUnknown($this);
+    submissionPagePanel($this, $this->owner);
+    $page = Livewire::test(ApplicationPage::class, ['record' => $this->posting->id])
+        ->set('reconciliationData.outcome', 'succeeded')
+        ->set('reconciliationData.evidence_kind', 'submission_receipt')
+        ->set('reconciliationData.reference', 'receipt-after-conflict');
+
+    app(ApplicationSubmissionService::class)->reconcileForOwner($this->owner, [
+        'attempt_id' => $attempt['attempt_id'], 'expected_revision' => $attempt['revision'],
+        'event_key' => 'another-panel', 'outcome' => 'unknown',
+        'evidence' => ['kind' => 'ambiguous', 'details' => 'Ainda aguardando.'],
+    ]);
+
+    $page->call('reconcileSubmission')
+        ->assertSet('reconciliationRequest', null)
+        ->assertSet('submissionError', 'O estado mudou ou as evidências não permitem resolver a tentativa. Atualize o estado.');
+    $page->call('refreshSubmissionStatus')
+        ->assertSet('submissionSummary.revision', $attempt['revision'] + 1)
+        ->call('reconcileSubmission')
+        ->assertSet('submissionError', null)
+        ->assertSet('submissionSummary.state', 'succeeded');
 });
