@@ -1,9 +1,10 @@
-import { createApp, type App as VueApp } from 'vue';
+import { createApp, ref, type App as VueApp } from 'vue';
 import type { ContentScriptContext, ShadowRootContentScriptUi } from '#imports';
 import CapturePanel from '@/components/CapturePanel.vue';
 import { createCaptureSession, type CaptureSession } from '@/utils/capture-session';
 import type {
   CaptureCoverageReason,
+  CaptureErrorKind,
   EnvelopeResult,
   ResolveRunResult,
 } from '@/types/capture';
@@ -54,6 +55,7 @@ interface CaptureAttempt {
 
 export function createIndeedController(): IndeedController {
   const session: CaptureSession = createCaptureSession();
+  const panelError = ref<CaptureErrorKind | null>(null);
   let observer: MutationObserver | null = null;
   let debounceTimer: number | undefined;
   let finalizeTimer: number | undefined;
@@ -246,7 +248,8 @@ export function createIndeedController(): IndeedController {
       if (!isGenerationActive(generation) || attempt !== current) return;
       if (response?.context) current.credentialContext = response.context;
       if (response && response.ok === false) {
-        if (['auth', 'invalid', 'conflict', 'not_found', 'ambiguous'].includes(response.error)) {
+        panelError.value = response.error;
+        if (['auth', 'invalid', 'conflict', 'not_found', 'ambiguous', 'reservation_changed'].includes(response.error)) {
           current.blocked = true;
           session.counters.phase = 'error';
         }
@@ -301,6 +304,8 @@ export function createIndeedController(): IndeedController {
         context: current.credentialContext,
       })) as EnvelopeResult | undefined;
       if (!result || result.ok !== true) {
+        if (attempt === current) panelError.value = result?.error ?? 'network';
+        if (result?.error === 'reservation_changed') current.blocked = true;
         for (const card of cards) {
           session.applyResult(jobIdentity(card.platform_id), result ?? { ok: false, error: 'network' });
         }
@@ -353,6 +358,7 @@ export function createIndeedController(): IndeedController {
     pendingSet.clear();
     const current = newAttempt();
     attempt = current;
+    panelError.value = null;
 
     ui = await createShadowRootUi(ctx, {
       name: 'vagas-capture-panel',
@@ -363,6 +369,7 @@ export function createIndeedController(): IndeedController {
         const panelApp = createApp(CapturePanel, {
           siteLabel: 'Jobora Job Capture',
           counters: session.counters,
+          error: panelError,
           visible: panelVisible,
           'onUpdate:visible': (value: boolean) => {
             panelVisible = value;

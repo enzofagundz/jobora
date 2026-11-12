@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { ContentScriptContext } from 'wxt/utils/content-script-context';
+import { nextTick } from 'vue';
 import type { CaptureEnvelope, CaptureMessage } from '@/types/capture';
 import { createLinkedInController } from '@/sites/linkedin/controller';
 import { OBSERVER_DEBOUNCE_MS } from '@/sites/linkedin/extract';
@@ -96,6 +97,33 @@ describe('LinkedIn publicações — envelope consolidado', () => {
     vi.useRealTimers();
     vi.restoreAllMocks();
     document.body.innerHTML = '';
+  });
+
+  it.each(['capture:resolve-run', 'capture:submit-envelope'])('bloqueia e mostra reserva alterada em %s', async (failureType) => {
+    const feed = mountFeed(1);
+    const { sendMessage } = setupMessaging();
+    const respond = sendMessage.getMockImplementation() as (raw: unknown) => Promise<unknown>;
+    sendMessage.mockImplementation(async (raw: unknown) =>
+      (raw as CaptureMessage).type === failureType
+        ? { ok: false, error: 'reservation_changed' }
+        : respond(raw),
+    );
+    const controller = createLinkedInController();
+    try {
+      await activate(controller);
+      await advance(1200 * 8);
+      await nextTick();
+      expect(controller.getCaptureState().captured).toBe(false);
+      const roots = Array.from(document.querySelectorAll('*')).map((element) => element.shadowRoot);
+      expect(roots.some((root) => root?.querySelector('[role="alert"]')?.textContent?.includes('Captura bloqueada para preservar a reserva.'))).toBe(true);
+      const count = sendMessage.mock.calls.length;
+      feed.insertAdjacentHTML('beforeend', cardHtml(2));
+      await advance(3_000);
+      expect(sendMessage).toHaveBeenCalledTimes(count);
+      expect(controller.getCaptureState().blocks).toBe(failureType === 'capture:resolve-run' ? 0 : 1);
+    } finally {
+      controller.deactivate();
+    }
   });
 
   it('envia um único envelope v1 após o scroll, sem requests legados por post', async () => {

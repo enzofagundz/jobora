@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { ContentScriptContext } from 'wxt/utils/content-script-context';
+import { nextTick } from 'vue';
 import type { CaptureEnvelope, CaptureMessage } from '@/types/capture';
 import { createIndeedController } from '@/sites/indeed/controller';
 import { extractJob } from '@/sites/indeed/extract';
@@ -146,6 +147,31 @@ describe('indeed controller — integridade observer/SPA', () => {
     expect(sendMessageMock.mock.calls.filter(([message]) => (message as CaptureMessage).type === 'capture:submit-envelope')).toHaveLength(1);
 
     deactivate();
+  });
+
+  it.each(['capture:resolve-run', 'capture:submit-envelope'])('bloqueia e mostra reserva alterada em %s', async (failureType) => {
+    mountList(1);
+    const respond = sendMessageMock.getMockImplementation() as (raw: unknown) => Promise<unknown>;
+    sendMessageMock.mockImplementation(async (raw: unknown) =>
+      (raw as CaptureMessage).type === failureType
+        ? { ok: false, error: 'reservation_changed' }
+        : respond(raw),
+    );
+    const { controller } = await activateUntilDone();
+    try {
+      await advance(3_000);
+      await nextTick();
+      expect(controller.getCaptureState().captured).toBe(false);
+      const roots = Array.from(document.querySelectorAll('*')).map((element) => element.shadowRoot);
+      expect(roots.some((root) => root?.querySelector('[role="alert"]')?.textContent?.includes('Captura bloqueada para preservar a reserva.'))).toBe(true);
+      const count = sendMessageMock.mock.calls.length;
+      document.querySelector('.jobsearch-ResultsList')!.insertAdjacentHTML('beforeend', '<a data-jk="later"><h2>Outra vaga</h2></a>');
+      await advance(3_000);
+      expect(sendMessageMock).toHaveBeenCalledTimes(count);
+      expect(controller.getCaptureState().cards).toBe(failureType === 'capture:resolve-run' ? 0 : 1);
+    } finally {
+      controller.deactivate();
+    }
   });
 
   it('captura descrição factual no painel Job Post Details sem o marcador legado', async () => {
