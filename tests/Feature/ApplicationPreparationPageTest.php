@@ -21,6 +21,7 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
+use Illuminate\Validation\ValidationException;
 use Livewire\Livewire;
 use Spatie\LaravelPdf\Facades\Pdf;
 use Spatie\LaravelPdf\FakePdfBuilder;
@@ -295,4 +296,34 @@ it('restores pending question labels from persisted snapshots on mount and polli
         ->call('refreshApplicationPreparation')
         ->assertSet('preparationQuestionLabels', [$question['id'] => 'Qual habilidade você usou?'])
         ->assertSee('Qual habilidade você usou?');
+});
+
+it('notifies preparation form validation failures without creating materials', function () {
+    Livewire::test(ApplicationPage::class, ['record' => $this->posting->id])
+        ->set('destinationApplicationMethodId', $this->method->id)
+        ->set('preparationData.questions', [[
+            'question' => 'Qual habilidade você usou?', 'answer' => 'PHP',
+            'support' => [['source' => 'profile', 'path' => 'competencies.0', 'quote' => '']],
+        ]])
+        ->call('prepareApplicationMaterials')
+        ->assertNotified('Não foi possível preparar o material');
+
+    $this->assertDatabaseCount('application_preparations', 0);
+    $this->assertDatabaseCount('document_artifacts', 0);
+});
+
+it('notifies validation failures returned by the preparation service', function () {
+    $this->mock(ApplicationPreparationService::class, function ($mock): void {
+        $mock->shouldReceive('prepare')->once()->andThrow(ValidationException::withMessages([
+            'input.questions.0.support.0.source' => 'Origem inválida.',
+        ]));
+    });
+
+    Livewire::test(ApplicationPage::class, ['record' => $this->posting->id])
+        ->set('destinationApplicationMethodId', $this->method->id)
+        ->call('prepareApplicationMaterials')
+        ->assertNotified('Não foi possível preparar o material')
+        ->assertHasNoErrors();
+
+    $this->assertDatabaseCount('application_preparations', 0);
 });

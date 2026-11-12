@@ -336,6 +336,14 @@ class ApplicationPage extends Page implements HasTable
 
             return;
         }
+        try {
+            $questions = $this->preparationQuestions();
+        } catch (ValidationException) {
+            Notification::make()->danger()->title('Não foi possível preparar o material')->body('Revise as perguntas e os trechos de apoio.')->send();
+
+            return;
+        }
+
         $input = [
             'job_posting_id' => $posting->id,
             'expected_profile_confirmed_version' => $profile['confirmed_version'],
@@ -344,7 +352,7 @@ class ApplicationPage extends Page implements HasTable
             'cover_letter_requested' => $this->preparationCoverLetterRequested,
             'translate_missing' => $language === ResumeLanguage::En && $this->preparationTranslateMissing,
             'ats_consent' => $this->preparationAtsConsent,
-            'questions' => $this->preparationQuestions(),
+            'questions' => $questions,
         ];
 
         if ($posting->isStructuredOpportunity()) {
@@ -360,7 +368,7 @@ class ApplicationPage extends Page implements HasTable
                 default => Notification::make()->success()->title('Material preparado'),
             };
             $notification->send();
-        } catch (AuthorizationException|LogicException|ModelNotFoundException) {
+        } catch (AuthorizationException|LogicException|ModelNotFoundException|ValidationException) {
             Notification::make()->danger()->title('Não foi possível preparar o material')->body('Confira se perfil, vaga e destino ainda estão válidos.')->send();
         }
     }
