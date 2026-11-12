@@ -188,7 +188,7 @@ it('requires admin gate for permission updates and prevents self elevation', fun
     expect($target->fresh()->is_admin)->toBeTrue();
 });
 
-it('keeps market history pages available by URL but removes them from primary navigation and hides legacy captures', function () {
+it('keeps market history pages available by URL and confirms legacy capture history remains in navigation', function () {
     $user = User::factory()->create();
     $this->actingAs($user);
 
@@ -198,7 +198,8 @@ it('keeps market history pages available by URL but removes them from primary na
     $this->get(route('filament.admin.pages.market-comparison'))->assertSuccessful();
     $this->get(route('filament.admin.pages.market-trends'))->assertSuccessful();
 
-    expect(JobCaptureResource::getNavigationLabel())->toBe('Capturas legadas');
+    expect(JobCaptureResource::shouldRegisterNavigation())->toBeTrue()
+        ->and(JobCaptureResource::getNavigationLabel())->toBe('Capturas legadas');
 });
 
 it('separates V2 readiness from legacy posting status in the postings list', function () {
