@@ -3,6 +3,8 @@
 use App\Models\Application;
 use App\Models\ApplicationApproval;
 use App\Models\ApplicationPreparation;
+use App\Models\ApplicationSubmissionAttempt;
+use App\Models\ApplicationSubmissionEvent;
 use App\Models\TelegramIdentityBinding;
 use App\Models\TelegramLinkChallenge;
 use App\Models\User;
@@ -37,6 +39,29 @@ beforeEach(function () {
         'expires_at' => now()->addMinutes(30),
     ]);
 });
+
+it('deletes posting submission attempts in every state and their events', function (string $state) {
+    $attempt = ApplicationSubmissionAttempt::query()->create([
+        'user_id' => $this->owner->id, 'application_id' => $this->application->id,
+        'integration_id' => $this->integration->id, 'approval_id' => $this->approval->id,
+        'preparation_id' => $this->preparation->id, 'fingerprint' => $this->preparation->fingerprint,
+        'idempotency_key' => 'regression', 'request_hash' => str_repeat('f', 64), 'state' => $state,
+        'active_application_id' => in_array($state, ['reserved', 'sending', 'unknown'], true) ? $this->application->id : null,
+        'consumed_approval_id' => $state === 'reserved' ? null : $this->approval->id,
+        'reserved_at' => now(), 'reservation_expires_at' => now()->addMinutes(5),
+    ]);
+    $event = ApplicationSubmissionEvent::query()->create([
+        'attempt_id' => $attempt->id, 'event_key' => 'regression', 'kind' => 'reserved',
+        'request_hash' => str_repeat('f', 64), 'evidence' => [], 'actor' => [],
+        'occurred_at' => now(), 'received_at' => now(),
+    ]);
+    $this->posting->delete();
+
+    $this->assertDatabaseMissing('application_submission_attempts', ['id' => $attempt->id]);
+    $this->assertDatabaseMissing('application_submission_events', ['id' => $event->id]);
+    $this->assertDatabaseMissing('application_approvals', ['id' => $this->approval->id]);
+    $this->assertDatabaseMissing('applications', ['id' => $this->application->id]);
+})->with(['reserved', 'sending', 'unknown', 'failed', 'succeeded']);
 
 it('deletes an approved posting and its preparation without deleting the identity binding', function () {
     $this->posting->delete();
