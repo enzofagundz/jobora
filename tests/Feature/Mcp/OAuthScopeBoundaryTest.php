@@ -10,7 +10,10 @@ uses(RefreshDatabase::class);
 
 it('registers only mcp:use as an oauth scope', function () {
     expect(Passport::scopes()->pluck('id')->all())->toBe(['mcp:use'])
-        ->and(AgentIntegrationScope::labels())->toHaveCount(23)
+        ->and(AgentIntegrationScope::labels())->toHaveCount(28)
+        ->and(AgentIntegrationScope::labels())->toHaveKey('applications:submit')
+        ->and(AgentIntegrationScope::labels())->toHaveKeys(['approvals:read', 'approvals:write'])
+        ->and(AgentIntegrationScope::labels())->toHaveKeys(['matching:read', 'matching:write'])
         ->and(AgentIntegrationScope::labels())->toHaveKeys(['profile:read', 'profile:write'])
         ->and(AgentIntegrationScope::labels())->not->toHaveKey('mcp:use');
 });

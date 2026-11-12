@@ -18,6 +18,8 @@ class ApplicationEvent extends Model
         'notes',
         'contact',
         'occurred_at',
+        'event_key',
+        'request_hash',
     ];
 
     protected function casts(): array

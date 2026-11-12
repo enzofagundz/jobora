@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\ApplicationStatus;
+use App\Mcp\Support\ToolException;
 use App\Models\Application;
 use App\Models\ApplicationEvent;
 use App\Models\JobPosting;
@@ -11,6 +12,7 @@ use Carbon\CarbonInterface;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Validator;
 
 /**
  * Mutação transacional do acompanhamento de candidatura.
@@ -60,18 +62,32 @@ final class ApplicationTrackingService
         ?string $notes = null,
         ?string $contact = null,
         ?CarbonInterface $occurredAt = null,
+        ?string $eventKey = null,
     ): ApplicationEvent {
-        return DB::transaction(function () use ($user, $application, $status, $title, $notes, $contact, $occurredAt): ApplicationEvent {
+        Validator::validate(['event_key' => $eventKey], ['event_key' => ['nullable', 'string', 'min:1', 'max:128']]);
+        $title = filled($title) ? mb_substr(trim($title), 0, 255) : $status->getLabel();
+        $notes = filled($notes) ? trim($notes) : null;
+        $contact = filled($contact) ? mb_substr(trim($contact), 0, 255) : null;
+        $requestHash = $eventKey === null ? null : hash('sha256', json_encode([
+            $status->value, $title, $notes, $contact, $occurredAt?->toISOString(),
+        ], JSON_THROW_ON_ERROR));
+
+        return DB::transaction(function () use ($user, $application, $status, $title, $notes, $contact, $occurredAt, $eventKey, $requestHash): ApplicationEvent {
             $application = Application::whereKey($application->getKey())
                 ->whereHas('jobPosting', fn ($query) => $query->whereBelongsTo($user))
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            $title = filled($title)
-                ? mb_substr(trim($title), 0, 255)
-                : $status->getLabel();
-            $notes = filled($notes) ? trim($notes) : null;
-            $contact = filled($contact) ? mb_substr(trim($contact), 0, 255) : null;
+            if ($eventKey !== null) {
+                $existing = $application->events()->where('event_key', $eventKey)->first();
+                if ($existing !== null) {
+                    if (! hash_equals($existing->request_hash, $requestHash)) {
+                        throw ToolException::conflict('A chave do evento já foi usada para outro conteúdo.');
+                    }
+
+                    return $existing;
+                }
+            }
 
             $application->update([
                 'status' => $status,
@@ -82,7 +98,9 @@ final class ApplicationTrackingService
                 'title' => $title,
                 'notes' => $notes,
                 'contact' => $contact,
-                'occurred_at' => $occurredAt,
+                'occurred_at' => $occurredAt ?? now(),
+                'event_key' => $eventKey,
+                'request_hash' => $requestHash,
             ]);
         });
     }

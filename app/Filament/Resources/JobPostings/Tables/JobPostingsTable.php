@@ -28,12 +28,14 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class JobPostingsTable
 {
     public static function configure(Table $table): Table
     {
         return $table
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->withExists('application'))
             ->columns([
                 TextColumn::make('id')
                     ->label('ID')
@@ -219,7 +221,7 @@ class JobPostingsTable
                     ->icon(Heroicon::OutlinedPaperAirplane)
                     ->color('info')
                     ->authorize('view')
-                    ->visible(fn (JobPosting $record): bool => $record->status === JobPostingStatus::Confirmed)
+                    ->visible(fn (JobPosting $record): bool => $record->isEligibleForApplicationDocuments() || $record->application_exists)
                     ->url(fn (JobPosting $record): string => ApplicationPage::getUrl(['record' => $record])),
                 DeleteAction::make(),
             ])

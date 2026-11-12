@@ -29,6 +29,7 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Illuminate\Testing\TestResponse;
 
 uses(RefreshDatabase::class);
@@ -816,9 +817,10 @@ it('recovers a stale running attempt from the queue', function () {
         'text' => 'Vaga travada',
     ]]);
 
+    $staleAttemptToken = (string) Str::uuid();
     $operation->forceFill([
         'status' => AiOperationStatus::Running,
-        'attempt_token' => 'stale-attempt-token',
+        'attempt_token' => $staleAttemptToken,
         'attempts' => 1,
         'last_attempt_started_at' => now()->subMinutes(10),
     ])->save();
@@ -832,6 +834,7 @@ it('recovers a stale running attempt from the queue', function () {
         ->handle(app(AiOperationService::class));
 
     expect($operation->refresh()->status)->toBe(AiOperationStatus::Completed)
+        ->and($operation->attempt_token)->not->toBe($staleAttemptToken)
         ->and(Publication::query()->sole()->content_version)->toBe(1);
 });
 
@@ -845,9 +848,10 @@ it('rejects a paused stale worker after a new attempt completes', function () {
         'text' => 'Vaga com escrita concorrente',
     ]]);
 
+    $pausedAttemptToken = (string) Str::uuid();
     $operation->forceFill([
         'status' => AiOperationStatus::Queued,
-        'attempt_token' => 'attempt-A',
+        'attempt_token' => $pausedAttemptToken,
         'attempts' => 0,
     ])->save();
 
@@ -884,7 +888,7 @@ it('rejects a paused stale worker after a new attempt completes', function () {
     $staleFailed = false;
 
     try {
-        (new ProcessAiOperation($operation->id, $operation->run_token, 'attempt-A'))
+        (new ProcessAiOperation($operation->id, $operation->run_token, $pausedAttemptToken))
             ->handle(app(AiOperationService::class));
     } catch (LogicException) {
         $staleFailed = true;
@@ -893,7 +897,7 @@ it('rejects a paused stale worker after a new attempt completes', function () {
     expect($newCompleted)->toBeTrue()
         ->and($staleFailed)->toBeTrue()
         ->and($operation->refresh()->status)->toBe(AiOperationStatus::Completed)
-        ->and($operation->attempt_token)->not->toBe('attempt-A')
+        ->and($operation->attempt_token)->not->toBe($pausedAttemptToken)
         ->and(PublicationObservation::query()->where('page_capture_id', $capture->id)->count())->toBe(1);
 });
 

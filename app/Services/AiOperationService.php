@@ -2,15 +2,16 @@
 
 namespace App\Services;
 
+use App\Enums\AgentIntegrationScope;
 use App\Enums\AiOperationStatus;
 use App\Enums\AiOperationType;
-use App\Enums\JobPostingStatus;
 use App\Enums\ResumeLanguage;
 use App\Filament\Pages\ProfessionalCompetenciesPage;
 use App\Filament\Pages\ResumePage;
 use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Jobs\ClassifyPublicationWithClef;
 use App\Jobs\ProcessAiOperation;
+use App\Mcp\Support\AgentIntegrationContext;
 use App\Models\AiOperation;
 use App\Models\JobPosting;
 use App\Models\PageCapture;
@@ -52,7 +53,35 @@ class AiOperationService
         private readonly PublicationExtractionProcessor $publicationExtraction,
         private readonly PublicationTriageProcessor $publicationTriage,
         private readonly ProfileImportProcessor $profileImport,
+        private readonly MatchingProcessor $matching,
     ) {}
+
+    /** @param array{source?: string, integration_id?: int} $actorMetadata */
+    public function enqueueMatching(User $user, int $opportunityId, int $expectedOpportunityVersion, int $expectedProfileConfirmedVersion, string $criteriaVersion = 'matching-v1', array $actorMetadata = [], bool $retry = false): AiOperation
+    {
+        if (app()->bound(AgentIntegrationContext::class)) {
+            $actorMetadata = ['source' => 'mcp', 'integration_id' => app(AgentIntegrationContext::class)->integration->id];
+        }
+        $matching = app(MatchingService::class);
+        $matching->authorize($user, $actorMetadata);
+        $payload = $matching->snapshot($user, $opportunityId, $criteriaVersion);
+        $frozen = $payload['frozen'];
+        if ($frozen['opportunity']['opportunity_version'] !== $expectedOpportunityVersion || $frozen['profile']['confirmed_version'] !== $expectedProfileConfirmedVersion) {
+            throw new MatchingException('conflict');
+        }
+        $payload['requester_actor'] = $actorMetadata;
+        $fingerprint = MatchingService::hash($frozen);
+        $key = 'matching:'.$fingerprint;
+        if ($retry) {
+            $previous = AiOperation::query()->where('user_id', $user->id)->where('operation_key', $key)->first();
+            if ($previous === null || ($previous->status === AiOperationStatus::Failed && $previous->attempts >= self::MAX_ATTEMPTS)) {
+                throw new LogicException('Não há retry de matching disponível para esta entrada.');
+            }
+        }
+
+        return $this->enqueue($user, AiOperationType::Matching, $key, 'opportunity', $opportunityId, null,
+            ['payload' => $payload, 'fingerprint' => $fingerprint], failOnDispatchError: false, idempotent: true, retry: $retry);
+    }
 
     /** @param array{source?: string, integration_id?: int} $actorMetadata */
     public function enqueueProfileImport(User $user, ResumeLanguage $language, int $expectedVersion, array $actorMetadata = [], bool $retry = false): AiOperation
@@ -120,7 +149,7 @@ class AiOperationService
             failOnDispatchError: false, idempotent: true, retry: $retry);
     }
 
-    public function enqueueResumeAdaptation(User $user, JobPosting $posting, ResumeLanguage $language = ResumeLanguage::PtBr): AiOperation
+    public function enqueueResumeAdaptation(User $user, JobPosting $posting, ResumeLanguage $language = ResumeLanguage::PtBr, array $actorMetadata = []): AiOperation
     {
         Gate::forUser($user)->authorize('update', $posting);
 
@@ -128,7 +157,7 @@ class AiOperationService
             throw new LogicException('Vaga não pertence ao usuário.');
         }
 
-        if ($posting->status !== JobPostingStatus::Confirmed) {
+        if (! $posting->fresh()->isEligibleForApplicationDocuments()) {
             throw new LogicException('A adequação exige uma vaga confirmada.');
         }
 
@@ -137,6 +166,7 @@ class AiOperationService
         }
 
         $snapshot = $this->snapshots->resumeAdaptation($user, $posting->fresh()->load('items'), $language);
+        $snapshot = $this->documentSnapshot($user, $posting, $snapshot, $actorMetadata, AgentIntegrationScope::AtsWrite);
 
         return $this->enqueue(
             $user,
@@ -149,13 +179,14 @@ class AiOperationService
         );
     }
 
-    public function enqueueResumeTranslation(User $user): AiOperation
+    public function enqueueResumeTranslation(User $user, array $actorMetadata = []): AiOperation
     {
         if (blank($this->resumeService->content($user, ResumeLanguage::PtBr))) {
             throw new LogicException('Cadastre o currículo em português antes de gerar a versão em inglês.');
         }
 
         $snapshot = $this->snapshots->resumeTranslation($user);
+        $snapshot = $this->documentSnapshot($user, null, $snapshot, $actorMetadata, AgentIntegrationScope::ResumeWrite);
 
         return $this->enqueue(
             $user,
@@ -191,7 +222,7 @@ class AiOperationService
         );
     }
 
-    public function enqueueAtsScore(User $user, JobPosting $posting, ResumeLanguage $language = ResumeLanguage::PtBr): AiOperation
+    public function enqueueAtsScore(User $user, JobPosting $posting, ResumeLanguage $language = ResumeLanguage::PtBr, array $actorMetadata = []): AiOperation
     {
         Gate::forUser($user)->authorize('useAtsOptimization');
         Gate::forUser($user)->authorize('view', $posting);
@@ -200,11 +231,12 @@ class AiOperationService
             throw new LogicException('Vaga não pertence ao usuário.');
         }
 
-        if ($posting->status !== JobPostingStatus::Confirmed) {
+        if (! $posting->fresh()->isEligibleForApplicationDocuments()) {
             throw new LogicException('A simulação ATS exige uma vaga confirmada.');
         }
 
         $snapshot = $this->snapshots->atsScore($posting->fresh()->load('items'), $language);
+        $snapshot = $this->documentSnapshot($user, $posting, $snapshot, $actorMetadata, AgentIntegrationScope::AtsWrite);
 
         return $this->enqueue(
             $user,
@@ -217,7 +249,7 @@ class AiOperationService
         );
     }
 
-    public function enqueueAtsOptimization(User $user, JobPosting $posting, bool $enabled, ResumeLanguage $language = ResumeLanguage::PtBr): AiOperation
+    public function enqueueAtsOptimization(User $user, JobPosting $posting, bool $enabled, ResumeLanguage $language = ResumeLanguage::PtBr, array $actorMetadata = []): AiOperation
     {
         Gate::forUser($user)->authorize('useAtsOptimization');
         Gate::forUser($user)->authorize('update', $posting);
@@ -226,7 +258,7 @@ class AiOperationService
             throw new LogicException('Vaga não pertence ao usuário.');
         }
 
-        if ($posting->status !== JobPostingStatus::Confirmed) {
+        if (! $posting->fresh()->isEligibleForApplicationDocuments()) {
             throw new LogicException('A otimização exige uma vaga confirmada.');
         }
 
@@ -241,6 +273,8 @@ class AiOperationService
             throw new LogicException('Não há palavras-chave do currículo para otimizar esta vaga.');
         }
 
+        $snapshot = $this->documentSnapshot($user, $posting, $snapshot, $actorMetadata, AgentIntegrationScope::AtsWrite);
+
         return $this->enqueue(
             $user,
             AiOperationType::AtsOptimization,
@@ -250,6 +284,42 @@ class AiOperationService
             $posting->id,
             $snapshot,
         );
+    }
+
+    /** @param array{payload: array, fingerprint: string} $snapshot @param array{source?: string, integration_id?: int} $actor */
+    private function documentSnapshot(User $user, ?JobPosting $posting, array $snapshot, array $actor, AgentIntegrationScope $scope): array
+    {
+        if (app()->bound(AgentIntegrationContext::class)) {
+            $actor = ['source' => 'mcp', 'integration_id' => app(AgentIntegrationContext::class)->integration->id];
+        }
+        $access = app(ApplicationDocumentAccess::class);
+        $access->authorize($user, $actor, $scope);
+        $snapshot['payload']['document_guard'] = [
+            'actor' => $actor, 'scope' => $scope->value,
+            'version_hash' => $access->versionHash($user, $posting?->fresh()),
+            'translation_source_hash' => $posting === null ? $access->sourceHash($user) : null,
+        ];
+
+        return $snapshot;
+    }
+
+    private function authorizeDocumentOperation(AiOperation $operation): void
+    {
+        if (! in_array($operation->operation_type, [AiOperationType::ResumeAdaptation, AiOperationType::ResumeTranslation, AiOperationType::AtsOptimization, AiOperationType::AtsScore], true)) {
+            return;
+        }
+        $access = app(ApplicationDocumentAccess::class);
+        $guard = $operation->input_snapshot['document_guard'] ?? [];
+        $scope = $operation->operation_type === AiOperationType::ResumeTranslation ? AgentIntegrationScope::ResumeWrite : AgentIntegrationScope::AtsWrite;
+        $access->authorize($operation->user, $guard['actor'] ?? [], $scope);
+        $posting = $operation->jobPosting?->fresh();
+        if ($posting !== null) {
+            $access->posting($operation->user, $posting);
+        }
+        if ((isset($guard['version_hash']) && ! hash_equals($guard['version_hash'], $access->versionHash($operation->user, $posting)))
+            || (isset($guard['translation_source_hash']) && ! hash_equals($guard['translation_source_hash'], $access->sourceHash($operation->user)))) {
+            throw new LogicException('As fontes da operação mudaram. Solicite novamente.');
+        }
     }
 
     public function enqueuePublicationExtraction(PageCapture $capture): AiOperation
@@ -606,7 +676,7 @@ class AiOperationService
                     'run_token' => (string) Str::uuid(),
                     'attempt_token' => (string) Str::uuid(),
                     'status' => AiOperationStatus::Queued,
-                    'attempts' => $operationType === AiOperationType::ProfileImport ? ($operation?->attempts ?? 0) : 0,
+                    'attempts' => in_array($operationType, [AiOperationType::ProfileImport, AiOperationType::Matching], true) ? ($operation?->attempts ?? 0) : 0,
                     'queued_at' => $now,
                     'started_at' => null,
                     'last_attempt_started_at' => null,
@@ -647,6 +717,7 @@ class AiOperationService
             if (! $failOnDispatchError) {
                 Log::channel('ai')->warning(match ($operationType) {
                     AiOperationType::ProfileImport => 'Profile import dispatch failed; recovery will retry.',
+                    AiOperationType::Matching => 'Matching dispatch failed; recovery will retry.',
                     AiOperationType::PublicationTriage => 'Publication triage dispatch failed; recovery will retry.',
                     default => 'Publication extraction dispatch failed; recovery will retry.',
                 }, [
@@ -710,6 +781,7 @@ class AiOperationService
             AiOperationType::PublicationExtraction => 'A extração de publicações já está em andamento para esta captura.',
             AiOperationType::PublicationTriage => 'A triagem da publicação já está em andamento.',
             AiOperationType::ProfileImport => 'A importação do currículo já está em andamento.',
+            AiOperationType::Matching => 'O matching já está em andamento.',
         };
     }
 
@@ -817,6 +889,7 @@ class AiOperationService
         $ownedAttemptToken = $attemptToken;
 
         try {
+            $this->authorizeDocumentOperation($operation);
             match ($operation->operation_type) {
                 AiOperationType::ResumeAdaptation => $this->processResumeAdaptation($operation, $runToken, $ownedAttemptToken),
                 AiOperationType::ResumeTranslation => $this->processResumeTranslation($operation, $runToken, $ownedAttemptToken),
@@ -827,7 +900,16 @@ class AiOperationService
                 AiOperationType::PublicationTriage => $this->processPublicationTriage($operation, $runToken, $ownedAttemptToken),
                 AiOperationType::ProfileImport => $this->profileImport->process($operation, $runToken, $ownedAttemptToken,
                     fn (Closure $persist): mixed => $this->persistForAttempt($operation->id, $runToken, $ownedAttemptToken, $persist)),
+                AiOperationType::Matching => $this->matching->process($operation, $runToken, $ownedAttemptToken,
+                    fn (Closure $persist): mixed => $this->persistForAttempt($operation->id, $runToken, $ownedAttemptToken, $persist)),
             };
+        } catch (MatchingException $exception) {
+            AiOperation::query()->whereKey($operation->id)->where('run_token', $runToken)->where('attempt_token', $ownedAttemptToken)
+                ->where('status', AiOperationStatus::Running)->update([
+                    'status' => AiOperationStatus::Failed->value, 'failed_at' => now(), 'failure_code' => $exception->failureCode,
+                ]);
+
+            return;
         } catch (ProfileImportException $exception) {
             $updated = AiOperation::query()->whereKey($operation->id)->where('run_token', $runToken)->where('attempt_token', $ownedAttemptToken)
                 ->where('status', AiOperationStatus::Running)->update([
@@ -1124,6 +1206,8 @@ class AiOperationService
                 throw new LogicException('A tentativa da operação não é mais válida.');
             }
 
+            $this->authorizeDocumentOperation(AiOperation::query()->findOrFail($operationId));
+
             return $persist();
         });
     }
@@ -1351,6 +1435,7 @@ class AiOperationService
                 'O resultado estruturado está disponível para consulta.',
             ],
             AiOperationType::ProfileImport => ['Proposta de perfil disponível', 'Revise os fatos e as evidências antes de confirmar.'],
+            AiOperationType::Matching => ['Matching disponível', 'Consulte critérios, evidências e incertezas.'],
         };
 
         $this->sendTerminalNotification($operation, true, $title, $body);
@@ -1388,6 +1473,7 @@ class AiOperationService
                 'Não foi possível estruturar esta publicação. Tente novamente.',
             ],
             AiOperationType::ProfileImport => ['Falha na importação do currículo', 'Consulte a operação antes de tentar novamente.'],
+            AiOperationType::Matching => ['Falha no matching', 'Consulte a operação antes de tentar novamente.'],
         };
 
         $this->sendTerminalNotification($operation, false, $title, $body);
@@ -1489,6 +1575,7 @@ class AiOperationService
             AiOperationType::PublicationExtraction => [null, null],
             AiOperationType::PublicationTriage => [null, null],
             AiOperationType::ProfileImport => [null, null],
+            AiOperationType::Matching => [null, null],
         };
     }
 }

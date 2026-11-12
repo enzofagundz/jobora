@@ -3,9 +3,11 @@
 use App\Agents\ResumeAdaptationAgent;
 use App\Enums\ResumeLanguage;
 use App\Models\JobPosting;
+use App\Models\ProfessionalProfile;
 use App\Models\Resume;
 use App\Models\ResumeAdaptation;
 use App\Models\User;
+use App\Services\AiInputSnapshotService;
 use App\Services\ResumeAdaptationService;
 use App\Services\ResumeService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -41,6 +43,39 @@ function validAdaptationResponse(): array
         'alerts' => [],
     ];
 }
+
+it('ignores unrelated source edits while persisting an adaptation', function () {
+    ResumeAdaptationAgent::fake([validAdaptationResponse()]);
+    $user = User::factory()->create();
+    $posting = adaptationPosting($user);
+    adaptationResume($user);
+    $snapshot = app(AiInputSnapshotService::class)->resumeAdaptation($user, $posting, ResumeLanguage::PtBr);
+    $adaptation = app(ResumeAdaptationService::class)->adaptFromSnapshot($user, $posting, $snapshot['payload'], $snapshot['fingerprint'],
+        function (Closure $persist) use ($user, $posting) {
+            Resume::factory()->for($user)->create(['language' => 'en', 'content' => 'Unrelated English resume']);
+            ProfessionalProfile::query()->create(['user_id' => $user->id, 'version' => 1, 'draft' => [],
+                'confirmed_version' => 1, 'confirmed_snapshot' => ['competencies' => ['Unrelated']]]);
+            ResumeAdaptation::query()->create(['job_posting_id' => $posting->id, 'language' => 'en', 'adapted_content' => 'Unrelated English adaptation']);
+
+            return $persist();
+        });
+    expect($adaptation->source_fingerprint)->toBe($snapshot['fingerprint']);
+});
+
+it('rejects changes to actual adaptation inputs during persistence', function () {
+    ResumeAdaptationAgent::fake([validAdaptationResponse()]);
+    $user = User::factory()->create();
+    $posting = adaptationPosting($user);
+    adaptationResume($user);
+    $snapshot = app(AiInputSnapshotService::class)->resumeAdaptation($user, $posting, ResumeLanguage::PtBr);
+    expect(fn () => app(ResumeAdaptationService::class)->adaptFromSnapshot($user, $posting, $snapshot['payload'], $snapshot['fingerprint'],
+        function (Closure $persist) use ($user) {
+            Resume::query()->where('user_id', $user->id)->where('language', 'pt-BR')->update(['content' => 'Changed resume']);
+
+            return $persist();
+        }))->toThrow(RuntimeException::class, 'As fontes mudaram durante a adequação.');
+    expect(ResumeAdaptation::query()->count())->toBe(0);
+});
 
 it('generates and persists the last adaptation per posting (UPSERT)', function () {
     ResumeAdaptationAgent::fake([validAdaptationResponse()]);

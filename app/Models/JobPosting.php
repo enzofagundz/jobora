@@ -141,6 +141,13 @@ class JobPosting extends Model
         return $this->readiness !== null;
     }
 
+    public function isEligibleForApplicationDocuments(): bool
+    {
+        return $this->readiness !== null
+            ? $this->readiness === 'ready'
+            : $this->status === JobPostingStatus::Confirmed;
+    }
+
     public function assertLegacyWorkflow(): void
     {
         if ($this->isStructuredOpportunity()) {

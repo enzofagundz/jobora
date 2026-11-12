@@ -36,6 +36,7 @@ class RecordApplicationUpdateTool extends JoboraTool
             'notes' => ['nullable', 'string', 'max:5000'],
             'contact' => ['nullable', 'string', 'max:255'],
             'occurred_at' => ['nullable', 'date'],
+            'event_key' => ['nullable', 'string', 'min:1', 'max:128'],
         ]);
 
         $user = $this->user();
@@ -56,7 +57,8 @@ class RecordApplicationUpdateTool extends JoboraTool
             $validated['title'] ?? null,
             $validated['notes'] ?? null,
             $validated['contact'] ?? null,
-            isset($validated['occurred_at']) ? Carbon::parse($validated['occurred_at']) : now(),
+            isset($validated['occurred_at']) ? Carbon::parse($validated['occurred_at']) : null,
+            $validated['event_key'] ?? null,
         );
 
         return $this->ok([
@@ -77,6 +79,7 @@ class RecordApplicationUpdateTool extends JoboraTool
             'notes' => $schema->string()->description('Notas do evento.'),
             'contact' => $schema->string()->description('Contato relacionado.'),
             'occurred_at' => $schema->string()->description('Quando ocorreu (ISO-8601). Padrão: agora.'),
+            'event_key' => $schema->string()->description('Chave opcional de idempotência. Mesmo conteúdo retorna o evento sem reaplicar status.'),
         ];
     }
 }

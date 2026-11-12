@@ -3,12 +3,15 @@
 namespace App\Mcp\Tools\System;
 
 use App\Enums\AiOperationType;
+use App\Mcp\Support\AgentIntegrationContext;
 use App\Mcp\Support\ToolException;
 use App\Mcp\Tools\JoboraTool;
 use App\Models\AiOperation;
+use App\Models\MatchingEvaluation;
 use App\Models\ProfessionalProfile;
 use App\Models\ProfileImportProposal;
 use App\Models\PublicationTriageResult;
+use App\Services\MatchingService;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -96,9 +99,13 @@ class GetAiOperationTool extends JoboraTool
 
         return [
             'id' => $operation->id,
+            'matching_evaluation_id' => $operation->operation_type === AiOperationType::Matching
+                ? MatchingEvaluation::query()->where('ai_operation_id', $operation->id)->where('run_token', $operation->run_token)->value('id') : null,
             'profile_import_proposal_id' => $operation->operation_type === AiOperationType::ProfileImport
                 ? ProfileImportProposal::query()->where('ai_operation_id', $operation->id)->where('run_token', $operation->run_token)->latest('id')->value('id') : null,
-            'retry_allowed' => $this->profileImportRetryAllowed($operation),
+            'retry_allowed' => $operation->operation_type === AiOperationType::Matching
+                ? $this->matchingRetryAllowed($operation)
+                : $this->profileImportRetryAllowed($operation),
             'type' => $operation->operation_type?->value,
             'status' => $operation->status?->value,
             'attempts' => $operation->attempts,
@@ -121,6 +128,17 @@ class GetAiOperationTool extends JoboraTool
                 ->all(),
             'publication_triage_history' => $publicationTriageHistory,
         ];
+    }
+
+    private function matchingRetryAllowed(AiOperation $operation): bool
+    {
+        $candidate = clone $operation;
+        $actor = app()->bound(AgentIntegrationContext::class)
+            ? ['source' => 'mcp', 'integration_id' => app(AgentIntegrationContext::class)->integration->id]
+            : ['source' => 'stdio'];
+        $candidate->input_snapshot = [...($operation->input_snapshot ?? []), 'requester_actor' => $actor];
+
+        return app(MatchingService::class)->retryAllowed($this->user(), $candidate);
     }
 
     private function profileImportRetryAllowed(AiOperation $operation): bool
