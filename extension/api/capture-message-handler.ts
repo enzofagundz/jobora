@@ -410,9 +410,30 @@ export function createCaptureMessageHandler(
       }
       const pin = await contexts.get(binding.scopeKey);
       if (pin?.contextId !== message.context || pin.executionId !== binding.executionId) return { ok: false, error: 'reservation_changed' };
+      const preserveForOriginalCredential = async (preservedBinding: CredentialContext = binding): Promise<EnvelopeResult> => {
+        const owner = await owners.get(preservedBinding.origin, preservedBinding.credentialFingerprint);
+        if ((owner && owner.ownerUserId !== preservedBinding.ownerUserId) || preservedBinding.receipt) {
+          return { ok: false, error: 'credential_changed' };
+        }
+        const payloadHash = await credentialFingerprint(JSON.stringify(message.envelope));
+        if ((preservedBinding.acceptedPayloadHash && preservedBinding.acceptedPayloadHash !== payloadHash) ||
+          (!preservedBinding.acceptedPayloadHash && (pin.blocked || expired(preservedBinding))) ||
+          (await contexts.get(preservedBinding.scopeKey!))?.revision !== pin.revision) {
+          return { ok: false, error: 'reservation_changed' };
+        }
+        if (!preservedBinding.acceptedPayloadHash && !(await contexts.putIfRevision(message.context!, preservedBinding.revision, { ...preservedBinding, acceptedPayloadHash: payloadHash }))) {
+          return { ok: false, error: 'reservation_changed' };
+        }
+        const saved = await queue.enqueue(message.envelope, {
+          origin: preservedBinding.origin,
+          credentialFingerprint: preservedBinding.credentialFingerprint,
+          ownerUserId: preservedBinding.ownerUserId,
+        });
+        return saved.ok ? { ok: false, error: 'credential_changed', queued: true } : { ok: false, error: saved.error };
+      };
       const credential = await currentCredential();
       if (!credential || !sameTarget(credential, binding) || !(await bindingCurrent(credential, binding))) {
-        return { ok: false, error: credential ? 'credential_changed' : 'auth' };
+        return preserveForOriginalCredential();
       }
       const target: CaptureQueueTarget = {
         origin: binding.origin,
@@ -420,7 +441,7 @@ export function createCaptureMessageHandler(
         ownerUserId: binding.ownerUserId,
       };
       const payloadHash = await credentialFingerprint(JSON.stringify(message.envelope));
-      if (!(await bindingCurrent(credential, binding))) return { ok: false, error: 'credential_changed' };
+      if (!(await bindingCurrent(credential, binding))) return preserveForOriginalCredential();
       if (binding.acceptedPayloadHash && binding.acceptedPayloadHash !== payloadHash) return { ok: false, error: 'reservation_changed' };
       if (binding.receipt && binding.acceptedPayloadHash === payloadHash) return { ...binding.receipt, duplicate: true };
       const exactReplay = binding.acceptedPayloadHash === payloadHash;
@@ -432,7 +453,7 @@ export function createCaptureMessageHandler(
           if (message.envelope.capture.initial_url !== binding.observedUrl) urls.add(message.envelope.capture.initial_url);
           for (const url of urls) {
             const resolved = await resolveDiscoveryRun(url, { origin: credential.origin, token: credential.token });
-            if (!(await bindingCurrent(credential, binding))) return { ok: false, error: 'credential_changed' };
+            if (!(await bindingCurrent(credential, binding))) return preserveForOriginalCredential();
             if ((await contexts.get(binding.scopeKey))?.revision !== pin.revision) return { ok: false, error: 'reservation_changed' };
             if (!resolved.ok || resolved.run?.executionId !== binding.executionId || resolved.run.source !== binding.source || resolved.run.surface !== binding.surface) {
               await contexts.putIfRevision(binding.scopeKey, pin.revision, { ...pin, blocked: true });
@@ -442,7 +463,7 @@ export function createCaptureMessageHandler(
           }
         }
       }
-      if (!(await bindingCurrent(credential, binding))) return { ok: false, error: 'credential_changed' };
+      if (!(await bindingCurrent(credential, binding))) return preserveForOriginalCredential();
       const currentPin = await contexts.get(binding.scopeKey);
       if (currentPin?.contextId !== message.context || currentPin.revision !== pin.revision) return { ok: false, error: 'reservation_changed' };
       const accepted = exactReplay ? binding : { ...binding, acceptedPayloadHash: payloadHash, revision: newCredentialContextId() };
@@ -453,18 +474,18 @@ export function createCaptureMessageHandler(
           return { ok: false, error: 'storage' };
         }
       }
-      if (!(await bindingCurrent(credential, binding))) return { ok: false, error: 'credential_changed' };
+      if (!(await bindingCurrent(credential, binding))) return preserveForOriginalCredential(accepted);
       if ((await contexts.get(binding.scopeKey))?.revision !== pin.revision) return { ok: false, error: 'reservation_changed' };
       const enqueued = await queue.enqueue(message.envelope, target);
       if (!enqueued.ok) return { ok: false, error: enqueued.error };
 
       const credentialCurrent = await bindingCurrent(credential, binding);
       if (!credentialCurrent || (await contexts.get(binding.scopeKey))?.revision !== pin.revision) {
-        if (!enqueued.existing) await queue.discard(message.envelope.capture.idempotency_key, target);
+        if (credentialCurrent && !enqueued.existing) await queue.discard(message.envelope.capture.idempotency_key, target);
         const visible: EnvelopeResult = {
           ok: false,
           error: credentialCurrent ? 'reservation_changed' : 'credential_changed',
-          queued: enqueued.existing,
+          queued: !credentialCurrent || enqueued.existing,
           executionId: message.envelope.capture.execution_id,
           coverage: message.envelope.capture.coverage.status,
         };

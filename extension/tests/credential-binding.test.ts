@@ -151,14 +151,52 @@ describe('contexto opaco de credencial', () => {
 
     expect(result).toMatchObject({ ok: false, error: 'credential_changed' });
     expect(uploads).toHaveLength(0);
-    expect(store.records.size).toBe(0);
+    expect(store.records.size).toBe(1);
+    expect([...store.records.values()][0]!.envelope).toEqual(captured);
+    await handler.flush();
+    expect(uploads).toHaveLength(0);
 
     await apiToken.setValue(TOKEN_A1);
-    expect(await handler({ type: 'capture:submit-envelope', envelope: captured, context: resolved.context! })).toMatchObject({ ok: true });
+    await handler.flush();
     expect(uploads).toHaveLength(1);
     expect(uploads[0]!.token).toBe(TOKEN_A1);
     expect(store.records.size).toBe(0);
     expect(fetchSpy).toHaveBeenCalled();
+  });
+
+  it('preserva o envelope quando o token muda imediatamente após aceitar o payload', async () => {
+    const { store, contexts, handler } = setup();
+    const { uploads } = mockBackend();
+    const resolved = await resolveContext(handler);
+    const putIfRevision = contexts.putIfRevision.bind(contexts);
+    contexts.putIfRevision = async (id, revision, context) => {
+      const updated = await putIfRevision(id, revision, context);
+      if (updated && id === resolved.context && context.acceptedPayloadHash) {
+        await apiToken.setValue(TOKEN_B);
+      }
+      return updated;
+    };
+    const captured = envelope('exec-1');
+
+    expect(await handler({
+      type: 'capture:submit-envelope',
+      envelope: captured,
+      context: resolved.context!,
+    })).toMatchObject({ ok: false, error: 'credential_changed', queued: true });
+    expect(store.records.size).toBe(1);
+    expect([...store.records.values()][0]).toMatchObject({
+      envelope: captured,
+      credentialFingerprint: await credentialFingerprint(TOKEN_A1),
+      ownerUserId: 1,
+    });
+    expect(uploads).toHaveLength(0);
+    await handler.flush();
+    expect(uploads).toHaveLength(0);
+
+    await apiToken.setValue(TOKEN_A1);
+    await handler.flush();
+    expect(uploads).toEqual([{ body: captured, token: TOKEN_A1 }]);
+    expect(store.records.size).toBe(0);
   });
 
   it('captura espontânea (execution_id null) também fica presa ao contexto A1', async () => {
@@ -177,7 +215,14 @@ describe('contexto opaco de credencial', () => {
 
     expect(result).toMatchObject({ ok: false, error: 'credential_changed' });
     expect(uploads).toHaveLength(0);
-    expect(store.records.size).toBe(0);
+    expect(store.records.size).toBe(1);
+    await handler.flush();
+    expect(uploads).toHaveLength(0);
+    await apiToken.setValue(TOKEN_A1);
+    await handler.flush();
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0]!.body).toEqual(envelope(null));
+    expect(uploads[0]!.token).toBe(TOKEN_A1);
   });
 
   it('contexto ausente ou desconhecido não enfileira nem envia', async () => {

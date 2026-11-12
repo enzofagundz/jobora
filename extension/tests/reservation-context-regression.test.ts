@@ -271,7 +271,7 @@ describe('background reservation authority tied to trusted tab and frame', () =>
     expect(flow.uploads).toHaveLength(0);
   });
 
-  it('does not inherit authority across credentials and never queues an old credential context', async () => {
+  it('does not inherit authority across credentials and preserves the original credential payload', async () => {
     const flow = authorityFixture();
     const old = await authorityContext(flow.handler);
     await apiToken.setValue('different-controlled-credential');
@@ -280,7 +280,8 @@ describe('background reservation authority tied to trusted tab and frame', () =>
     const envelope = authorityEnvelope(null, CHANGED_URL);
     expect(await flow.handler({ type: 'capture:submit-envelope', context: manual, envelope }, TAB_A)).toMatchObject({ ok: true });
     expect(flow.uploads).toHaveLength(1);
-    expect(await flow.store.getAll()).toHaveLength(0);
+    expect(await flow.store.getAll()).toHaveLength(1);
+    expect((await flow.store.getAll())[0]?.envelope).toEqual(authorityEnvelope());
   });
 
   it('rejects stale resolve responses rather than overwriting the newer persisted reservation', async () => {
@@ -416,7 +417,7 @@ describe('background reservation authority tied to trusted tab and frame', () =>
     expect(await flow.handler({ type: 'capture:submit-envelope', context: reserved, envelope: authorityEnvelope() }, TAB_A)).toMatchObject({ ok: false, error: 'credential_changed' });
     const manualApi = await authorityContext(flow.handler, CHANGED_URL);
     expect(manualApi).not.toBe(reserved);
-    expect(await flow.store.getAll()).toHaveLength(0);
+    expect(await flow.store.getAll()).toHaveLength(1);
   });
 
   it('does not accept an old owner binding after credential validation identifies a different owner', async () => {
@@ -456,7 +457,7 @@ describe('background reservation authority tied to trusted tab and frame', () =>
     }
   });
 
-  it('does not queue a reserved capture if credentials change while readonly validation awaits', async () => {
+  it('preserves a reserved capture without sending if credentials change during readonly validation', async () => {
     const flow = authorityFixture();
     const context = await authorityContext(flow.handler);
     const delayed = Promise.withResolvers<Response>();
@@ -467,7 +468,7 @@ describe('background reservation authority tied to trusted tab and frame', () =>
     await apiToken.setValue('new-credential-during-validation');
     delayed.resolve(json({ execution_id: EXECUTION_ID, source: 'linkedin', surface: 'linkedin_jobs', initial_url: INITIAL_URL }));
     expect(await submitting).toMatchObject({ ok: false, error: 'credential_changed' });
-    expect(await flow.store.getAll()).toHaveLength(0);
+    expect(await flow.store.getAll()).toHaveLength(1);
     expect(flow.uploads).toHaveLength(0);
   });
 
