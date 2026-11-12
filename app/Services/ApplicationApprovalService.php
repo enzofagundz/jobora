@@ -10,6 +10,7 @@ use App\Models\ApplicationPreparation;
 use App\Models\TelegramIdentityBinding;
 use App\Models\User;
 use Carbon\CarbonImmutable;
+use Closure;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -103,13 +104,35 @@ class ApplicationApprovalService
     }
 
     /** @return array<string, mixed> */
-    public function forPreparation(User $user, string $preparationId): array
+    public function forPreparation(User $user, string $preparationId, int $limit = 20, int $offset = 0): array
     {
+        Validator::validate(['limit' => $limit, 'offset' => $offset], [
+            'limit' => ['integer', 'min:1', 'max:100'], 'offset' => ['integer', 'min:0'],
+        ]);
         app(ApplicationDocumentAccess::class)->authorize($user, scope: AgentIntegrationScope::ApprovalsRead);
-        ApplicationPreparation::query()->where('user_id', $user->id)->findOrFail($preparationId);
+        $preparation = ApplicationPreparation::query()->where('user_id', $user->id)->findOrFail($preparationId);
+        $query = ApplicationApproval::query()->where('user_id', $user->id)->where('preparation_id', $preparationId);
+        $total = $query->count();
+        $approvals = $query->orderBy('received_at')->orderBy('id')->offset($offset)->limit($limit)->get();
+        $integrations = AgentIntegration::query()->where('user_id', $user->id)->whereIn('id', $approvals->pluck('integration_id'))->get()->keyBy('id');
+        $bindings = TelegramIdentityBinding::query()->where('user_id', $user->id)->whereIn('id', $approvals->pluck('binding_id'))->get()->keyBy('id');
+        $cache = ['preparation:'.$preparationId => $preparation];
+        foreach ($approvals as $approval) {
+            $cache['integration:'.$approval->integration_id] = $integrations->get($approval->integration_id);
+            $cache['binding:'.$approval->binding_id] = $bindings->get($approval->binding_id);
+        }
+        $remember = static function (string $key, Closure $load) use (&$cache): mixed {
+            if (! array_key_exists($key, $cache)) {
+                $cache[$key] = $load();
+            }
 
-        return ['preparation_id' => $preparationId, 'approvals' => ApplicationApproval::query()->where('user_id', $user->id)->where('preparation_id', $preparationId)
-            ->orderBy('received_at')->orderBy('id')->get()->map(fn (ApplicationApproval $approval): array => $this->present($user, $approval))->all(),
+            return $cache[$key];
+        };
+
+        return ['preparation_id' => $preparationId,
+            'approvals' => $approvals->map(fn (ApplicationApproval $approval): array => $this->present($user, $approval, $remember))->all(),
+            'total' => $total, 'limit' => $limit, 'offset' => $offset,
+            'next_offset' => $offset + $approvals->count() < $total ? $offset + $approvals->count() : null,
             'trust_statement' => TelegramIdentityService::TRUST_STATEMENT, 'authorizes_submission' => false];
     }
 
@@ -133,8 +156,15 @@ class ApplicationApprovalService
     /** @return list<string> */
     public function invalidReasons(User $user, ApplicationApproval $approval): array
     {
+        return $this->collectInvalidReasons($user, $approval);
+    }
+
+    /** @return list<string> */
+    private function collectInvalidReasons(User $user, ApplicationApproval $approval, ?Closure $remember = null): array
+    {
+        $remember ??= static fn (string $key, Closure $load): mixed => $load();
         $reasons = [];
-        $currentUser = $user->fresh();
+        $currentUser = $remember('user', fn () => $user->fresh());
         if ($user->id !== $approval->user_id || $currentUser === null || $currentUser->disabled_at !== null) {
             $reasons[] = 'account_inactive';
         }
@@ -144,25 +174,33 @@ class ApplicationApprovalService
         if ($approval->expires_at->lte(now())) {
             $reasons[] = 'approval_expired';
         }
-        $integration = AgentIntegration::query()->where('user_id', $user->id)->find($approval->integration_id);
+        $integration = $remember('integration:'.$approval->integration_id,
+            fn () => AgentIntegration::query()->where('user_id', $user->id)->find($approval->integration_id));
         if (! $integration?->can(AgentIntegrationScope::ApprovalsWrite)) {
             $reasons[] = 'integration_inactive';
         }
-        $binding = TelegramIdentityBinding::query()->where('user_id', $user->id)->find($approval->binding_id);
+        $binding = $remember('binding:'.$approval->binding_id,
+            fn () => TelegramIdentityBinding::query()->where('user_id', $user->id)->find($approval->binding_id));
         if ($binding === null || $binding->revoked_at !== null || $binding->active_user_id !== $user->id
             || $binding->integration_id !== $approval->integration_id || $binding->telegram_identity['telegram_user_id'] !== $approval->telegram_identity['telegram_user_id']
             || $binding->telegram_identity['chat_id'] !== $approval->telegram_identity['chat_id']) {
             $reasons[] = 'binding_inactive';
         }
-        $preparation = ApplicationPreparation::query()->where('user_id', $user->id)->find($approval->preparation_id);
+        $preparation = $remember('preparation:'.$approval->preparation_id,
+            fn () => ApplicationPreparation::query()->where('user_id', $user->id)->find($approval->preparation_id));
         if ($preparation === null || ! hash_equals($preparation->fingerprint, $approval->fingerprint)
             || $preparation->state !== 'awaiting_approval' || $preparation->pending !== []
-            || ! app(ApplicationPreparationService::class)->isCurrentForApproval($user, $preparation)) {
+            || ! $remember('current:'.$approval->preparation_id,
+                fn (): bool => app(ApplicationPreparationService::class)->isCurrentForApproval($user, $preparation))) {
             $reasons[] = 'preparation_stale';
         }
-        $artifacts = $preparation?->artifacts()->get();
-        if ($artifacts === null || $artifacts->isEmpty() || $artifacts->contains(fn ($artifact): bool => $artifact->revoked_at !== null
-            || $artifact->expires_at->lte(now()) || ! Storage::disk('local')->exists($artifact->path))) {
+        $artifactsUnavailable = $remember('artifacts:'.$approval->preparation_id, function () use ($preparation): bool {
+            $artifacts = $preparation?->artifacts()->get();
+
+            return $artifacts === null || $artifacts->isEmpty() || $artifacts->contains(fn ($artifact): bool => $artifact->revoked_at !== null
+                || $artifact->expires_at->lte(now()) || ! Storage::disk('local')->exists($artifact->path));
+        });
+        if ($artifactsUnavailable) {
             $reasons[] = 'artifacts_unavailable';
         }
         if (($preparation?->snapshot['ats_consent'] ?? false) && ! Gate::forUser($currentUser ?? $user)->allows('useAtsOptimization')) {
@@ -173,9 +211,9 @@ class ApplicationApprovalService
     }
 
     /** @return array<string, mixed> */
-    private function present(User $user, ApplicationApproval $approval): array
+    private function present(User $user, ApplicationApproval $approval, ?Closure $remember = null): array
     {
-        $reasons = $this->invalidReasons($user, $approval);
+        $reasons = $this->collectInvalidReasons($user, $approval, $remember);
         $status = $approval->revoked_at !== null ? 'revoked' : ($approval->expires_at->lte(now()) ? 'expired' : ($reasons === [] ? 'active' : 'invalid'));
 
         return ['id' => $approval->id, 'preparation_id' => $approval->preparation_id, 'binding_id' => $approval->binding_id, 'integration_id' => $approval->integration_id,
