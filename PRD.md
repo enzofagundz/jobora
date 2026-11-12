@@ -1,6 +1,18 @@
 # PRD — Análise do Mercado de Trabalho a partir de Vagas de Emprego
 
-## 1. Visão do produto
+## Estado atual V2 e leitura do histórico (#37)
+
+O Jobora V2 organiza descoberta por fontes e execuções, captura de páginas, triagem explícita de publicações, revisão de oportunidades, perfil profissional confirmado e matching explicável. Currículos PT-BR/EN, competências estratégicas, adequação e ATS permanecem disponíveis. O perfil confirmado é a referência do matching; o PT-BR permanece a referência de tradução, não a verdade única do perfil.
+
+A extensão deste monorepo envia envelopes para `/api/page-captures` com credencial individual. `/api/job-captures` está aposentado, sem efeito de captura. O usuário confirmou que todas as instalações Hermes e clientes foram migrados para V2 e que os userscripts e a extensão antiga não estão em uso. Não há necessidade de compatibilidade operacional com esses clientes.
+
+O mercado deixa a navegação principal e o catálogo MCP, mas seus serviços, normalização compartilhada e rotas históricas são preservados. Isso não converte frequências de mercado em matching nem transforma `confirmed` V1 em `ready` V2. As funcionalidades F1–F6 e os critérios abaixo registram o produto original; suas prioridades de mercado e exclusões de contas, transporte remoto, descoberta e candidaturas não definem o escopo atual.
+
+O envio externo exige aprovação humana vigente e autorização exclusiva no primeiro consumo remoto autenticado. Reserva, consulta e replay nunca autorizam envio. Hermes executa no navegador e relata evidências; o Jobora não garante exactly-once externo. Resultado `unknown` impede repetição até reconciliação. O acompanhamento de candidaturas é separado desse protocolo.
+
+Backups ainda não foram implantados. A homologação real Hermes nas três superfícies, a inspeção de browser/JS/rede/backend e o teste de restore em ambiente descartável continuam pendentes (#38). O fechamento de #29 por pedido do usuário não comprova homologação integral.
+
+## 1. Visão do produto (histórico V1)
 
 **O que é o produto**
 

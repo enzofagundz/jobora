@@ -9,4 +9,8 @@ enum AiOperationType: string
     case StrategicCompetencyClassification = 'strategic_competency_classification';
     case AtsOptimization = 'ats_optimization';
     case AtsScore = 'ats_score';
+    case PublicationExtraction = 'publication_extraction';
+    case PublicationTriage = 'publication_triage';
+    case ProfileImport = 'profile_import';
+    case Matching = 'matching';
 }

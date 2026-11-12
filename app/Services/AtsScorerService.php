@@ -68,6 +68,7 @@ class AtsScorerService
         if ($posting->user_id !== $user->id) {
             throw new \LogicException('Vaga não pertence ao usuário.');
         }
+        app(ApplicationDocumentAccess::class)->posting($user, $posting->fresh());
     }
 
     /**
@@ -83,7 +84,8 @@ class AtsScorerService
         bool $persistResult = true,
     ): array {
 
-        $jsonPayload = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        $jsonPayload = json_encode(array_diff_key($payload, ['document_guard' => true]), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+        $sourceHash = app(ApplicationDocumentAccess::class)->sourceHash($user, $posting->fresh());
         $started = microtime(true);
         $usage = null;
 
@@ -122,6 +124,13 @@ class AtsScorerService
 
             $rationale = trim(mb_substr($rationale, 0, 200));
 
+            if (! $persistResult) {
+                $this->assertAccess($user, $posting->fresh());
+                if ($sourceHash !== app(ApplicationDocumentAccess::class)->sourceHash($user, $posting->fresh())) {
+                    throw new \LogicException('As fontes mudaram durante a comparação ATS.');
+                }
+            }
+
             if ($persistResult) {
                 $language = ResumeLanguage::tryFrom((string) ($payload['language'] ?? '')) ?? ResumeLanguage::PtBr;
                 $adaptation = $posting->resumeAdaptation($language)->first();
@@ -130,7 +139,11 @@ class AtsScorerService
                     throw new \LogicException('Gere a adaptação do currículo antes de simular a nota.');
                 }
 
-                $persist = function () use ($adaptation, $fingerprint, $rationale, $score): void {
+                $persist = function () use ($sourceHash, $user, $posting, $adaptation, $fingerprint, $rationale, $score): void {
+                    $this->assertAccess($user, $posting->fresh());
+                    if ($sourceHash !== app(ApplicationDocumentAccess::class)->sourceHash($user, $posting->fresh())) {
+                        throw new \LogicException('As fontes mudaram durante a simulação ATS.');
+                    }
                     $adaptation->forceFill([
                         'ats_score' => $score,
                         'ats_rationale' => $rationale,
@@ -177,6 +190,7 @@ class AtsScorerService
      */
     public function scoreComparison(User $user, JobPosting $posting, ResumeLanguage $language): array
     {
+        $this->assertAccess($user, $posting);
         Gate::forUser($user)->authorize('useAtsOptimization');
         Gate::forUser($user)->authorize('view', $posting);
 

@@ -4,19 +4,25 @@ use App\Agents\JobExtractionAgent;
 use App\Agents\ResumeAdaptationAgent;
 use App\Enums\JobPostingStatus;
 use App\Enums\ResumeLanguage;
+use App\Filament\Pages\AiOperationsPage;
 use App\Filament\Pages\CaptureSetupPage;
+use App\Filament\Pages\DiscoveryRunsPage;
 use App\Filament\Pages\JobSearchPage;
 use App\Filament\Pages\MarketComparisonPage;
 use App\Filament\Pages\MarketTrendsPage;
 use App\Filament\Pages\ProfessionalCompetenciesPage;
+use App\Filament\Pages\ProfessionalProfilePage;
 use App\Filament\Pages\ResumePage;
 use App\Filament\Pages\ScreeningPreferencesPage;
+use App\Filament\Pages\TelegramIdentityPage;
 use App\Filament\Resources\AgentIntegrations\AgentIntegrationResource;
+use App\Filament\Resources\DiscoverySources\DiscoverySourceResource;
 use App\Filament\Resources\JobCaptures\JobCaptureResource;
 use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Filament\Resources\JobPostings\Pages\ApplicationPage;
 use App\Filament\Resources\JobPostings\Pages\ListJobPostings;
 use App\Filament\Resources\JobPostings\Pages\ViewJobPosting;
+use App\Filament\Resources\PageCaptures\PageCaptureResource;
 use App\Filament\Widgets\ComparisonSummaryWidget;
 use App\Filament\Widgets\StatsOverviewWidget;
 use App\Filament\Widgets\TopConceptsWidget;
@@ -24,16 +30,20 @@ use App\Filament\Widgets\TrendsChartWidget;
 use App\Jobs\AnalyzeJobPosting;
 use App\Jobs\ProcessAiOperation;
 use App\Models\AiOperation;
+use App\Models\JobIaAttempt;
 use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
 use App\Models\User;
 use App\Services\AiInputSnapshotService;
+use App\Services\ApplicationTrackingService;
 use App\Services\CaptureTokenService;
 use App\Services\JobAnalysisService;
 use App\Services\ResumeService;
 use Filament\Facades\Filament;
 use Filament\Pages\Dashboard;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 use Spatie\LaravelPdf\Facades\Pdf;
@@ -148,13 +158,15 @@ it('renderiza as tendências com série mensal', function () {
 });
 
 it('widgets exibem dados corretos', function () {
-    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription(), 'readiness' => 'ready']);
     $posting->items()->create(['category' => 'skill', 'name' => 'Python', 'source' => 'ai']);
-    JobPosting::factory()->for(auth()->user(), 'user')->needsReview()->create(['description' => longDescription()]);
+    JobPosting::factory()->for(auth()->user(), 'user')->create(['description' => longDescription(), 'readiness' => 'needs_review']);
 
     Livewire::test(StatsOverviewWidget::class)
         ->assertSee('2')
-        ->assertSee('Aguardando revisão');
+        ->assertSee('Oportunidades prontas')
+        ->assertSee('com prontidão V2 marcada como pronta')
+        ->assertSee('Precisam de revisão');
 
     Livewire::test(TopConceptsWidget::class)
         ->assertSee('Python');
@@ -333,23 +345,40 @@ it('renderiza a página de view com a descrição rica', function () {
         ->assertSeeHtml('<strong>Vaga</strong>');
 });
 
-it('a ação de Candidatura aparece na listagem para vagas confirmadas e esconde fora desse status', function () {
+it('exibe candidatura para vagas elegíveis e oculta vagas sem prontidão ou histórico', function () {
     $confirmed = JobPosting::factory()->for(auth()->user(), 'user')->confirmed()->create(['description' => longDescription()]);
     $pending = JobPosting::factory()->for(auth()->user(), 'user')->create(['description' => longDescription()]);
     $needsReview = JobPosting::factory()->for(auth()->user(), 'user')->needsReview()->create(['description' => longDescription()]);
+    $readyStructured = JobPosting::factory()->for(auth()->user(), 'user')->create([
+        'description' => longDescription(), 'readiness' => 'ready', 'status' => 'pending',
+    ]);
 
     Livewire::test(ListJobPostings::class)
         ->assertTableActionVisible('application', $confirmed)
+        ->assertTableActionVisible('application', $readyStructured)
         ->assertTableActionHidden('application', $pending)
         ->assertTableActionHidden('application', $needsReview)
         ->assertSeeHtml('href="'.ApplicationPage::getUrl(['record' => $confirmed]).'"');
 });
 
-it('ApplicationPage redireciona para a listagem em vaga não confirmada', function () {
+it('mantém ação de candidatura na listagem para vaga V2 com histórico após perder prontidão', function () {
+    $posting = JobPosting::factory()->for(auth()->user(), 'user')->create([
+        'description' => longDescription(), 'readiness' => 'ready', 'status' => 'pending',
+    ]);
+    app(ApplicationTrackingService::class)->start(auth()->user(), $posting);
+    $posting->update(['readiness' => 'archived']);
+
+    Livewire::test(ListJobPostings::class)
+        ->assertTableActionVisible('application', $posting)
+        ->assertSeeHtml('href="'.ApplicationPage::getUrl(['record' => $posting]).'"');
+});
+
+it('ApplicationPage mantém leitura autorizada para vaga não confirmada sem histórico', function () {
     $posting = JobPosting::factory()->for(auth()->user(), 'user')->create(['description' => longDescription()]);
 
     Livewire::test(ApplicationPage::class, ['record' => $posting->id])
-        ->assertRedirect(ListJobPostings::getUrl());
+        ->assertSuccessful()
+        ->assertSee('Esta vaga não está pronta para novas gerações ou preparação');
 });
 
 it('ApplicationPage renderiza os métodos confirmados com origem, plataforma, URL e e-mail', function () {
@@ -566,6 +595,91 @@ it('permite visualizar vagas pendentes e confirmadas', function () {
     Livewire::test(ViewJobPosting::class, ['record' => $confirmed->id])->assertSuccessful();
 });
 
+it('loads latest attempt once per render with a separate aggregate count', function () {
+    $user = auth()->user();
+    $failed = JobPosting::factory()->for($user, 'user')->failed()->create(['description' => longDescription()]);
+    $failedAttempt = JobIaAttempt::factory()->for($failed, 'jobPosting')->for($user, 'user')->create([
+        'operation' => 'failed_operation',
+        'provider' => 'failed_provider',
+        'model' => 'failed_model',
+        'error_class' => 'FailedAttemptException',
+        'error_message' => 'Failed attempt detail.',
+    ]);
+    $confirmed = JobPosting::factory()->for($user, 'user')->confirmed()->create(['description' => longDescription()]);
+    $confirmedAttempt = JobIaAttempt::factory()->for($confirmed, 'jobPosting')->for($user, 'user')->create([
+        'operation' => 'confirmed_operation',
+        'provider' => 'confirmed_provider',
+        'model' => 'confirmed_model',
+        'error_class' => 'ConfirmedAttemptException',
+        'error_message' => 'Confirmed attempt detail.',
+    ]);
+    $pending = JobPosting::factory()->for($user, 'user')->create(['description' => longDescription()]);
+    $attemptQueries = 0;
+
+    DB::listen(function (QueryExecuted $query) use (&$attemptQueries): void {
+        if (str_contains($query->sql, 'job_ia_attempts')) {
+            $attemptQueries++;
+
+            if (str_starts_with($query->sql, 'select') && ! str_contains($query->sql, 'count(*)')) {
+                expect($query->sql)->toContain('limit 1');
+            }
+        }
+    });
+
+    $queriesBeforeFailed = $attemptQueries;
+    Livewire::test(ViewJobPosting::class, ['record' => $failed->id])
+        ->assertSuccessful()
+        ->assertSee('Diagnóstico da análise')
+        ->assertSee('Tentativas')
+        ->assertSee('Detalhes técnicos')
+        ->assertSee('Falha simulada na análise.')
+        ->assertSee($failedAttempt->operation)
+        ->assertSee($failedAttempt->provider)
+        ->assertSee($failedAttempt->model)
+        ->assertSee($failedAttempt->error_message);
+    $failedQueries = $attemptQueries - $queriesBeforeFailed;
+
+    $queriesBeforeConfirmed = $attemptQueries;
+    Livewire::test(ViewJobPosting::class, ['record' => $confirmed->id])
+        ->assertSuccessful()
+        ->assertDontSee('Diagnóstico da análise')
+        ->assertSee('Detalhes técnicos')
+        ->assertSee($confirmedAttempt->operation)
+        ->assertSee($confirmedAttempt->provider)
+        ->assertSee($confirmedAttempt->model)
+        ->assertSee($confirmedAttempt->error_message);
+    $confirmedQueries = $attemptQueries - $queriesBeforeConfirmed;
+
+    $queriesBeforePending = $attemptQueries;
+    $pendingPage = Livewire::test(ViewJobPosting::class, ['record' => $pending->id])
+        ->assertSuccessful()
+        ->assertDontSee('Detalhes técnicos');
+    $pendingQueries = $attemptQueries - $queriesBeforePending;
+
+    $newAttempt = JobIaAttempt::factory()->for($pending, 'jobPosting')->for($user, 'user')->create([
+        'operation' => 'new_pending_operation',
+        'provider' => 'new_pending_provider',
+        'model' => 'new_pending_model',
+    ]);
+    $queriesBeforePendingRefresh = $attemptQueries;
+    $pendingPage->call('$refresh')
+        ->assertSee('Detalhes técnicos')
+        ->assertSee($newAttempt->operation);
+    $pendingRefreshQueries = $attemptQueries - $queriesBeforePendingRefresh;
+
+    expect([
+        'failed' => $failedQueries,
+        'confirmed' => $confirmedQueries,
+        'pending' => $pendingQueries,
+        'pending_refresh' => $pendingRefreshQueries,
+    ])->toBe([
+        'failed' => 2,
+        'confirmed' => 1,
+        'pending' => 1,
+        'pending_refresh' => 1,
+    ]);
+});
+
 it('renderiza a página de onboarding da extensão com os quatro passos e máscara quando há token', function () {
     $service = app(CaptureTokenService::class);
     $service->issueToken(auth()->user());
@@ -592,7 +706,7 @@ it('mostra estado sem credencial quando usuário não tem token', function () {
         ->assertSee('Gerar credencial');
 });
 it('exibe a marca Jobora no painel', function () {
-    $this->get('/')->assertSuccessful()->assertSee('Jobora');
+    $this->get('/')->assertSuccessful()->assertSee('Jobora')->assertSee('Vínculo Telegram');
 });
 
 it('ordena a navegação lateral conforme o fluxo do produto', function () {
@@ -611,13 +725,17 @@ it('ordena a navegação lateral conforme o fluxo do produto', function () {
         JobSearchPage::class,
         CaptureSetupPage::class,
         JobCaptureResource::class,
+        PageCaptureResource::class,
+        DiscoveryRunsPage::class,
         JobPostingResource::class,
+        DiscoverySourceResource::class,
+        AiOperationsPage::class,
+        ProfessionalProfilePage::class,
         ResumePage::class,
         ScreeningPreferencesPage::class,
         ProfessionalCompetenciesPage::class,
         AgentIntegrationResource::class,
-        MarketComparisonPage::class,
-        MarketTrendsPage::class,
+        TelegramIdentityPage::class,
     ]);
 });
 

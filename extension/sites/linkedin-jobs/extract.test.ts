@@ -8,6 +8,7 @@ import {
   isJobCard,
   isLinkedInJobsRoute,
   jobIdFromCard,
+  jobsPaneMatches,
 } from './extract';
 
 function fixture(): string {
@@ -28,6 +29,31 @@ describe('LinkedIn Jobs extração (fixture real)', () => {
     expect(isLinkedInJobsRoute(new URL('https://www.linkedin.com/jobs/view/4461568021/'))).toBe(false);
     expect(isLinkedInJobsRoute(new URL('https://www.linkedin.com/search/results/content/?keywords=vaga'))).toBe(false);
     expect(isLinkedInJobsRoute(new URL('https://www.linkedin.com/feed/'))).toBe(false);
+  });
+
+  it('recognizes the redirected search-results route without accepting unrelated job paths or origins', () => {
+    const redirected = 'https://www.linkedin.com/jobs/search-results?skipRedirect=true&currentJobId=4486639255&keywords=Laravel&f_WT=2&f_SAL=f_SA_id_225001%3A272001&infoNotice=ai-job-search&f_TPR=r86400';
+    expect(isLinkedInJobsRoute(new URL(redirected))).toBe(true);
+    window.happyDOM.setURL(redirected);
+    expect(isLinkedInJobsRoute(window.location)).toBe(true);
+    expect(isLinkedInJobsRoute(new URL('https://www.linkedin.com/jobs/search-results/'))).toBe(true);
+    for (const url of [
+      'https://www.linkedin.com/jobs/search-results-extra?keywords=Laravel',
+      'https://www.linkedin.com/jobs/search-results/other',
+      'https://www.linkedin.com/jobs/collections/recommended/',
+      'https://www.linkedin.com/jobs/view/4486639255/',
+      'https://linkedin.com/jobs/search-results?keywords=Laravel',
+      'https://other.example/jobs/search-results?keywords=Laravel',
+      'http://www.linkedin.com/jobs/search-results?keywords=Laravel',
+    ]) expect(isLinkedInJobsRoute(new URL(url))).toBe(false);
+    const frozen = new URL(frozenSearchUrl());
+    expect(frozen.pathname).toBe('/jobs/search-results');
+    expect(frozen.searchParams.has('currentJobId')).toBe(false);
+    expect(frozen.searchParams.get('f_SAL')).toBe('f_SA_id_225001:272001');
+    expect(frozen.searchParams.get('f_TPR')).toBe('r86400');
+    expect(frozen.searchParams.get('f_WT')).toBe('2');
+    expect(frozen.searchParams.get('skipRedirect')).toBe('true');
+    expect(frozen.searchParams.get('infoNotice')).toBe('ai-job-search');
   });
 
   it('isJobCard detecta cards com data-job-id ou data-occludable-job-id', () => {
@@ -95,6 +121,33 @@ describe('LinkedIn Jobs extração (fixture real)', () => {
     expect(raw!.description).toContain('Job Description');
     expect(raw!.description).toContain('Laravel');
     expect(raw!.description).toContain('- Laravel');
+  });
+
+  it('não aceita currentJobId da URL quando o painel não expõe ID/permalink', () => {
+    window.happyDOM.setURL(
+      'https://www.linkedin.com/jobs/search/?keywords=Laravel&currentJobId=222',
+    );
+    const pane = document.querySelector('.scaffold-layout__detail.jobs-search__job-details')!;
+    pane.removeAttribute('data-job-id');
+    pane.querySelectorAll('[data-job-id]').forEach((node) => node.removeAttribute('data-job-id'));
+    pane.querySelectorAll('a[href*="/jobs/view/"]').forEach((node) => node.remove());
+
+    expect(jobsPaneMatches('222', pane)).toBe(false);
+  });
+
+  it('não aceita painel antigo por título igual; exige ID/permalink explícito', async () => {
+    window.happyDOM.setURL(
+      'https://www.linkedin.com/jobs/search/?keywords=Laravel&currentJobId=4461568022',
+    );
+    const pane = document.querySelector('.scaffold-layout__detail.jobs-search__job-details')!;
+    const title = pane.querySelector('h1 a')!;
+    title.textContent = 'PHP Back End Developer';
+
+    expect(jobsPaneMatches('4461568022', pane)).toBe(false);
+    expect(jobsPaneMatches('4461568021', pane)).toBe(true);
+
+    const card = document.querySelector('li[data-occludable-job-id="4461568022"]')!;
+    expect(await extractLinkedInJob('4461568022', card)).toBeNull();
   });
 
   it('extractLinkedInJob retorna null quando painel sem descrição', async () => {

@@ -3,6 +3,7 @@
 use App\Enums\ApplicationStatus;
 use App\Enums\ResumeLanguage;
 use App\Filament\Resources\JobPostings\Pages\ApplicationPage;
+use App\Mcp\Support\ToolException;
 use App\Models\Application;
 use App\Models\ApplicationEvent;
 use App\Models\JobPosting;
@@ -63,6 +64,21 @@ it('é idempotente e a unique protege contra duas candidaturas', function () {
         'job_posting_id' => $posting->id,
         'status' => ApplicationStatus::Planned,
     ]))->toThrow(QueryException::class);
+});
+
+it('replays keyed tracking updates using their normalized stored content', function () {
+    $user = auth()->user();
+    $posting = JobPosting::factory()->for($user, 'user')->confirmed()->create();
+    $service = app(ApplicationTrackingService::class);
+    $application = $service->start($user, $posting);
+    $first = $service->recordUpdate($user, $application, ApplicationStatus::Submitted,
+        title: null, notes: ' Notas ', contact: ' Contato ', eventKey: 'normalized');
+    $replay = $service->recordUpdate($user, $application, ApplicationStatus::Submitted,
+        title: ApplicationStatus::Submitted->getLabel().' ', notes: 'Notas', contact: 'Contato', eventKey: 'normalized');
+    expect($replay->id)->toBe($first->id);
+    expect($application->events()->where('event_key', 'normalized')->count())->toBe(1);
+    expect(fn () => $service->recordUpdate($user, $application, ApplicationStatus::Submitted,
+        notes: 'Different', eventKey: 'normalized'))->toThrow(ToolException::class);
 });
 
 it('relaciona candidatura e eventos nos dois sentidos', function () {

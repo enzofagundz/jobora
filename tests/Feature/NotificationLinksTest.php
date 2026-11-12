@@ -3,11 +3,13 @@
 use App\Agents\JobExtractionAgent;
 use App\Agents\JobTriageAgent;
 use App\Enums\AiOperationStatus;
+use App\Enums\AiOperationType;
 use App\Enums\JobCaptureTriageStatus;
 use App\Enums\JobPostingStatus;
 use App\Enums\ResumeLanguage;
 use App\Jobs\AnalyzeJobPosting;
 use App\Jobs\TriageJobCaptures;
+use App\Models\AiOperation;
 use App\Models\JobCapture;
 use App\Models\JobPosting;
 use App\Models\ResumeAdaptation;
@@ -33,6 +35,35 @@ function notificationLinksDescription(): string
     return 'Vaga para desenvolvedor PHP com Laravel e PostgreSQL. Requisitos: Docker, AWS e banco relacional.'.str_repeat(' ', 20);
 }
 
+it('delivers durable V2 notification links through the public terminal recovery command', function (string $type, string $routeName, string $status) {
+    Event::fake([DatabaseNotificationsSent::class]);
+    $owner = User::factory()->create();
+    $other = User::factory()->create();
+    $posting = JobPosting::factory()->for($owner, 'user')->create(['readiness' => 'ready', 'opportunity_version' => 1]);
+    $operation = AiOperation::query()->create([
+        'user_id' => $owner->id, 'operation_key' => 'notification-v2:'.Str::uuid(), 'operation_type' => AiOperationType::from($type),
+        'target_type' => $type === 'matching' ? 'opportunity' : 'page_capture', 'target_id' => $posting->id,
+        'run_token' => (string) Str::uuid(), 'status' => $status, 'queued_at' => now()->subMinute(), 'expires_at' => now()->addMinute(),
+        'completed_at' => $status === 'completed' ? now() : null, 'failed_at' => $status === 'failed' ? now() : null,
+        'failure_code' => $status === 'failed' ? 'processing_failed' : null, 'input_fingerprint' => str_repeat('a', 64), 'input_snapshot' => [],
+    ]);
+    $this->artisan('ai-operations:expire')->assertSuccessful();
+    $notification = $owner->notifications()->sole();
+    $expected = route($routeName, $type === 'matching' ? ['record' => $posting->id] : []);
+    expect($notification->data['actions'])->toHaveCount(1);
+    expect($notification->data['actions'][0]['url'])->toBe($expected);
+    expect($notification->data['actions'][0]['shouldMarkAsRead'])->toBeTrue();
+    expect($operation->fresh()->notified_at)->not->toBeNull();
+    expect($other->notifications()->count())->toBe(0);
+    $this->artisan('ai-operations:expire')->assertSuccessful();
+    expect($owner->notifications()->count())->toBe(1);
+})->with([
+    ['publication_extraction', 'filament.admin.resources.page-captures.index'],
+    ['publication_triage', 'filament.admin.resources.page-captures.index'],
+    ['profile_import', 'filament.admin.pages.professional-profile'],
+    ['matching', 'filament.admin.resources.job-postings.matching'],
+])->with(['completed', 'failed']);
+
 // Slice 1: AiOperation ResumeAdaptation deve gerar notificação com link "Ver candidatura"
 it('AiOperation ResumeAdaptation completed notification has Ver candidatura link', function () {
     Queue::fake();
@@ -52,10 +83,7 @@ it('AiOperation ResumeAdaptation completed notification has Ver candidatura link
         'notified_at' => null,
     ]);
 
-    $service = app(AiOperationService::class);
-    $ref = new ReflectionMethod($service, 'notifyCompleted');
-    $ref->setAccessible(true);
-    $ref->invoke($service, $operation->fresh(['user']));
+    $this->artisan('ai-operations:expire')->assertSuccessful();
 
     $notification = $user->notifications()->sole();
 
@@ -85,10 +113,7 @@ it('AiOperation ResumeAdaptation failed notification has Ver candidatura link', 
         'notified_at' => null,
     ]);
 
-    $service = app(AiOperationService::class);
-    $ref = new ReflectionMethod($service, 'notifyFailed');
-    $ref->setAccessible(true);
-    $ref->invoke($service, $operation->fresh(['user']));
+    $this->artisan('ai-operations:expire')->assertSuccessful();
 
     $notification = $user->notifications()->sole();
 
@@ -115,10 +140,7 @@ it('AiOperation StrategicCompetencyClassification completed has Ver competência
         'notified_at' => null,
     ]);
 
-    $service = app(AiOperationService::class);
-    $ref = new ReflectionMethod($service, 'notifyCompleted');
-    $ref->setAccessible(true);
-    $ref->invoke($service, $operation->fresh(['user']));
+    $this->artisan('ai-operations:expire')->assertSuccessful();
 
     $notification = $user->notifications()->sole();
 
@@ -154,10 +176,7 @@ it('AiOperation AtsScore completed has Ver candidatura link', function () {
         'notified_at' => null,
     ]);
 
-    $service = app(AiOperationService::class);
-    $ref = new ReflectionMethod($service, 'notifyCompleted');
-    $ref->setAccessible(true);
-    $ref->invoke($service, $operation->fresh(['user']));
+    $this->artisan('ai-operations:expire')->assertSuccessful();
 
     $notification = $user->notifications()->sole();
 
@@ -190,10 +209,7 @@ it('AiOperation AtsOptimization completed has Ver candidatura link', function ()
         'notified_at' => null,
     ]);
 
-    $service = app(AiOperationService::class);
-    $ref = new ReflectionMethod($service, 'notifyCompleted');
-    $ref->setAccessible(true);
-    $ref->invoke($service, $operation->fresh(['user']));
+    $this->artisan('ai-operations:expire')->assertSuccessful();
 
     $notification = $user->notifications()->sole();
 
@@ -406,10 +422,7 @@ it('AiOperation StrategicCompetencyClassification failed has Ver competências l
         'notified_at' => null,
     ]);
 
-    $service = app(AiOperationService::class);
-    $ref = new ReflectionMethod($service, 'notifyFailed');
-    $ref->setAccessible(true);
-    $ref->invoke($service, $operation->fresh(['user']));
+    $this->artisan('ai-operations:expire')->assertSuccessful();
 
     $notification = $user->notifications()->sole();
 

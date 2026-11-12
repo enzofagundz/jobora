@@ -16,6 +16,10 @@ enum AgentIntegrationScope: string
     case JobPostingsWrite = 'job_postings:write';
     case ResumeRead = 'resume:read';
     case ResumeWrite = 'resume:write';
+    case ProfileRead = 'profile:read';
+    case ProfileWrite = 'profile:write';
+    case MatchingRead = 'matching:read';
+    case MatchingWrite = 'matching:write';
     case ScreeningRead = 'screening:read';
     case ScreeningWrite = 'screening:write';
     case MarketRead = 'market:read';
@@ -25,6 +29,9 @@ enum AgentIntegrationScope: string
     case AtsWrite = 'ats:write';
     case ApplicationsRead = 'applications:read';
     case ApplicationsWrite = 'applications:write';
+    case ApplicationsSubmit = 'applications:submit';
+    case ApprovalsRead = 'approvals:read';
+    case ApprovalsWrite = 'approvals:write';
     case SearchRead = 'search:read';
     case OperationsRead = 'operations:read';
     case SourcesRead = 'sources:read';
@@ -45,7 +52,7 @@ enum AgentIntegrationScope: string
      */
     public static function defaults(): array
     {
-        return self::values();
+        return array_values(array_diff(self::values(), [self::ApplicationsSubmit->value]));
     }
 
     public function label(): string
@@ -57,6 +64,10 @@ enum AgentIntegrationScope: string
             self::JobPostingsWrite => 'Criar, excluir, analisar e confirmar vagas',
             self::ResumeRead => 'Ler currículo',
             self::ResumeWrite => 'Salvar currículo',
+            self::ProfileRead => 'Ler perfil profissional',
+            self::ProfileWrite => 'Salvar e confirmar perfil profissional',
+            self::MatchingRead => 'Ler matching e histórico',
+            self::MatchingWrite => 'Solicitar matching',
             self::ScreeningRead => 'Ler preferências de triagem',
             self::ScreeningWrite => 'Salvar preferências de triagem',
             self::MarketRead => 'Ler dados de mercado',
@@ -66,6 +77,9 @@ enum AgentIntegrationScope: string
             self::AtsWrite => 'Adaptar currículo e calcular ATS',
             self::ApplicationsRead => 'Ler candidaturas',
             self::ApplicationsWrite => 'Iniciar e movimentar candidaturas',
+            self::ApplicationsSubmit => 'Reservar, consumir e reconciliar tentativas de envio',
+            self::ApprovalsRead => 'Consultar consentimentos de candidatura',
+            self::ApprovalsWrite => 'Atestar e revogar consentimentos de candidatura',
             self::SearchRead => 'Gerar URLs de busca',
             self::OperationsRead => 'Ler operações assíncronas',
             self::SourcesRead => 'Ler fontes de descoberta',
@@ -95,22 +109,32 @@ enum AgentIntegrationScope: string
     public static function forTool(string $tool): self
     {
         return match (class_basename($tool)) {
-            'GetApplicationTool', 'ListApplicationsTool' => self::ApplicationsRead,
-            'StartApplicationTool', 'RecordApplicationUpdateTool' => self::ApplicationsWrite,
+            'ReserveApplicationSubmissionTool', 'ConsumeApplicationSubmissionTool', 'ReportApplicationSubmissionTool', 'ReconcileApplicationSubmissionTool' => self::ApplicationsSubmit,
+            'GetApplicationSubmissionTool' => self::ApplicationsRead,
+            'GetApplicationApprovalTool' => self::ApprovalsRead,
+            'SubmitTelegramLinkTool', 'RecordApplicationApprovalTool', 'RevokeApplicationApprovalTool' => self::ApprovalsWrite,
+            'GetApplicationTool', 'ListApplicationsTool', 'GetApplicationPreparationTool' => self::ApplicationsRead,
+            'StartApplicationTool', 'RecordApplicationUpdateTool', 'PrepareApplicationTool' => self::ApplicationsWrite,
             'GetResumeAdaptationTool', 'ExportAdaptedResumePdfTool' => self::AtsRead,
             'AdaptResumeTool', 'SetAtsOptimizationTool', 'ScoreAtsTool' => self::AtsWrite,
-            'GetJobCaptureTool', 'ListJobCapturesTool', 'GetPageCaptureTool' => self::CapturesRead,
+            'GetJobCaptureTool', 'ListJobCapturesTool', 'GetPageCaptureTool', 'ListPublicationsTool' => self::CapturesRead,
             'CaptureJobTool', 'IngestPageCaptureTool', 'DeleteJobCaptureTool', 'TriageJobCapturesTool',
-            'PromoteJobCaptureTool', 'PromoteEligibleJobCapturesTool' => self::CapturesWrite,
+            'PromoteJobCaptureTool', 'PromoteEligibleJobCapturesTool', 'RequestPublicationTriageTool' => self::CapturesWrite,
             'ListProfessionalCompetenciesTool' => self::CompetenciesRead,
             'ClassifyProfessionalCompetenciesTool', 'SetProfessionalCompetencyTool',
             'RemoveProfessionalCompetencyTool' => self::CompetenciesWrite,
             'GetJobPostingTool', 'ListJobPostingsTool' => self::JobPostingsRead,
             'CreateJobPostingTool', 'DeleteJobPostingTool', 'AnalyzeJobPostingTool',
-            'ConfirmJobPostingTool', 'DiscardJobPostingSuggestionTool' => self::JobPostingsWrite,
+            'ConfirmJobPostingTool', 'DiscardJobPostingSuggestionTool',
+            'ReviewJobPostingTool' => self::JobPostingsWrite,
             'GetMarketComparisonTool', 'GetMarketFrequenciesTool',
             'GetMarketPairsTool', 'GetMarketTrendsTool' => self::MarketRead,
             'GetResumeTool' => self::ResumeRead,
+            'GetProfessionalProfileTool', 'GetProfileImportTool' => self::ProfileRead,
+            'GetMatchingTool' => self::MatchingRead,
+            'RequestMatchingTool' => self::MatchingWrite,
+            'SaveProfessionalProfileTool', 'ConfirmProfessionalProfileTool', 'RequestProfileImportTool',
+            'ConfirmProfileImportTool', 'RejectProfileImportTool' => self::ProfileWrite,
             'SaveResumeTool' => self::ResumeWrite,
             'GetScreeningPreferencesTool' => self::ScreeningRead,
             'SaveScreeningPreferencesTool' => self::ScreeningWrite,

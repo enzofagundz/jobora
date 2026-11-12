@@ -6,9 +6,7 @@ import { createIndeedController } from '@/sites/indeed/controller';
 import './panel.css';
 
 export default defineContentScript({
-  // Host inteiro para detectar navegação SPA dentro de *.indeed.com;
-  // o filtro de rota real (/jobs) roda em runtime.
-  matches: ['https://*.indeed.com/*'],
+  matches: ['https://br.indeed.com/*', 'https://www.indeed.com/*', 'https://indeed.com/*'],
   cssInjectionMode: 'ui',
 
   async main(ctx: ContentScriptContext) {

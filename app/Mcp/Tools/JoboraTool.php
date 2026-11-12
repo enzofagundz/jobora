@@ -8,6 +8,9 @@ use App\Mcp\Support\AgentIntegrationContext;
 use App\Mcp\Support\McpUserResolver;
 use App\Mcp\Support\ToolException;
 use App\Models\User;
+use App\Services\MatchingException;
+use App\Services\ProfessionalProfileConflictException;
+use App\Services\ProfileImportException;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -59,6 +62,14 @@ abstract class JoboraTool extends Tool
             return $this->execute($request);
         } catch (ToolException $exception) {
             return $this->fail($exception);
+        } catch (MatchingException $exception) {
+            return $this->fail(ToolException::matching($exception->failureCode));
+        } catch (ProfessionalProfileConflictException $exception) {
+            return $this->fail(ToolException::conflict($exception->getMessage()));
+        } catch (ProfileImportException $exception) {
+            return $this->fail($exception->failureCode === 'authorization_revoked'
+                ? ToolException::forbidden('A autorização da importação não é mais válida.')
+                : ToolException::validation($exception->getMessage()));
         } catch (ValidationException $exception) {
             return $this->fail(ToolException::validation(
                 (string) (collect($exception->errors())->flatten()->first() ?? 'Dados inválidos.'),

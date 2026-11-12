@@ -42,7 +42,15 @@ export interface LinkedInRawPost {
   externalId: string | null;
   description: string;
   author: { name: string | null; profileUrl: string | null } | null;
+  identityConflict?: boolean;
 }
+
+export interface HydratedIdentity {
+  activityId: string;
+  permalink: string;
+}
+
+export type HydrationIdentityResolver = (componentKey: string) => HydratedIdentity | null;
 
 /** `urn:li:activity:<n>` ou `activity-<n>` de um href; null se ausente. */
 export function activityUrn(href: string | null | undefined): string | null {
@@ -67,9 +75,12 @@ function activityUrnFromAttributes(rootEl: Element): string | null {
   return null;
 }
 
-export async function extractLinkedInPost(postEl: Element): Promise<LinkedInRawPost> {
+export async function extractLinkedInPost(
+  postEl: Element,
+  resolveHydrationIdentity?: HydrationIdentityResolver,
+): Promise<LinkedInRawPost> {
   const link = postEl.querySelector('a[href*="/feed/update/"]');
-  const url = cleanHref(link?.getAttribute('href') ?? null);
+  let url = cleanHref(link?.getAttribute('href') ?? null);
 
   // URN de atividade: primeiro em todos os href do card, depois em qualquer
   // atributo próprio/descendente que case exatamente os padrões conhecidos.
@@ -82,6 +93,24 @@ export async function extractLinkedInPost(postEl: Element): Promise<LinkedInRawP
     }
   }
   if (!externalId) externalId = activityUrnFromAttributes(postEl);
+
+  const componentKey = postEl.getAttribute('componentkey');
+  const hydrated = componentKey ? resolveHydrationIdentity?.(componentKey) ?? null : null;
+  let identityConflict = false;
+  if (hydrated) {
+    const hydratedUrn = `urn:li:activity:${hydrated.activityId}`;
+    if (externalId !== null && externalId !== hydratedUrn) {
+      identityConflict = true;
+    } else {
+      const domUrlUrn = url ? activityUrn(url) : null;
+      if (domUrlUrn !== null && domUrlUrn !== hydratedUrn) {
+        identityConflict = true;
+      } else {
+        externalId = hydratedUrn;
+        if (!url) url = hydrated.permalink;
+      }
+    }
+  }
 
   await expandPost(postEl);
 
@@ -98,7 +127,7 @@ export async function extractLinkedInPost(postEl: Element): Promise<LinkedInRawP
     author = { name: name || null, profileUrl };
   }
 
-  return { url, externalId, description, author };
+  return { url, externalId, description, author, identityConflict };
 }
 
 /** Payload fiel ao userscript: title/company/location nulos, search_url viva no envio. */

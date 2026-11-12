@@ -15,16 +15,20 @@ class Application extends Model
     protected $fillable = [
         'job_posting_id',
         'status',
+        'current_preparation_id',
+        'preparation_version',
     ];
 
     protected $attributes = [
         'status' => ApplicationStatus::Planned->value,
+        'preparation_version' => 0,
     ];
 
     protected function casts(): array
     {
         return [
             'status' => ApplicationStatus::class,
+            'preparation_version' => 'integer',
         ];
     }
 

@@ -20,4 +20,38 @@ Schedule::command('ai-operations:expire')
     ->everyMinute()
     ->withoutOverlapping();
 
+Schedule::command('discovery-runs:expire')
+    ->everyMinute()
+    ->withoutOverlapping();
+
+Schedule::command('publication-extractions:recover')
+    ->everyMinute()
+    ->withoutOverlapping();
+
+Schedule::command('publication-triages:recover')
+    ->everyMinute()
+    ->withoutOverlapping();
+
+Schedule::command('profile-imports:recover')
+    ->everyMinute()
+    ->withoutOverlapping();
+
+Schedule::command('matching:recover')
+    ->everyMinute()
+    ->withoutOverlapping();
+
+Schedule::command('publication-clef:recover')
+    ->everyMinute()
+    ->withoutOverlapping();
+
+Schedule::command('captures:prune-raw')
+    ->daily()
+    ->withoutOverlapping();
+
+Schedule::command('captures:reconcile-orphans')
+    ->daily()
+    ->withoutOverlapping();
+
 Schedule::command('auth:clear-resets')->everyFifteenMinutes();
+
+Schedule::command('document-artifacts:prune')->hourly()->withoutOverlapping();

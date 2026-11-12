@@ -2,6 +2,18 @@
 
 return [
 
+    'matching' => [
+        'provider' => 'opencode_go', 'model' => 'deepseek-v4.1-flash',
+        'criteria_version' => 'matching-v1', 'schema_version' => 'matching-result-v1',
+    ],
+
+    'profile_import' => [
+        'provider' => 'opencode_go',
+        'model' => 'deepseek-v4.1-flash',
+        'schema_version' => '1',
+        'max_content_characters' => 100000,
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Default AI Provider Names
@@ -132,6 +144,16 @@ return [
             'store' => env('OPENAI_STORE', true),
         ],
 
+        'opencode_go' => [
+            'driver' => 'openai-compatible',
+            'key' => env('OPENCODE_GO_API_KEY', env('OPENCODE_ZEN_API_KEY')),
+            'url' => 'https://opencode.ai/inference/go/openai/v1',
+            'headers' => [
+                'x-opencode-session' => env('OPENCODE_ZEN_SESSION_ID', '135bfaf9-c0b9-46d5-8334-298bb4af41fa'),
+            ],
+            'models' => ['text' => ['default' => 'deepseek-v4.1-flash']],
+        ],
+
         'opencode_zen' => [
             'driver' => 'openai-compatible',
             'key' => env('OPENCODE_ZEN_API_KEY'),
@@ -157,6 +179,13 @@ return [
             'driver' => 'xai',
             'key' => env('XAI_API_KEY'),
         ],
+    ],
+
+    'publication_triage' => [
+        'provider' => 'opencode_go',
+        'model' => 'deepseek-v4.1-flash',
+        'schema_version' => 'publication-triage-v1',
+        'max_content_characters' => 100000,
     ],
 
 ];

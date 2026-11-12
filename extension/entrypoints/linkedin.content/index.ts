@@ -4,19 +4,28 @@ import { isLinkedInJobsRoute } from '@/sites/linkedin-jobs/extract';
 import { isCaptureReady } from '@/utils/capture-control';
 import { apiToken, captureEnabled } from '@/utils/storage';
 import { createLinkedInController } from '@/sites/linkedin/controller';
+import { createHydrationIdentityCollector } from '@/sites/linkedin/hydration-identity';
 import { createLinkedInJobsController } from '@/sites/linkedin-jobs/controller';
 import './panel.css';
 
 export default defineContentScript({
   // Host inteiro para detectar entrada/saída da rota SPA; filtro real em runtime.
   matches: ['https://www.linkedin.com/*'],
+  runAt: 'document_start',
   cssInjectionMode: 'ui',
 
   async main(ctx: ContentScriptContext) {
-    const publicationsController = createLinkedInController();
+    const hydrationIdentities = createHydrationIdentityCollector();
+    ctx.onInvalidated(() => hydrationIdentities.dispose());
+    await waitForBody();
+
+    const publicationsController = createLinkedInController({
+      resolveHydrationIdentity: (componentKey) => hydrationIdentities.resolve(componentKey),
+    });
     const jobsController = createLinkedInJobsController();
     let activePublications = false;
     let activeJobs = false;
+    let lastToken: string | null = null;
 
     // Serializa sincronizações: mudanças de rota/storage durante uma leitura
     // apenas enfileiram a reavaliação; nenhuma transição concorrente.
@@ -40,6 +49,22 @@ export default defineContentScript({
 
     async function syncRoute(): Promise<void> {
       const ready = await isCaptureReady();
+      const token = await apiToken.getValue();
+      // Troca de conta/token encerra a captura antiga antes de correlacionar outra.
+      const tokenChanged = lastToken !== null && lastToken !== token;
+      lastToken = token;
+      if (tokenChanged) {
+        hydrationIdentities.reset();
+        if (activePublications) {
+          activePublications = false;
+          publicationsController.deactivate();
+        }
+        if (activeJobs) {
+          activeJobs = false;
+          jobsController.deactivate();
+        }
+      }
+
       const isPublicationsRoute = isLinkedInRoute(location);
       const isJobsRoute = isLinkedInJobsRoute(location);
 
@@ -77,7 +102,22 @@ export default defineContentScript({
       unwatchEnabled();
       unwatchToken();
     });
-    ctx.addEventListener(window, 'wxt:locationchange', () => void requestSync());
+    ctx.addEventListener(window, 'wxt:locationchange', () => {
+      hydrationIdentities.reset();
+      void requestSync();
+    });
     await requestSync();
   },
 });
+
+function waitForBody(): Promise<void> {
+  if (document.body) return Promise.resolve();
+  return new Promise((resolve) => {
+    const observer = new MutationObserver(() => {
+      if (!document.body) return;
+      observer.disconnect();
+      resolve();
+    });
+    observer.observe(document, { childList: true, subtree: true });
+  });
+}

@@ -5,6 +5,7 @@ namespace App\Filament\Resources\JobPostings\Tables;
 use App\Enums\ConceptCategory;
 use App\Enums\ItemSource;
 use App\Enums\JobPostingStatus;
+use App\Filament\Resources\JobPostings\JobPostingResource;
 use App\Filament\Resources\JobPostings\Pages\ApplicationPage;
 use App\Filament\Resources\JobPostings\Schemas\ApplicationMethodForm;
 use App\Jobs\AnalyzeJobPosting;
@@ -27,12 +28,14 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class JobPostingsTable
 {
     public static function configure(Table $table): Table
     {
         return $table
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->withExists('application'))
             ->columns([
                 TextColumn::make('id')
                     ->label('ID')
@@ -51,7 +54,7 @@ class JobPostingsTable
                     ->dateTime('d/m/Y')
                     ->sortable(),
                 TextColumn::make('status')
-                    ->label('Status')
+                    ->label('Status legado')
                     ->badge()
                     ->color(fn (JobPostingStatus $state): string => match ($state) {
                         JobPostingStatus::Pending => 'gray',
@@ -59,6 +62,15 @@ class JobPostingsTable
                         JobPostingStatus::Confirmed => 'success',
                         JobPostingStatus::Failed => 'danger',
                     })
+                    ->sortable(),
+                TextColumn::make('readiness')
+                    ->label('Prontidão V2')
+                    ->badge()
+                    ->state(fn (JobPosting $record): ?string => $record->readiness === null
+                        ? null
+                        : JobPostingResource::readinessLabel($record->readiness))
+                    ->color(fn (JobPosting $record): string => JobPostingResource::readinessColor($record->readiness))
+                    ->placeholder('Fluxo legado')
                     ->sortable(),
                 TextColumn::make('error_message')
                     ->label('Erro')
@@ -73,8 +85,14 @@ class JobPostingsTable
             ])
             ->filters([
                 SelectFilter::make('status')
-                    ->label('Status')
+                    ->label('Status legado')
                     ->options(JobPostingStatus::class),
+                SelectFilter::make('readiness')
+                    ->label('Prontidão V2')
+                    ->options([
+                        'ready' => 'Pronta',
+                        'needs_review' => 'Precisa de revisão',
+                    ]),
                 Filter::make('collected_at')
                     ->label('Período de coleta')
                     ->form([
@@ -98,7 +116,7 @@ class JobPostingsTable
                     ->icon(Heroicon::OutlinedSparkles)
                     ->color('primary')
                     ->authorize('update')
-                    ->visible(fn (JobPosting $record): bool => $record->status === JobPostingStatus::Failed)
+                    ->visible(fn (JobPosting $record): bool => ! $record->isStructuredOpportunity() && $record->status === JobPostingStatus::Failed)
                     ->requiresConfirmation()
                     ->modalHeading('Analisar com IA')
                     ->modalDescription('A descrição da vaga será enviada ao modelo de linguagem para (re)estruturação. Custo de uma chamada de IA por execução.')
@@ -114,12 +132,19 @@ class JobPostingsTable
                 ViewAction::make()
                     ->label('Ver')
                     ->visible(fn (JobPosting $record): bool => $record->status === JobPostingStatus::Pending),
+                Action::make('reviewOpportunity')
+                    ->label('Corrigir oportunidade')
+                    ->icon(Heroicon::OutlinedPencilSquare)
+                    ->color('warning')
+                    ->authorize('update')
+                    ->visible(fn (JobPosting $record): bool => $record->isStructuredOpportunity() && $record->readiness === 'needs_review')
+                    ->url(fn (JobPosting $record): string => JobPostingResource::getUrl('view', ['record' => $record])),
                 Action::make('review')
                     ->label('Revisar')
                     ->icon(Heroicon::OutlinedClipboardDocumentCheck)
                     ->color('warning')
                     ->authorize('update')
-                    ->visible(fn (JobPosting $record): bool => $record->status === JobPostingStatus::NeedsReview)
+                    ->visible(fn (JobPosting $record): bool => ! $record->isStructuredOpportunity() && $record->status === JobPostingStatus::NeedsReview)
                     ->modalHeading('Revisar vaga')
                     ->modalWidth(Width::SevenExtraLarge)
                     ->schema([
@@ -211,7 +236,7 @@ class JobPostingsTable
                     ->icon(Heroicon::OutlinedPaperAirplane)
                     ->color('info')
                     ->authorize('view')
-                    ->visible(fn (JobPosting $record): bool => $record->status === JobPostingStatus::Confirmed)
+                    ->visible(fn (JobPosting $record): bool => $record->isEligibleForApplicationDocuments() || $record->application_exists)
                     ->url(fn (JobPosting $record): string => ApplicationPage::getUrl(['record' => $record])),
                 DeleteAction::make(),
             ])

@@ -3,11 +3,30 @@
 use App\Enums\AgentIntegrationScope;
 use App\Models\JobPosting;
 use App\Models\User;
+use App\Services\AgentIntegrationService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Feature\AgentIntegrations\AgentIntegrationTestHelpers as Helpers;
 use Tests\Feature\Mcp\McpTestHelpers;
 
 uses(RefreshDatabase::class);
+
+it('requires an explicit submit grant and preserves it across registration', function () {
+    $user = User::factory()->create();
+    $client = Helpers::client();
+    $service = app(AgentIntegrationService::class);
+    $integration = $service->register($user, (string) $client->id, 'Hermes');
+    $token = Helpers::accessToken($user, $client);
+
+    expect($integration->can(AgentIntegrationScope::ApplicationsSubmit))->toBeFalse()
+        ->and(AgentIntegrationScope::values())->toContain('applications:submit')
+        ->and(AgentIntegrationScope::defaults())->not->toContain('applications:submit');
+
+    $response = $this->withToken($token)->postJson('/mcp', Helpers::toolCall('reserve_application_submission'))->assertOk();
+    expect(Helpers::decodeToolResult($response->getContent())['error']['code'] ?? null)->toBe('forbidden');
+
+    $integration->update(['scopes' => [...$integration->scopes, AgentIntegrationScope::ApplicationsSubmit->value]]);
+    expect($service->register($user, (string) $client->id, 'Hermes')->can(AgentIntegrationScope::ApplicationsSubmit))->toBeTrue();
+});
 
 it('separates resume and adaptation capabilities when reading resource uris', function (AgentIntegrationScope $scope, bool $adaptation, bool $allowed) {
     $user = User::factory()->create();
@@ -41,20 +60,20 @@ it('separates resume and adaptation capabilities when reading resource uris', fu
 it('blocks a tool when the integration lacks its internal capability', function () {
     $user = User::factory()->create();
     $client = Helpers::client();
-    Helpers::integration($user, $client, [AgentIntegrationScope::MarketRead]);
+    Helpers::integration($user, $client, [AgentIntegrationScope::CapturesRead]);
     $token = Helpers::accessToken($user, $client);
 
-    $market = $this->withToken($token)
-        ->postJson('/mcp', Helpers::toolCall('get_market_frequencies'))
+    $publications = $this->withToken($token)
+        ->postJson('/mcp', Helpers::toolCall('list_publications', ['clef_status' => 'eligible']))
         ->assertOk();
 
-    $captures = $this->withToken($token)
-        ->postJson('/mcp', Helpers::toolCall('list_job_captures'))
+    $resume = $this->withToken($token)
+        ->postJson('/mcp', Helpers::toolCall('get_resume'))
         ->assertOk();
 
-    expect(Helpers::decodeToolResult($market->getContent())['ok'] ?? null)->toBeTrue()
-        ->and(Helpers::decodeToolResult($captures->getContent())['ok'] ?? null)->toBeFalse()
-        ->and(Helpers::decodeToolResult($captures->getContent())['error']['code'] ?? null)->toBe('forbidden');
+    expect(Helpers::decodeToolResult($publications->getContent())['ok'] ?? null)->toBeTrue()
+        ->and(Helpers::decodeToolResult($resume->getContent())['ok'] ?? null)->toBeFalse()
+        ->and(Helpers::decodeToolResult($resume->getContent())['error']['code'] ?? null)->toBe('forbidden');
 });
 
 it('blocks a write tool when only its read capability is granted', function () {

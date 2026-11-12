@@ -1,35 +1,47 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
-import type { CaptureMessage, CaptureResult } from '@/types/capture';
-import { submitCapture } from '@/api/captures';
-import { isCaptureReady } from '@/utils/capture-control';
-import { apiToken, captureEnabled, lastApiStatus } from '@/utils/storage';
+import type { CaptureEnvelope } from '@/types/capture';
+import { createTestCaptureMessageHandler as createCaptureMessageHandler } from './helpers/memory-credential-context';
+import { createCaptureQueue } from '@/utils/capture-queue';
+import { apiToken, captureEnabled } from '@/utils/storage';
+import { lastApiStatus } from '@/utils/session-storage';
+import { createMemoryQueueStore } from './helpers/memory-queue-store';
+import {
+  createMemoryCredentialContextStore,
+  seedCredentialContext,
+} from './helpers/memory-credential-context';
 
 /** Contrato do handler do background: token vem só do storage, nunca da mensagem;
  * gate de captura fecha antes do payload/toque na rede. */
-async function handleMessage(message: unknown): Promise<CaptureResult> {
-  if (
-    typeof message !== 'object' ||
-    message === null ||
-    (message as CaptureMessage).type !== 'capture:submit'
-  ) {
-    return { ok: false, error: 'invalid' };
-  }
-  if (!(await isCaptureReady())) return { ok: false, error: 'auth' };
-  const payload = (message as CaptureMessage).payload;
-  const result = await submitCapture(payload);
-  await lastApiStatus.setValue({
-    ok: result.ok,
-    duplicate: result.duplicate,
-    error: result.error,
-    status: result.status,
-    at: new Date().toISOString(),
-  });
-  return result;
+let handleMessage: ReturnType<typeof createCaptureMessageHandler>;
+let contexts: ReturnType<typeof createMemoryCredentialContextStore>;
+
+function envelope(): CaptureEnvelope {
+  return {
+    format: 'jobora.capture-envelope',
+    version: 1,
+    capture: {
+      idempotency_key: 'capture-key-1',
+      execution_id: 'exec-1',
+      source: 'linkedin',
+      surface: 'linkedin_publications',
+      initial_url: 'https://www.linkedin.com/search/results/content/?keywords=php',
+      final_url: 'https://www.linkedin.com/search/results/content/?keywords=php',
+      captured_at: '2026-08-18T10:00:00Z',
+      coverage: {
+        status: 'complete',
+        reason: null,
+        blocks_expected: 0,
+        blocks_captured: 0,
+      },
+      html: '<main data-capture-surface="linkedin_publications" data-capture-version="1"></main>',
+    },
+    blocks: [],
+  };
 }
 
-function payload(): CaptureMessage['payload'] {
+function payload() {
   return {
     source: 'indeed',
     external_id: 'abc111',
@@ -46,25 +58,48 @@ function payload(): CaptureMessage['payload'] {
 describe('messaging background → API', () => {
   beforeEach(() => {
     fakeBrowser.reset();
+    vi.useFakeTimers();
+    contexts = createMemoryCredentialContextStore();
+    handleMessage = createCaptureMessageHandler(
+      createCaptureQueue(createMemoryQueueStore()),
+      contexts,
+    );
   });
 
   afterEach(() => {
+    vi.clearAllTimers();
     vi.unstubAllGlobals();
     vi.useRealTimers();
   });
 
-  function mockFetch(status: number): ReturnType<typeof vi.fn> {
-    const spy = vi.fn(async () => new Response('{}', { status }));
+  function mockFetch(status: number, body: unknown = {}): ReturnType<typeof vi.fn> {
+    const spy = vi.fn(
+      async () =>
+        new Response(JSON.stringify(body), {
+          status,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    );
     vi.stubGlobal('fetch', spy);
     return spy;
   }
+
+  it('ignores retired capture:submit without network or status writes', async () => {
+    await captureEnabled.setValue(true);
+    await apiToken.setValue('segredo-do-env');
+    const fetchSpy = mockFetch(201);
+    expect(await handleMessage({ type: 'capture:submit', payload: payload() })).toBeUndefined();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(await lastApiStatus.getValue()).toBeNull();
+  });
 
   it('token vem do storage; mensagem não carrega segredo', async () => {
     await captureEnabled.setValue(true);
     await apiToken.setValue('segredo-do-env');
     const fetchSpy = mockFetch(201);
 
-    const message = { type: 'capture:submit' as const, payload: payload() };
+    const context = await seedCredentialContext(contexts, { token: 'segredo-do-env', origin: 'https://vagas.test', executionId: 'exec-1' });
+    const message = { type: 'capture:submit-envelope' as const, envelope: envelope(), context };
     expect(JSON.stringify(message)).not.toContain('segredo-do-env');
 
     const result = await handleMessage(message);
@@ -84,7 +119,10 @@ describe('messaging background → API', () => {
     await captureEnabled.setValue(true);
     await apiToken.setValue('segredo-do-env');
     mockFetch(status);
-    const result = await handleMessage({ type: 'capture:submit', payload: payload() });
+    const context = await seedCredentialContext(contexts, { token: 'segredo-do-env', origin: 'https://vagas.test', executionId: 'exec-1' });
+    const result = await handleMessage({ type: 'capture:submit-envelope', envelope: envelope(), context });
+    expect(result).toBeDefined();
+    if (!result || !('error' in result)) throw new Error('resultado inesperado');
     expect(result.ok).toBe(false);
     expect(result.error).toBe(error);
 
@@ -94,14 +132,15 @@ describe('messaging background → API', () => {
 
   it('gate fechado → auth, zero fetch e lastApiStatus intacto', async () => {
     const fetchSpy = mockFetch(200);
-    const result = await handleMessage({ type: 'capture:submit', payload: payload() });
+    const context = await seedCredentialContext(contexts, { token: 'segredo-do-env', origin: 'https://vagas.test' });
+    const result = await handleMessage({ type: 'capture:submit-envelope', envelope: envelope(), context });
     expect(result).toMatchObject({ ok: false, error: 'auth' });
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(await lastApiStatus.getValue()).toBeNull();
 
     // Token presente, mas flag desligada: também bloqueia.
     await apiToken.setValue('segredo-do-env');
-    const withToken = await handleMessage({ type: 'capture:submit', payload: payload() });
+    const withToken = await handleMessage({ type: 'capture:submit-envelope', envelope: envelope(), context });
     expect(withToken).toMatchObject({ ok: false, error: 'auth' });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -110,9 +149,98 @@ describe('messaging background → API', () => {
     await captureEnabled.setValue(true);
     await apiToken.setValue('segredo-do-env');
     const fetchSpy = mockFetch(200);
-    const result = await handleMessage({ type: 'outra-coisa' });
-    expect(result).toMatchObject({ ok: false, error: 'invalid' });
+    expect(await handleMessage({ type: 'outra-coisa' })).toBeUndefined();
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('resolve-run correla execução sem enviar token no payload', async () => {
+    await captureEnabled.setValue(true);
+    await apiToken.setValue('segredo-do-env');
+    const fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(async (url) => {
+        if (String(url).includes('/extension/auth/validate')) {
+          return new Response(JSON.stringify({ valid: true, owner_user_id: 1 }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            execution_id: 'exec-1',
+            source: 'linkedin',
+            surface: 'linkedin_publications',
+            initial_url: 'https://www.linkedin.com/search/results/content/?keywords=php',
+            expires_at: null,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      });
+    const message = {
+      type: 'capture:resolve-run' as const,
+      url: 'https://www.linkedin.com/search/results/content/?keywords=php',
+    };
+    expect(JSON.stringify(message)).not.toContain('segredo-do-env');
+
+    const result = await handleMessage(message);
+
+    expect(result).toMatchObject({
+      ok: true,
+      run: { executionId: 'exec-1', surface: 'linkedin_publications' },
+      context: expect.any(String),
+    });
+    const resolveCall = fetchSpy.mock.calls.find(([url]) =>
+      String(url).includes('/discovery-runs/resolve'),
+    ) as [string, RequestInit];
+    const [url, init] = resolveCall;
+    expect(url).toBe('https://vagas.test/api/discovery-runs/resolve');
+    expect((init.headers as Record<string, string>).Authorization).toBe(
+      'Bearer segredo-do-env',
+    );
+  });
+
+  it('submit-envelope só responde ok no ACK 201 e grava lastApiStatus', async () => {
+    await captureEnabled.setValue(true);
+    await apiToken.setValue('segredo-do-env');
+    mockFetch(201, { id: 7, execution_id: 'exec-1', coverage: 'complete', replay: false });
+
+    const captured = envelope();
+    const context = await seedCredentialContext(contexts, {
+      token: 'segredo-do-env',
+      origin: 'https://vagas.test',
+      executionId: 'exec-1',
+      source: 'linkedin',
+      surface: 'linkedin_publications',
+    });
+    const message = { type: 'capture:submit-envelope' as const, envelope: captured, context };
+    expect(JSON.stringify(message)).not.toContain('segredo-do-env');
+
+    const result = await handleMessage(message);
+
+    expect(result).toMatchObject({ ok: true, status: 201, coverage: 'complete' });
+    expect(await lastApiStatus.getValue()).toMatchObject({ ok: true });
+  });
+
+  it('submit-envelope 409 não declara captura e não vira ok', async () => {
+    await captureEnabled.setValue(true);
+    await apiToken.setValue('segredo-do-env');
+    mockFetch(409, {});
+    const context = await seedCredentialContext(contexts, {
+      token: 'segredo-do-env',
+      origin: 'https://vagas.test',
+      executionId: 'exec-1',
+      source: 'linkedin',
+      surface: 'linkedin_publications',
+    });
+
+    const result = await handleMessage({
+      type: 'capture:submit-envelope',
+      envelope: envelope(),
+      context,
+    });
+
+    expect(result).toMatchObject({ ok: false, error: 'conflict' });
+    expect(await lastApiStatus.getValue()).toMatchObject({ ok: false, error: 'conflict' });
   });
 
   it('limpar token remove o valor do storage (popup Desconectar)', async () => {

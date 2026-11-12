@@ -12,6 +12,11 @@ use Filament\Widgets\TableWidget;
 
 class ComparisonSummaryWidget extends TableWidget
 {
+    public static function canView(): bool
+    {
+        return false;
+    }
+
     protected int|string|array $columnSpan = 'full';
 
     public function table(Table $table): Table

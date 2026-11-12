@@ -18,8 +18,23 @@ class ResumePdfService
 {
     public function download(ResumeAdaptation $adaptation): PdfBuilder
     {
-        $language = $adaptation->language;
+        $posting = $adaptation->jobPosting()->firstOrFail();
+        app(ApplicationDocumentAccess::class)->posting($posting->user, $posting);
 
+        return $this->builder(clone $adaptation, $adaptation->language);
+    }
+
+    /** @param array<string, mixed> $content */
+    public function frozen(array $content, ResumeLanguage $language): PdfBuilder
+    {
+        $adaptation = new ResumeAdaptation;
+        $adaptation->setRawAttributes($content);
+
+        return $this->builder($adaptation, $language);
+    }
+
+    private function builder(ResumeAdaptation $adaptation, ResumeLanguage $language): PdfBuilder
+    {
         return Pdf::view('pdf.adapted-resume', [
             'adaptation' => $adaptation,
             'language' => $language->value,

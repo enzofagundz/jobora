@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://jobora.test/contracts/capture-envelope/v1",
   "title": "Jobora capture envelope v1",
-  "description": "Inert, sanitized envelope for a consolidated page capture. Each blocks[] entry MUST appear once in capture.html as an element carrying data-block-id, data-kind, data-platform-id and data-permalink. Card/detail relations use data-detail-block-id on the card and data-card-block-id on the detail. HTML MUST NOT contain executable content.",
+  "description": "Inert, sanitized envelope for a consolidated page capture. Each blocks[] entry MUST appear once in capture.html as an element carrying data-block-id and data-kind. platform_id and permalink keys remain required. Both values may be null for kind=post on surface=linkedin_publications; platform_id may also be null for kind=card or kind=detail on surface=indeed_jobs. Null means the matching HTML attribute is absent. A string means the matching HTML attribute is present with the identical value. Other blocks require non-empty platform_id strings. Cards, details and job surfaces require non-null permalinks. Publication permalinks MUST be individual LinkedIn URLs, not search URLs. Card/detail relations use data-detail-block-id on the card and data-card-block-id on the detail. HTML MUST NOT contain executable content.",
   "type": "object",
   "additionalProperties": false,
   "required": ["format", "version", "capture", "blocks"],
@@ -129,6 +129,111 @@
       }
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "capture": {
+            "properties": {
+              "surface": {
+                "const": "linkedin_publications"
+              }
+            },
+            "required": ["surface"]
+          }
+        },
+        "required": ["capture"]
+      },
+      "then": {
+        "properties": {
+          "blocks": {
+            "items": {
+              "if": {
+                "properties": {
+                  "kind": {
+                    "const": "post"
+                  }
+                },
+                "required": ["kind"]
+              },
+              "else": {
+                "properties": {
+                  "platform_id": {
+                    "type": "string"
+                  },
+                  "permalink": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "if": {
+          "properties": {
+            "capture": {
+              "properties": {
+                "surface": {
+                  "const": "indeed_jobs"
+                }
+              },
+              "required": ["surface"]
+            }
+          },
+          "required": ["capture"]
+        },
+        "then": {
+          "properties": {
+            "blocks": {
+              "items": {
+                "if": {
+                  "properties": {
+                    "kind": {
+                      "enum": ["card", "detail"]
+                    }
+                  },
+                  "required": ["kind"]
+                },
+                "else": {
+                  "properties": {
+                    "platform_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "else": {
+          "properties": {
+            "blocks": {
+              "items": {
+                "properties": {
+                  "platform_id": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "properties": {
+          "blocks": {
+            "items": {
+              "properties": {
+                "permalink": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
     "block": {
       "type": "object",
@@ -143,12 +248,12 @@
           "enum": ["post", "card", "detail"]
         },
         "platform_id": {
-          "type": "string",
+          "type": ["string", "null"],
           "minLength": 1,
           "maxLength": 255
         },
         "permalink": {
-          "type": "string",
+          "type": ["string", "null"],
           "format": "uri",
           "maxLength": 2000
         },

@@ -9,8 +9,10 @@ use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use LogicException;
 
 #[Hidden(['user_id'])]
 class JobPosting extends Model
@@ -26,6 +28,20 @@ class JobPosting extends Model
         'company',
         'suggested_data',
         'error_message',
+        'readiness',
+        'opportunity_version',
+        'location',
+        'work_mode',
+        'employment_type',
+        'salary_min',
+        'salary_max',
+        'salary_currency',
+        'salary_period',
+        'seniority',
+        'requirements',
+        'technologies',
+        'evidence',
+        'review_reasons',
     ];
 
     protected function casts(): array
@@ -34,6 +50,13 @@ class JobPosting extends Model
             'collected_at' => 'datetime',
             'status' => JobPostingStatus::class,
             'suggested_data' => 'array',
+            'opportunity_version' => 'integer',
+            'salary_min' => 'decimal:2',
+            'salary_max' => 'decimal:2',
+            'requirements' => 'array',
+            'technologies' => 'array',
+            'evidence' => 'array',
+            'review_reasons' => 'array',
         ];
     }
 
@@ -94,5 +117,41 @@ class JobPosting extends Model
     public function application(): HasOne
     {
         return $this->hasOne(Application::class);
+    }
+
+    public function publications(): BelongsToMany
+    {
+        return $this->belongsToMany(Publication::class, 'opportunity_sources')
+            ->withPivot('is_legacy')
+            ->withTimestamps();
+    }
+
+    public function sources(): HasMany
+    {
+        return $this->hasMany(OpportunitySource::class);
+    }
+
+    public function reviewRevisions(): HasMany
+    {
+        return $this->hasMany(OpportunityReviewRevision::class)->orderBy('to_version');
+    }
+
+    public function isStructuredOpportunity(): bool
+    {
+        return $this->readiness !== null;
+    }
+
+    public function isEligibleForApplicationDocuments(): bool
+    {
+        return $this->readiness !== null
+            ? $this->readiness === 'ready'
+            : $this->status === JobPostingStatus::Confirmed;
+    }
+
+    public function assertLegacyWorkflow(): void
+    {
+        if ($this->isStructuredOpportunity()) {
+            throw new LogicException('Oportunidades estruturadas não aceitam operações de revisão V1.');
+        }
     }
 }

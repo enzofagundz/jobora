@@ -1,11 +1,23 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { nextTick } from 'vue';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { ContentScriptContext } from 'wxt/utils/content-script-context';
-import type { CaptureMessage } from '@/types/capture';
+import type { CaptureEnvelope, CaptureMessage } from '@/types/capture';
 import { createLinkedInJobsController } from '@/sites/linkedin-jobs/controller';
+import { OBSERVER_DEBOUNCE_MS } from '@/sites/linkedin-jobs/extract';
+import { createTestCaptureMessageHandler as createCaptureMessageHandler } from './helpers/memory-credential-context';
+import { createCaptureQueue } from '@/utils/capture-queue';
+import { apiBaseUrl, apiToken, captureEnabled } from '@/utils/storage';
+import { lastApiStatus } from '@/utils/session-storage';
+import { createMemoryQueueStore } from './helpers/memory-queue-store';
+import {
+  createMemoryCredentialContextStore,
+  seedCredentialContext,
+} from './helpers/memory-credential-context';
 
 const CARD_COUNT = 5;
+const SEARCH_URL = 'https://www.linkedin.com/jobs/search/?keywords=Laravel';
 
 function jobCardHtml(id: number, title: string): string {
   return `
@@ -26,50 +38,104 @@ function mountJobsList(count = CARD_COUNT): HTMLElement {
   return document.querySelector('.scaffold-layout__list-container') as HTMLElement;
 }
 
-function openJobsPane(title: string): void {
+function openJobsPane(jobId: string | number, title: string): void {
   document.querySelector('.scaffold-layout__detail.jobs-search__job-details')?.remove();
   document.body.insertAdjacentHTML(
     'beforeend',
     `<div class="scaffold-layout__detail jobs-search__job-details">
-      <div class="jobs-search__job-details--container">
-        <h1 class="job-details-jobs-unified-top-card__job-title"><a href="/jobs/view/1/">${title}</a></h1>
-        <div class="job-details-jobs-unified-top-card__company-name">Empresa</div>
+      <div class="jobs-search__job-details--container" data-job-id="${jobId}">
+        <h1 class="job-details-jobs-unified-top-card__job-title"><a href="/jobs/view/${jobId}/">${title}</a></h1>
+        <div class="job-details-jobs-unified-top-card__company-name">Empresa ${jobId}</div>
         <div id="job-details" class="jobs-description-content__text--stretch"><p>Descrição completa de ${title}.</p><p>Stack: PHP, Laravel.</p></div>
       </div>
     </div>`,
   );
 }
 
+function setupMessaging() {
+  const envelopes: CaptureEnvelope[] = [];
+  const contexts: string[] = [];
+  const kinds: string[] = [];
+  const sendMessageMock = vi
+    .spyOn(fakeBrowser.runtime, 'sendMessage')
+    .mockImplementation(async (raw: unknown) => {
+      const message = raw as CaptureMessage;
+      kinds.push(message.type);
+
+      if (message.type === 'capture:resolve-run') {
+        return {
+          ok: true,
+          run: {
+            executionId: 'exec-jobs-1',
+            source: 'linkedin',
+            surface: 'linkedin_jobs',
+            initialUrl: SEARCH_URL,
+            expiresAt: null,
+          },
+          context: 'ctx-test',
+        };
+      }
+
+      if (message.type === 'capture:submit-envelope') {
+        envelopes.push(message.envelope);
+        contexts.push(message.context);
+        return { ok: true, duplicate: false, status: 201, coverage: 'complete' };
+      }
+
+      return { ok: true, duplicate: false };
+    });
+  return { sendMessageMock, envelopes, contexts, kinds };
+}
+
 async function advance(ms: number): Promise<void> {
   await vi.advanceTimersByTimeAsync(ms);
 }
 
-describe('linkedin-jobs controller — integridade observer/SPA', () => {
-  let sendMessageMock: ReturnType<typeof vi.fn>;
-  let spaClickHandler: (e: Event) => void;
+async function activateJobs(): Promise<{
+  controller: ReturnType<typeof createLinkedInJobsController>;
+  envelopes: CaptureEnvelope[];
+  contexts: string[];
+  kinds: string[];
+  deactivate: () => void;
+}> {
+  const messaging = setupMessaging();
+  const ctx = new ContentScriptContext(`test-linkedin-jobs-${Math.random()}`);
+  const controller = createLinkedInJobsController();
+  let done = false;
+  const active = controller.activate(ctx).then(() => {
+    done = true;
+  });
+  for (let i = 0; i < 300 && !done; i++) await advance(200);
+  await active;
+  return {
+    controller,
+    envelopes: messaging.envelopes,
+    contexts: messaging.contexts,
+    kinds: messaging.kinds,
+    deactivate: () => controller.deactivate(),
+  };
+}
+
+describe('linkedin-jobs controller — envelope consolidado', () => {
+  let spaClickHandler: (event: Event) => void;
 
   beforeEach(() => {
     fakeBrowser.reset();
     vi.useFakeTimers();
-    window.happyDOM.setURL('https://www.linkedin.com/jobs/search/?keywords=Laravel');
-
+    window.happyDOM.setURL(SEARCH_URL);
     const settings = window.happyDOM.settings;
     settings.navigation.disableMainFrameNavigation = true;
     settings.navigation.disableFallbackToSetURL = true;
 
-    sendMessageMock = vi
-      .spyOn(fakeBrowser.runtime, 'sendMessage')
-      .mockImplementation(async () => ({ ok: true, duplicate: false }));
-
-    spaClickHandler = (e) => {
-      const target = e.target instanceof Element ? e.target : null;
+    spaClickHandler = (event) => {
+      const target = event.target instanceof Element ? event.target : null;
       const card = target?.closest('div[data-job-id]');
       if (!card) return;
       const jobId = card.getAttribute('data-job-id');
       const title = card.querySelector('a.job-card-container__link')?.textContent?.trim() ?? null;
-      if (!jobId) return;
-      window.happyDOM.setURL(`https://www.linkedin.com/jobs/search/?keywords=Laravel&currentJobId=${jobId}`);
-      if (title) openJobsPane(title);
+      if (!jobId || !title) return;
+      openJobsPane(jobId, title);
+      window.happyDOM.setURL(`${SEARCH_URL}&currentJobId=${jobId}`);
     };
     document.addEventListener('click', spaClickHandler, true);
   });
@@ -81,83 +147,401 @@ describe('linkedin-jobs controller — integridade observer/SPA', () => {
     document.body.innerHTML = '';
   });
 
-  function sentJobIds(): string[] {
-    return sendMessageMock.mock.calls.map((call) => {
-      const message = call[0] as CaptureMessage;
-      return message.payload.external_id ?? '';
-    });
-  }
-
-  async function activateUntilDone(): Promise<{ deactivate: () => void }> {
-    const ctx = new ContentScriptContext('test-linkedin-jobs');
-    const controller = createLinkedInJobsController();
-    let done = false;
-    const active = controller.activate(ctx).then(() => {
-      done = true;
-    });
-    for (let i = 0; i < 300 && !done; i++) {
-      await advance(200);
-    }
-    await active;
-    return { deactivate: () => controller.deactivate() };
-  }
-
-  it('5 cards → exatamente 5 requests; recriação não reclica', async () => {
+  it('5 cards → um envelope com 5 cards e 5 detalhes; sem requests legados', async () => {
     mountJobsList();
-    const { deactivate } = await activateUntilDone();
+    const { controller, envelopes, contexts, kinds, deactivate } = await activateJobs();
+    await advance(5000);
 
-    expect(sendMessageMock).toHaveBeenCalledTimes(CARD_COUNT);
-    expect(new Set(sentJobIds()).size).toBe(CARD_COUNT);
-    expect(sentJobIds()).toEqual(
-      Array.from({ length: CARD_COUNT }, (_, i) => `linkedin:job:${i + 1}`),
+    expect(kinds.filter((kind) => kind === 'capture:submit')).toEqual([]);
+    expect(envelopes).toHaveLength(1);
+    expect(contexts).toEqual(['ctx-test']);
+    const envelope = envelopes[0]!;
+    expect(envelope.capture).toMatchObject({
+      execution_id: 'exec-jobs-1',
+      source: 'linkedin',
+      surface: 'linkedin_jobs',
+      coverage: {
+        status: 'complete',
+        reason: null,
+        blocks_expected: 10,
+        blocks_captured: 10,
+      },
+    });
+    expect(envelope.blocks.map((block) => block.kind)).toEqual(
+      Array.from({ length: CARD_COUNT }, () => ['card', 'detail']).flat(),
     );
+    for (let index = 0; index < CARD_COUNT; index++) {
+      const card = envelope.blocks[index * 2]!;
+      const detail = envelope.blocks[index * 2 + 1]!;
+      expect(card).toMatchObject({
+        kind: 'card',
+        platform_id: String(index + 1),
+        permalink: `https://www.linkedin.com/jobs/view/${index + 1}`,
+        detail_block_id: detail.block_id,
+      });
+      expect(detail).toMatchObject({
+        kind: 'detail',
+        platform_id: String(index + 1),
+        permalink: `https://www.linkedin.com/jobs/view/${index + 1}`,
+        card_block_id: card.block_id,
+      });
+    }
+    expect(envelope.capture.html).toContain('<article data-block-id="card-1"');
+    expect(envelope.capture.html).toContain('<section data-block-id="detail-1"');
+    expect(envelope.capture.html).toContain('data-detail-block-id="detail-1"');
+    expect(envelope.capture.html).toContain('data-card-block-id="card-1"');
+    expect(controller.getCaptureState()).toMatchObject({
+      captured: true,
+      coverage: 'complete',
+      cards: CARD_COUNT,
+      details: CARD_COUNT,
+    });
 
     const list = document.querySelector('.scaffold-layout__list-container') as HTMLElement;
     list.innerHTML = list.innerHTML;
-    await advance(400);
-    expect(sendMessageMock).toHaveBeenCalledTimes(CARD_COUNT);
-
+    await advance(OBSERVER_DEBOUNCE_MS);
+    expect(envelopes).toHaveLength(1);
     deactivate();
   });
 
-  it('item novo pós-scan gera exatamente 1 request adicional', async () => {
-    mountJobsList();
-    const { deactivate } = await activateUntilDone();
-    expect(sendMessageMock).toHaveBeenCalledTimes(CARD_COUNT);
+  it('propaga reservation_changed à UI e bloqueia captura sem enviar envelope', async () => {
+    mountJobsList(0);
+    const sendMessage = vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockResolvedValue({
+      ok: false,
+      error: 'reservation_changed',
+    } as never);
 
+    const controller = createLinkedInJobsController();
+    await controller.activate(new ContentScriptContext(`reservation-ui-${Math.random()}`));
+    await nextTick();
+
+    expect(controller.getCaptureState().error).toBe('reservation_changed');
+    expect(controller.getCaptureState().captured).toBe(false);
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    const shadowRoots = Array.from(document.querySelectorAll('*'))
+      .map((element) => element.shadowRoot)
+      .filter((root): root is ShadowRoot => root !== null);
+    expect(shadowRoots.some((root) => root.querySelector('[role="alert"]')?.textContent?.includes(
+      'Captura bloqueada para preservar a reserva. Verifique a pesquisa e a validade da execução.',
+    ))).toBe(true);
+    controller.deactivate();
+  });
+
+  it.each(['cold load', 'legacy SPA entry'])('captures redirected search-results after %s without dropping filters or URL provenance', async (entry) => {
+    const redirected = 'https://www.linkedin.com/jobs/search-results?skipRedirect=true&currentJobId=4486639255&keywords=Laravel&f_WT=2&f_SAL=f_SA_id_225001%3A272001&infoNotice=ai-job-search&f_TPR=r86400';
+    document.removeEventListener('click', spaClickHandler, true);
+    mountJobsList(1);
+    const messaging = setupMessaging();
+    const controller = createLinkedInJobsController();
+    const ctx = new ContentScriptContext(`redirected-jobs-${entry}`);
+    const openRedirectedPane = (event: Event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const card = target?.closest('div[data-job-id]');
+      if (!card) return;
+      openJobsPane('1', 'Vaga 1');
+      const selected = new URL(redirected);
+      selected.searchParams.set('currentJobId', '1');
+      window.happyDOM.setURL(selected.href);
+    };
+    document.addEventListener('click', openRedirectedPane, true);
+    try {
+      window.happyDOM.setURL(entry === 'legacy SPA entry' ? redirected.replace('/jobs/search-results?', '/jobs/search/?') : redirected);
+      const activation = controller.activate(ctx);
+      await vi.waitFor(async () => {
+        await vi.advanceTimersByTimeAsync(OBSERVER_DEBOUNCE_MS);
+        expect(messaging.envelopes).toHaveLength(1);
+      });
+      await activation;
+      const envelope = messaging.envelopes[0]!;
+      expect(envelope.blocks.map((block) => block.kind)).toEqual(['card', 'detail']);
+      expect(envelope.capture.execution_id).toBe('exec-jobs-1');
+      expect(envelope.capture.coverage.status).toBe('complete');
+      const initial = new URL(envelope.capture.initial_url);
+      const final = new URL(envelope.capture.final_url);
+      expect(initial.pathname).toBe(entry === 'legacy SPA entry' ? '/jobs/search/' : '/jobs/search-results');
+      expect(initial.searchParams.has('currentJobId')).toBe(false);
+      expect(final.pathname).toBe('/jobs/search-results');
+      expect(final.searchParams.get('currentJobId')).toBe('1');
+      for (const url of [initial, final]) {
+        expect(url.searchParams.get('keywords')).toBe('Laravel');
+        expect(url.searchParams.get('f_WT')).toBe('2');
+        expect(url.searchParams.get('f_SAL')).toBe('f_SA_id_225001:272001');
+        expect(url.searchParams.get('f_TPR')).toBe('r86400');
+      }
+    } finally {
+      controller.deactivate();
+      ctx.notifyInvalidated();
+      document.removeEventListener('click', openRedirectedPane, true);
+    }
+  });
+
+  it('card novo durante a coleta entra no mesmo envelope', async () => {
+    mountJobsList(2);
+    const { envelopes, deactivate } = await activateJobs();
     const list = document.querySelector('.scaffold-layout__list-container') as HTMLElement;
     list.insertAdjacentHTML('beforeend', jobCardHtml(999, 'Vaga nova'));
-    let done = false;
-    let resolveDone!: () => void;
-    const settled = new Promise<void>((r) => { resolveDone = r; });
-    sendMessageMock.mockImplementationOnce(async () => {
-      done = true;
-      resolveDone();
-      return { ok: true, duplicate: false };
-    });
-    for (let i = 0; i < 50 && !done; i++) await advance(200);
-    await settled;
+    await advance(OBSERVER_DEBOUNCE_MS + 100);
+    await advance(5000);
 
-    expect(sendMessageMock).toHaveBeenCalledTimes(CARD_COUNT + 1);
-    expect(sentJobIds().at(-1)).toBe('linkedin:job:999');
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]!.blocks.filter((block) => block.kind === 'card').map((block) => block.platform_id)).toEqual([
+      '1',
+      '2',
+      '999',
+    ]);
+    expect(envelopes[0]!.blocks.filter((block) => block.kind === 'detail')).toHaveLength(3);
     deactivate();
   });
 
-  it('deactivate durante waitForPane cancela geração', async () => {
-    mountJobsList();
-    document.removeEventListener('click', spaClickHandler, true);
-    const ctx = new ContentScriptContext('test-linkedin-jobs');
-    const controller = createLinkedInJobsController();
-    const active = controller.activate(ctx).catch(() => {});
-    await advance(400);
-    window.happyDOM.setURL('https://www.linkedin.com/feed/');
-    controller.deactivate();
-    for (let i = 0; i < 20; i++) await advance(200);
-    await active;
-    expect(sendMessageMock).not.toHaveBeenCalled();
+  it('card hidratado só por atributos entra no mesmo envelope', async () => {
+    mountJobsList(1);
+    const { envelopes, deactivate } = await activateJobs();
+    const list = document.querySelector('.scaffold-layout__list-container') as HTMLElement;
+    list.insertAdjacentHTML(
+      'beforeend',
+      `<li class="scaffold-layout__list-item">
+        <div class="job-card-container">
+          <a class="job-card-container__link">Vaga tardia</a>
+          <div class="artdeco-entity-lockup__subtitle">Empresa 777</div>
+        </div>
+      </li>`,
+    );
+    await advance(OBSERVER_DEBOUNCE_MS + 100);
+
+    // Item já está no DOM: só os atributos chegam depois.
+    const shell = list.querySelector('li:last-child .job-card-container') as HTMLElement;
+    shell.setAttribute('data-job-id', '777');
+    shell.querySelector('a')!.setAttribute('href', '/jobs/view/777/');
+    await advance(OBSERVER_DEBOUNCE_MS + 100);
+    await advance(5000);
+
+    expect(envelopes).toHaveLength(1);
+    expect(
+      envelopes[0]!.blocks
+        .filter((block) => block.kind === 'card')
+        .map((block) => block.platform_id),
+    ).toEqual(['1', '777']);
+    expect(
+      envelopes[0]!.blocks.filter((block) => block.kind === 'detail'),
+    ).toHaveLength(2);
+    deactivate();
   });
 
-  it('lista mista div + li-only + href-only → todos são capturados', async () => {
+  it('falha de correlação sem contexto não descarta os cards coletados', async () => {
+    mountJobsList(2);
+    const envelopes: CaptureEnvelope[] = [];
+    let resolves = 0;
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockImplementation(async (raw: unknown) => {
+      const message = raw as CaptureMessage;
+      if (message.type === 'capture:resolve-run') {
+        resolves++;
+        if (resolves === 1) return { ok: false, error: 'credential_changed' };
+        return {
+          ok: true,
+          run: {
+            executionId: 'exec-jobs-1',
+            source: 'linkedin',
+            surface: 'linkedin_jobs',
+            initialUrl: SEARCH_URL,
+            expiresAt: null,
+          },
+          context: 'ctx-test',
+        };
+      }
+      if (message.type === 'capture:submit-envelope') {
+        envelopes.push(message.envelope);
+        return { ok: true, duplicate: false, status: 201, coverage: 'complete' };
+      }
+      return { ok: true, duplicate: false };
+    });
+
+    const controller = createLinkedInJobsController();
+    const active = controller.activate(new ContentScriptContext(`test-context-${Math.random()}`));
+    for (let i = 0; i < 300; i++) await advance(200);
+    await active;
+    await advance(10_000);
+
+    expect(resolves).toBeGreaterThan(1);
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]!.blocks.filter((block) => block.kind === 'card')).toHaveLength(2);
+    expect(
+      envelopes[0]!.blocks.filter((block) => block.kind === 'detail'),
+    ).toHaveLength(2);
+    controller.deactivate();
+  });
+
+  it('detalhe que falha não é tentado duas vezes pelos dois candidatos do card', async () => {
+    document.removeEventListener('click', spaClickHandler, true);
+    let clicks = 0;
+    const counter = (event: Event): void => {
+      if (event.target instanceof Element && event.target.closest('div[data-job-id]')) {
+        clicks++;
+      }
+    };
+    document.addEventListener('click', counter, true);
+    mountJobsList(1);
+
+    const { controller, envelopes, deactivate } = await activateJobs();
+    await advance(30_000);
+
+    // Sem falhar o detalhe, o card é clicado exatamente uma vez.
+    expect(clicks).toBe(1);
+    expect(envelopes).toHaveLength(1);
+    expect(controller.getCaptureState()).toMatchObject({ cards: 1, details: 0 });
+
+    document.removeEventListener('click', counter, true);
+    deactivate();
+  });
+
+  it('vaga já resolvida na aba não é reenviada depois de reativar a captura', async () => {
+    mountJobsList(1);
+    const controller = createLinkedInJobsController();
+    const first = setupMessaging();
+    const firstCtx = new ContentScriptContext(`test-react-1-${Math.random()}`);
+    const initial = controller.activate(firstCtx);
+    for (let i = 0; i < 300; i++) await advance(200);
+    await initial;
+    await advance(5000);
+    expect(first.envelopes).toHaveLength(1);
+    controller.deactivate();
+
+    const second = setupMessaging();
+    const reactivated = controller.activate(new ContentScriptContext(`test-react-2-${Math.random()}`));
+    for (let i = 0; i < 300; i++) await advance(200);
+    await reactivated;
+    await advance(5000);
+
+    expect(second.envelopes).toHaveLength(1);
+    expect(second.envelopes[0]!.blocks.filter((block) => block.kind === 'card')).toHaveLength(0);
+    expect(second.envelopes[0]!.capture.coverage).toMatchObject({
+      status: 'partial',
+      reason: 'no_content',
+      blocks_captured: 0,
+    });
+    controller.deactivate();
+  });
+
+  it('detalhe antigo nunca é associado ao card novo, mesmo com título igual', async () => {
+    document.removeEventListener('click', spaClickHandler, true);
+    const delayedHandler = (event: Event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const card = target?.closest('div[data-job-id]');
+      if (!card) return;
+      const jobId = card.getAttribute('data-job-id');
+      if (!jobId) return;
+      window.happyDOM.setURL(`${SEARCH_URL}&currentJobId=${jobId}`);
+      if (jobId === '2') {
+        // Mantém o painel antigo (id 1) por 2 s antes de trocar para id 2.
+        window.setTimeout(() => openJobsPane('2', 'Vaga igual'), 2000);
+      } else {
+        openJobsPane(jobId, 'Vaga igual');
+      }
+    };
+    document.addEventListener('click', delayedHandler, true);
+    mountJobsList(2);
+
+    const { envelopes, deactivate } = await activateJobs();
+    await advance(5000);
+
+    expect(envelopes).toHaveLength(1);
+    const details = envelopes[0]!.blocks.filter((block) => block.kind === 'detail');
+    expect(details).toHaveLength(2);
+    expect(envelopes[0]!.capture.html).toContain('Descrição completa de Vaga igual.');
+    expect(envelopes[0]!.capture.html).toContain('data-platform-id="2"');
+    // O detalhe 2 só pode existir depois de o painel declarar id 2.
+    const htmlDetail2 = envelopes[0]!.capture.html.match(
+      /<section data-block-id="detail-2"[^>]*>[\s\S]*?<\/section>/,
+    )?.[0];
+    expect(htmlDetail2).toBeDefined();
+    expect(htmlDetail2).toContain('data-platform-id="2"');
+
+    document.removeEventListener('click', delayedHandler, true);
+    deactivate();
+  });
+
+  it('Esc cancela a coleta e envia parcial cancelled', async () => {
+    mountJobsList(3);
+    document.removeEventListener('click', spaClickHandler, true);
+    const noPaneHandler = vi.fn();
+    document.addEventListener('click', noPaneHandler, true);
+
+    const ctx = new ContentScriptContext('test-linkedin-jobs-cancel');
+    const controller = createLinkedInJobsController();
+    const { envelopes } = setupMessaging();
+    const active = controller.activate(ctx).catch(() => {});
+    await advance(400);
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await advance(1000);
+    await active;
+
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]!.capture.coverage).toMatchObject({
+      status: 'partial',
+      reason: 'cancelled',
+    });
+    expect(envelopes[0]!.blocks.filter((block) => block.kind === 'card').length).toBeGreaterThan(0);
+    expect(controller.getCaptureState().captured).toBe(true);
+
+    document.removeEventListener('click', noPaneHandler, true);
+    controller.deactivate();
+  });
+
+  it('deactivate no meio do carregamento envia parcial navigation_interrupted', async () => {
+    mountJobsList();
+    document.removeEventListener('click', spaClickHandler, true);
+    const noPaneHandler = vi.fn();
+    document.addEventListener('click', noPaneHandler, true);
+
+    const ctx = new ContentScriptContext('test-linkedin-jobs-nav');
+    const controller = createLinkedInJobsController();
+    const { envelopes } = setupMessaging();
+    const active = controller.activate(ctx).catch(() => {});
+    await advance(400);
+
+    controller.deactivate();
+    await advance(OBSERVER_DEBOUNCE_MS * 2);
+    await active;
+
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]!.capture.coverage).toMatchObject({
+      status: 'partial',
+      reason: 'navigation_interrupted',
+    });
+    expect(envelopes[0]!.blocks.filter((block) => block.kind === 'card')).toHaveLength(1);
+
+    document.removeEventListener('click', noPaneHandler, true);
+  });
+
+  it('preserva card removido do DOM sem inventar detalhe', async () => {
+    mountJobsList(1);
+    const { controller, envelopes, deactivate } = await activateJobs();
+    const list = document.querySelector('.scaffold-layout__list-container') as HTMLElement;
+    list.insertAdjacentHTML('beforeend', jobCardHtml(777, 'Vaga removida'));
+    const transient = list.lastElementChild as HTMLElement;
+    transient.remove();
+
+    await advance(OBSERVER_DEBOUNCE_MS + 100);
+    await advance(5000);
+
+    expect(envelopes).toHaveLength(1);
+    const card777 = envelopes[0]!.blocks.find((block) => block.platform_id === '777');
+    expect(card777).toMatchObject({ kind: 'card', detail_block_id: null });
+    expect(envelopes[0]!.blocks.some((block) => block.block_id === 'detail-2')).toBe(false);
+    const card777Html = envelopes[0]!.capture.html.match(
+      /<article data-block-id="[^"]+"[^>]*data-platform-id="777"[^>]*>/,
+    )?.[0];
+    expect(card777Html).toBeDefined();
+    expect(card777Html).not.toContain('data-detail-block-id');
+    expect(envelopes[0]!.capture.coverage).toMatchObject({
+      status: 'partial',
+      reason: 'timeout',
+    });
+    expect(controller.getCaptureState().captured).toBe(true);
+    deactivate();
+  });
+
+  it('lista mista div + li-only + href-only → todos entram no envelope', async () => {
     document.body.innerHTML = `
       <ul class="scaffold-layout__list-container">
         <li data-occludable-job-id="111" class="scaffold-layout__list-item">
@@ -176,57 +560,176 @@ describe('linkedin-jobs controller — integridade observer/SPA', () => {
           </div>
         </li>
       </ul>`;
-    // handler precisa lidar com div, li e href
+
     document.removeEventListener('click', spaClickHandler, true);
-    const mixedHandler = (e: Event) => {
-      const target = e.target instanceof Element ? e.target : null;
+    const mixedHandler = (event: Event) => {
+      const target = event.target instanceof Element ? event.target : null;
       const card = target?.closest('div[data-job-id], li[data-occludable-job-id], div.job-card-container');
       if (!card) return;
       const href = card.querySelector('a[href*="/jobs/view/"]')?.getAttribute('href') ?? '';
-      const m = href.match(/\/jobs\/view\/(\d+)/);
-      const jobId = m?.[1] ?? card.getAttribute('data-job-id') ?? card.getAttribute('data-occludable-job-id');
+      const jobId = href.match(/\/jobs\/view\/(\d+)/)?.[1]
+        ?? card.getAttribute('data-job-id')
+        ?? card.getAttribute('data-occludable-job-id');
       const title = card.querySelector('a.job-card-container__link')?.textContent?.trim() ?? null;
-      if (!jobId) return;
-      window.happyDOM.setURL(`https://www.linkedin.com/jobs/search/?keywords=Laravel&currentJobId=${jobId}`);
-      if (title) openJobsPane(title);
+      if (!jobId || !title) return;
+      openJobsPane(jobId, title);
+      window.happyDOM.setURL(`${SEARCH_URL}&currentJobId=${jobId}`);
     };
     document.addEventListener('click', mixedHandler, true);
 
-    const ctx = new ContentScriptContext('test-linkedin-jobs-mixed');
-    const controller = createLinkedInJobsController();
-    let done = false;
-    const active = controller.activate(ctx).then(() => { done = true; });
-    for (let i = 0; i < 300 && !done; i++) await advance(200);
-    await active;
+    const { envelopes, deactivate } = await activateJobs();
+    await advance(5000);
 
-    expect(sendMessageMock).toHaveBeenCalledTimes(3);
-    expect(new Set(sentJobIds()).size).toBe(3);
-    expect(sentJobIds().sort()).toEqual(['linkedin:job:111', 'linkedin:job:222', 'linkedin:job:333'].sort());
+    expect(envelopes).toHaveLength(1);
+    expect(envelopes[0]!.blocks.filter((block) => block.kind === 'card').map((block) => block.platform_id).sort()).toEqual([
+      '111',
+      '222',
+      '333',
+    ]);
+    expect(envelopes[0]!.blocks.filter((block) => block.kind === 'detail')).toHaveLength(3);
 
     document.removeEventListener('click', mixedHandler, true);
+    deactivate();
+  });
+
+  it('SPA troca de busca usa nova execução e não mistura a anterior', async () => {
+    mountJobsList(1);
+    const envelopeCalls: CaptureEnvelope[] = [];
+    let run = 0;
+    vi.spyOn(fakeBrowser.runtime, 'sendMessage').mockImplementation(
+      async (raw: unknown): Promise<any> => {
+        const message = raw as CaptureMessage;
+        if (message.type === 'capture:resolve-run') {
+          run++;
+          return {
+            ok: true,
+            run: {
+              executionId: `exec-jobs-${run}`,
+              source: 'linkedin',
+              surface: 'linkedin_jobs',
+              initialUrl: message.url,
+              expiresAt: null,
+            },
+            context: 'ctx-test',
+          };
+        }
+        if (message.type === 'capture:submit-envelope') {
+          envelopeCalls.push(message.envelope);
+          return { ok: true, status: 201, coverage: 'complete' };
+        }
+        return { ok: true };
+      },
+    );
+
+    const ctx = new ContentScriptContext('test-linkedin-jobs-spa');
+    const controller = createLinkedInJobsController();
+    let done = false;
+    void controller.activate(ctx).then(() => { done = true; });
+    for (let i = 0; i < 100 && !done; i++) await advance(200);
+    await advance(5000);
+    controller.deactivate();
+    await advance(0);
+
+    const secondSearch = 'https://www.linkedin.com/jobs/search/?keywords=QA';
+    window.happyDOM.setURL(secondSearch);
+    document.body.innerHTML = `<ul class="scaffold-layout__list-container">${jobCardHtml(9, 'Vaga QA')}</ul>`;
+    done = false;
+    void controller.activate(ctx).then(() => { done = true; });
+    for (let i = 0; i < 100 && !done; i++) await advance(200);
+    await advance(5000);
+
+    expect(envelopeCalls).toHaveLength(2);
+    expect(envelopeCalls[0]!.capture.execution_id).toBe('exec-jobs-1');
+    expect(envelopeCalls[1]!.capture).toMatchObject({
+      execution_id: 'exec-jobs-2',
+      initial_url: secondSearch,
+    });
+    expect(envelopeCalls[1]!.blocks.map((block) => block.platform_id)).toEqual(['9', '9']);
     controller.deactivate();
   });
 
-  it('backend responde duplicate:true → contador Duplicadas incrementa', async () => {
-    mountJobsList(2);
-    // segunda vaga será duplicada no backend
-    sendMessageMock.mockImplementation(async (msg: unknown) => {
-      const m = msg as { payload: { external_id: string | null } };
-      if (m.payload.external_id === 'linkedin:job:2') return { ok: true, duplicate: true };
-      return { ok: true, duplicate: false };
+  it('envelope de vagas passa pela fila: troca de credencial não envia e replay limpa', async () => {
+    mountJobsList(1);
+    const { envelopes, deactivate } = await activateJobs();
+    await advance(5000);
+    const envelope = envelopes[0]!;
+    expect(envelope.capture.surface).toBe('linkedin_jobs');
+
+    await captureEnabled.setValue(true);
+    await apiToken.setValue('token-a');
+    await apiBaseUrl.setValue('http://localhost:8000');
+
+    const store = createMemoryQueueStore();
+    const contexts = createMemoryCredentialContextStore();
+    const handlerA = createCaptureMessageHandler(createCaptureQueue(store), contexts);
+    const context = await seedCredentialContext(contexts, {
+      token: 'token-a',
+      executionId: 'exec-jobs-1',
+      source: 'linkedin',
+      surface: 'linkedin_jobs',
     });
+    let fetchCalls = 0;
+    const bodies: CaptureEnvelope[] = [];
+    vi.spyOn(globalThis, 'fetch').mockImplementation(
+      async (url: string | URL | Request, init?: RequestInit) => {
+        if (String(url).includes('/extension/auth/validate')) {
+          const token = ((init?.headers as Record<string, string> | undefined)?.Authorization ?? '')
+            .replace(/^Bearer\s+/, '');
+          return new Response(
+            JSON.stringify({ valid: true, owner_user_id: token === 'token-b' ? 2 : 1 }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          );
+        }
+        if (String(url).endsWith('/discovery-runs/resolve')) {
+          return new Response(JSON.stringify({ execution_id: 'exec-jobs-1', source: 'linkedin', surface: 'linkedin_jobs', initial_url: SEARCH_URL }), { status: 200 });
+        }
+        fetchCalls++;
+        bodies.push(JSON.parse((init?.body as string) ?? '{}') as CaptureEnvelope);
+        if (fetchCalls === 1) throw new TypeError('offline depois do persist');
+        return new Response(JSON.stringify({ id: 31, replay: true, coverage: 'complete' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      },
+    );
 
-    const ctx = new ContentScriptContext('test-linkedin-jobs-dup');
-    const controller = createLinkedInJobsController();
-    let done = false;
-    const active = controller.activate(ctx).then(() => { done = true; });
-    for (let i = 0; i < 300 && !done; i++) await advance(200);
-    await active;
+    const first = (await handlerA({
+      type: 'capture:submit-envelope',
+      envelope,
+      context,
+    })) as { ok: boolean; queued?: boolean };
+    expect(first).toMatchObject({ ok: false, queued: true });
+    expect(store.records.size).toBe(1);
+    const queued = [...store.records.values()][0]!;
+    expect(queued.envelope.capture).toMatchObject({
+      surface: 'linkedin_jobs',
+      execution_id: 'exec-jobs-1',
+    });
+    expect(queued.envelope.blocks.map((block) => block.kind)).toEqual(['card', 'detail']);
+    vi.clearAllTimers();
 
-    expect(sendMessageMock).toHaveBeenCalledTimes(2);
-    // Verifica que uma foi duplicate (via chamada)
-    const calls = sendMessageMock.mock.calls.map((c) => (c[0] as { payload: { external_id: string | null } }).payload.external_id);
-    expect(calls).toContain('linkedin:job:2');
-    controller.deactivate();
+    // Credencial trocada não envia o material antigo, mesmo no mesmo backend.
+    await apiToken.setValue('token-b');
+    await handlerA({ type: 'capture:queue-drain' });
+    expect(fetchCalls).toBe(1);
+    expect(store.records.size).toBe(1);
+
+    await apiToken.setValue('token-a');
+    const restarted = createCaptureMessageHandler(createCaptureQueue(store), contexts);
+    const drain = (await restarted({ type: 'capture:queue-drain' })) as {
+      ok: true;
+      drain: { captured: number };
+    };
+    expect(drain.drain.captured).toBe(1);
+    expect(fetchCalls).toBe(2);
+    expect(store.records.size).toBe(0);
+    expect(bodies[0]!.capture.idempotency_key).toBe(bodies[1]!.capture.idempotency_key);
+    expect(bodies[1]!.capture).toMatchObject({
+      execution_id: 'exec-jobs-1',
+      surface: 'linkedin_jobs',
+    });
+    expect(await lastApiStatus.getValue()).toMatchObject({ ok: true, status: 200 });
+
+    deactivate();
   });
 });

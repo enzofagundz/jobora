@@ -19,6 +19,8 @@ final class ApplicationPresenter
             'id' => $application->id,
             'job_posting_id' => $application->job_posting_id,
             'status' => $application->status?->value,
+            'current_preparation_id' => $application->current_preparation_id,
+            'preparation_version' => $application->preparation_version,
             'created_at' => $application->created_at?->toIso8601String(),
         ];
     }

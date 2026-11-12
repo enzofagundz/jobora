@@ -6,7 +6,7 @@ export default defineConfig({
   manifest: {
     name: 'Jobora Job Capture',
     description: 'Captura publicações de vagas no LinkedIn e Indeed e envia à API do sistema Jobora.',
-    permissions: ['storage'],
+    permissions: ['storage', 'alarms'],
     host_permissions: [
       'https://www.linkedin.com/*',
       'https://*.indeed.com/*',
@@ -14,6 +14,7 @@ export default defineConfig({
       'http://127.0.0.1:8000/*',
       'https://vagas.test/*',
       'https://jobora.test/*',
+      'https://jobora-v2.vagas.test/*',
     ],
   },
 

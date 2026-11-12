@@ -15,4 +15,6 @@ enum McpErrorCode: string
     case AiUnavailable = 'ai_unavailable';
     case Configuration = 'configuration';
     case Internal = 'internal';
+    case ProfileNotConfirmed = 'profile_not_confirmed';
+    case OpportunityNotReady = 'opportunity_not_ready';
 }

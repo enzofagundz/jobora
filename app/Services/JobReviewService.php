@@ -35,6 +35,8 @@ final class JobReviewService
             throw new \LogicException('Vaga não pertence ao usuário.');
         }
 
+        $posting->assertLegacyWorkflow();
+
         $suggestedPairs = collect($posting->suggested_data['items'] ?? [])
             ->map(fn (array $item): string => $item['category'].'|'.$item['name'])
             ->all();
@@ -91,6 +93,8 @@ final class JobReviewService
             throw new \LogicException('Vaga não pertence ao usuário.');
         }
 
+        $posting->assertLegacyWorkflow();
+
         $posting->applicationMethods()->delete();
 
         $posting->forceFill([
@@ -114,6 +118,8 @@ final class JobReviewService
         if ($posting->user_id !== $user->id) {
             throw new \LogicException('Vaga não pertence ao usuário.');
         }
+
+        $posting->assertLegacyWorkflow();
 
         DB::transaction(function () use ($posting, $methods): void {
             $this->syncApplicationMethods($posting, $methods, []);
